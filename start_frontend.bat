@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo Starting ZKTeco Frontend (React)
+echo Starting ZKTeco Admin Panel (React)
 echo ========================================
 echo.
 
@@ -18,8 +18,8 @@ if not exist "node_modules" (
     )
 )
 
-echo Starting React development server...
-echo Frontend will be available at: http://localhost:5173
+echo Starting React admin panel...
+echo Admin Panel: http://localhost:5173
 echo.
 echo Press CTRL+C to stop the server
 echo ========================================

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from app.core import settings
 from app.api import device_router, users_router, attendance_router
+from app.api.devices import router as devices_router
 
 # Configure logging
 logging.basicConfig(
@@ -31,6 +32,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(devices_router, prefix="/api", tags=["Devices Management"])
 app.include_router(device_router, prefix="/api/device", tags=["Device"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendance"])
