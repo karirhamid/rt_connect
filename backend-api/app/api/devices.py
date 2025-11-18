@@ -2,6 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import uuid
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from app.services.device_store import device_store, Device
 from app.services.device_manager import ZKTecoDeviceManager
 
@@ -149,26 +151,79 @@ async def get_statistics():
     device_status = {"online": 0, "offline": 0}
     recent_devices = []
     
-    for device in devices:
-        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=5)
+    # If no devices, return empty statistics
+    if total_devices == 0:
+        days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        weekly_data = [{"day": days[i], "count": 0} for i in range(7)]
+        status_data = [
+            {"name": "Online", "value": 0},
+            {"name": "Offline", "value": 0}
+        ]
+        
+        return {
+            "total_devices": 0,
+            "total_users": 0,
+            "today_attendance": 0,
+            "active_devices": 0,
+            "weekly_attendance": weekly_data,
+            "device_status": status_data,
+            "recent_devices": []
+        }
+    
+    # Helper function to process a single device
+    def process_device(device):
+        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=3)
         info = manager.get_device_info()
         
+        device_data = {
+            "name": device.name,
+            "ip": device.ip,
+            "port": device.port,
+            "serial_number": device.serial_number or "N/A",
+            "status": "offline",
+            "user_count": 0,
+            "users": [],
+            "attendance": []
+        }
+        
         if info:
-            active_devices += 1
-            device_status["online"] += 1
+            device_data["status"] = "online"
+            serial_num = info.get("serial_number", "N/A") if isinstance(info, dict) else getattr(info, "serial_number", "N/A")
+            device_data["serial_number"] = serial_num
             
             users = manager.get_users() or []
-            total_users += len(users)
+            device_data["user_count"] = len(users)
+            device_data["users"] = users
             
             attendance = manager.get_attendance() or []
+            device_data["attendance"] = attendance
+        
+        return device_data
+    
+    # Process all devices in parallel using ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(5, total_devices)) as executor:
+        device_results = list(executor.map(process_device, devices))
+    
+    # Process results
+    for device_data in device_results:
+        if device_data["status"] == "online":
+            active_devices += 1
+            device_status["online"] += 1
+            total_users += device_data["user_count"]
             
-            # Count today's attendance
-            for record in attendance:
-                timestamp = record.get("timestamp")
-                if isinstance(timestamp, str):
-                    record_date = datetime.fromisoformat(timestamp.replace('Z', '+00:00')).date()
+            # Count today's and weekly attendance
+            for record in device_data["attendance"]:
+                # Handle both dict and Attendance object
+                if hasattr(record, 'timestamp'):
+                    record_date = record.timestamp.date()
+                elif isinstance(record, dict):
+                    timestamp = record.get("timestamp")
+                    if isinstance(timestamp, str):
+                        record_date = datetime.fromisoformat(timestamp.replace('Z', '+00:00')).date()
+                    else:
+                        record_date = timestamp.date()
                 else:
-                    record_date = timestamp.date()
+                    continue
                 
                 if record_date == today:
                     today_attendance += 1
@@ -178,25 +233,17 @@ async def get_statistics():
                     days_ago = (today - record_date).days
                     if 0 <= days_ago < 7:
                         weekly_attendance[6 - days_ago] += 1
-            
-            recent_devices.append({
-                "name": device.name,
-                "serial_number": info.get("serial_number", "N/A"),
-                "ip": device.ip,
-                "port": device.port,
-                "status": "online",
-                "user_count": len(users)
-            })
         else:
             device_status["offline"] += 1
-            recent_devices.append({
-                "name": device.name,
-                "serial_number": device.serial_number or "N/A",
-                "ip": device.ip,
-                "port": device.port,
-                "status": "offline",
-                "user_count": 0
-            })
+        
+        recent_devices.append({
+            "name": device_data["name"],
+            "serial_number": device_data["serial_number"],
+            "ip": device_data["ip"],
+            "port": device_data["port"],
+            "status": device_data["status"],
+            "user_count": device_data["user_count"]
+        })
     
     # Format weekly attendance for chart
     days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
