@@ -30,7 +30,7 @@ if not exist "venv" (
 
 REM Install dependencies
 echo Installing dependencies...
-venv\Scripts\pip install -r backend\requirements.txt
+venv\Scripts\pip install -r backend-api\requirements.txt
 if errorlevel 1 (
     echo Error: Failed to install dependencies
     pause

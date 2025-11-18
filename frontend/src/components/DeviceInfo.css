@@ -1,0 +1,99 @@
+.device-info {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  margin-bottom: 20px;
+}
+
+.device-info h2 {
+  margin-top: 0;
+  color: #2c3e50;
+  border-bottom: 2px solid #3498db;
+  padding-bottom: 10px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 15px;
+  margin: 20px 0;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.info-item .label {
+  font-size: 0.85em;
+  color: #7f8c8d;
+  margin-bottom: 5px;
+}
+
+.info-item .value {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+.actions button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  background: #3498db;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.3s;
+}
+
+.actions button:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.actions button:disabled {
+  background: #95a5a6;
+  cursor: not-allowed;
+}
+
+.actions button.warning {
+  background: #f39c12;
+}
+
+.actions button.warning:hover:not(:disabled) {
+  background: #e67e22;
+}
+
+.actions button.danger {
+  background: #e74c3c;
+}
+
+.actions button.danger:hover:not(:disabled) {
+  background: #c0392b;
+}
+
+.error {
+  background: #fee;
+  border-left: 4px solid #e74c3c;
+  padding: 12px;
+  margin: 10px 0;
+  border-radius: 4px;
+  color: #c0392b;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: #7f8c8d;
+}

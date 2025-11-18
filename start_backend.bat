@@ -4,13 +4,13 @@ echo Starting ZKTeco Device Management API
 echo ========================================
 echo.
 
-cd /d "%~dp0backend"
+cd /d "%~dp0backend-api"
 
 REM Check if virtual environment exists
 if not exist "..\venv\Scripts\python.exe" (
     echo Error: Virtual environment not found!
     echo Please run: python -m venv venv
-    echo Then run: venv\Scripts\pip install -r backend\requirements.txt
+    echo Then run: venv\Scripts\pip install -r backend-api\requirements.txt
     pause
     exit /b 1
 )
