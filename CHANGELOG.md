@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial FastAPI backend for ZKTeco device management
-- Device connection via VPN (10.185.1.201:4370)
+- Device connection via VPN/local network (10.185.1.201:4370)
+- MIT License - RIRAKTECH SARL
 - Device information endpoint (GET /api/device/info)
 - Device control endpoints (enable/disable/restart/poweroff)
 - User management endpoints (list/add/delete users)

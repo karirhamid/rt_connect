@@ -139,3 +139,15 @@ python test_vpn.py
 - Check device is not locked by another connection
 - Increase DEVICE_TIMEOUT in `.env`
 - Verify device is responding
+
+## License
+
+MIT License - Copyright (c) 2025 Hamid KARIR - RIRAKTECH SARL
+
+See [LICENSE](LICENSE) file for details.
+
+**Author:** Hamid KARIR  
+**Company:** RIRAKTECH SARL  
+**Website:** https://riraktech.ma  
+**Email:** hamid.karir@riraktech.ma  
+**Phone:** +212 611 644 6889
