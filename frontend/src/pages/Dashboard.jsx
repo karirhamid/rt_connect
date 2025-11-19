@@ -8,17 +8,24 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchStats();
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchStats = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await api.getStatistics();
       setStats(data);
     } catch (error) {
       console.error('Failed to fetch statistics:', error);
+      setError('Failed to load dashboard data. Please check your connection.');
     } finally {
       setLoading(false);
     }
@@ -26,8 +33,64 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="h-9 w-48 bg-gray-200 rounded animate-pulse"></div>
+          <div className="h-10 w-24 bg-gray-200 rounded animate-pulse"></div>
+        </div>
+
+        {/* Stats Cards Skeleton */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="bg-white rounded-lg shadow-md p-6">
+              <div className="flex items-center justify-between">
+                <div className="space-y-3 flex-1">
+                  <div className="h-4 w-24 bg-gray-200 rounded animate-pulse"></div>
+                  <div className="h-8 w-16 bg-gray-200 rounded animate-pulse"></div>
+                </div>
+                <div className="w-12 h-12 bg-gray-200 rounded-full animate-pulse"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Charts Skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {[1, 2].map((i) => (
+            <div key={i} className="bg-white p-6 rounded-lg shadow-md">
+              <div className="h-6 w-40 bg-gray-200 rounded animate-pulse mb-4"></div>
+              <div className="h-[300px] bg-gray-100 rounded animate-pulse"></div>
+            </div>
+          ))}
+        </div>
+
+        {/* Table Skeleton */}
+        <div className="bg-white rounded-lg shadow-md overflow-hidden">
+          <div className="p-6 border-b border-gray-200">
+            <div className="h-6 w-32 bg-gray-200 rounded animate-pulse"></div>
+          </div>
+          <div className="p-6 space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center space-x-4">
+                <div className="h-12 flex-1 bg-gray-200 rounded animate-pulse"></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 space-y-4">
+        <div className="text-red-500 text-lg font-semibold">{error}</div>
+        <button
+          onClick={fetchStats}
+          className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }
