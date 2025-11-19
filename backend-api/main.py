@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+from contextlib import asynccontextmanager
 from app.core import settings
 from app.api import device_router, users_router, attendance_router
 from app.api.devices import router as devices_router
+from app.database import init_db
+from app.services.sync_service import sync_service
 
 # Configure logging
 logging.basicConfig(
@@ -13,13 +16,40 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown events"""
+    # Startup
+    logger.info("Initializing database...")
+    init_db()
+    logger.info("Database initialized")
+    
+    logger.info("Starting background sync service...")
+    await sync_service.start()
+    logger.info("Background sync service started")
+    
+    # Run initial sync
+    logger.info("Running initial device sync...")
+    await sync_service.sync_all_devices()
+    logger.info("Initial sync completed")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Stopping background sync service...")
+    await sync_service.stop()
+    logger.info("Background sync service stopped")
+
+
 # Create FastAPI app
 app = FastAPI(
     title=settings.API_TITLE,
     version=settings.API_VERSION,
     description="API for managing ZKTeco biometric devices - attendance, users, and device control",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Configure CORS

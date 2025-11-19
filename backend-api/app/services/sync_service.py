@@ -1,0 +1,267 @@
+import asyncio
+import logging
+from datetime import datetime
+from typing import List
+from sqlalchemy.orm import Session
+from app.database import get_db_session
+from app.database.schema import Device as DBDevice, User as DBUser, Attendance as DBAttendance, SyncLog
+from app.services.device_store import device_store
+from app.services.device_manager import ZKTecoDeviceManager
+
+logger = logging.getLogger(__name__)
+
+
+class DeviceSyncService:
+    """Background service to sync device data to database"""
+    
+    def __init__(self, sync_interval: int = 300):
+        """
+        Initialize sync service
+        
+        Args:
+            sync_interval: Interval in seconds between syncs (default 5 minutes)
+        """
+        self.sync_interval = sync_interval
+        self.is_running = False
+        self._task = None
+    
+    async def start(self):
+        """Start the background sync service"""
+        if self.is_running:
+            logger.warning("Sync service is already running")
+            return
+        
+        self.is_running = True
+        self._task = asyncio.create_task(self._sync_loop())
+        logger.info(f"Sync service started with interval of {self.sync_interval} seconds")
+    
+    async def stop(self):
+        """Stop the background sync service"""
+        self.is_running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Sync service stopped")
+    
+    async def _sync_loop(self):
+        """Main sync loop"""
+        while self.is_running:
+            try:
+                await self.sync_all_devices()
+            except Exception as e:
+                logger.error(f"Error in sync loop: {e}")
+            
+            # Wait for next sync
+            await asyncio.sleep(self.sync_interval)
+    
+    async def sync_all_devices(self):
+        """Sync all registered devices"""
+        devices = device_store.get_all()
+        
+        if not devices:
+            logger.debug("No devices to sync")
+            return
+        
+        logger.info(f"Starting sync for {len(devices)} devices")
+        
+        for device_config in devices:
+            try:
+                await self.sync_device(device_config.id)
+            except Exception as e:
+                logger.error(f"Failed to sync device {device_config.name}: {e}")
+        
+        logger.info("Completed sync for all devices")
+    
+    async def sync_device(self, device_id: str):
+        """
+        Sync a specific device
+        
+        Args:
+            device_id: Device ID to sync
+        """
+        device_config = device_store.get_by_id(device_id)
+        if not device_config:
+            logger.warning(f"Device {device_id} not found")
+            return
+        
+        started_at = datetime.utcnow()
+        sync_log = SyncLog(
+            device_id=device_id,
+            sync_type='full',
+            status='error',
+            started_at=started_at
+        )
+        
+        try:
+            with get_db_session() as db:
+                # Get or create device in DB
+                db_device = db.query(DBDevice).filter(DBDevice.id == device_id).first()
+                if not db_device:
+                    db_device = DBDevice(
+                        id=device_config.id,
+                        name=device_config.name,
+                        ip=device_config.ip,
+                        port=device_config.port,
+                        tag=device_config.tag,
+                        serial_number=device_config.serial_number,
+                        is_active=True
+                    )
+                    db.add(db_device)
+                    db.commit()
+                    db.refresh(db_device)
+                
+                # Connect to device
+                manager = ZKTecoDeviceManager(
+                    ip=device_config.ip,
+                    port=device_config.port,
+                    timeout=5
+                )
+                
+                info = manager.get_device_info()
+                if not info:
+                    sync_log.status = 'error'
+                    sync_log.error_message = 'Failed to connect to device'
+                    db.add(sync_log)
+                    db.commit()
+                    logger.warning(f"Could not connect to device {device_config.name}")
+                    return
+                
+                records_synced = 0
+                
+                # Sync users
+                users = manager.get_users() or []
+                logger.info(f"Syncing {len(users)} users from {device_config.name}")
+                
+                for user in users:
+                    user_data = user if isinstance(user, dict) else {
+                        'uid': user.uid,
+                        'name': user.name,
+                        'privilege': user.privilege,
+                        'password': user.password,
+                        'group_id': user.group_id,
+                        'user_id': user.user_id,
+                        'card': user.card
+                    }
+                    
+                    # Check if user exists
+                    db_user = db.query(DBUser).filter(
+                        DBUser.device_id == device_id,
+                        DBUser.uid == user_data['uid']
+                    ).first()
+                    
+                    if db_user:
+                        # Update existing user
+                        db_user.name = user_data['name']
+                        db_user.privilege = user_data['privilege']
+                        db_user.password = user_data.get('password')
+                        db_user.group_id = user_data.get('group_id')
+                        db_user.user_id = user_data['user_id']
+                        db_user.card = user_data.get('card')
+                        db_user.synced_at = datetime.utcnow()
+                    else:
+                        # Create new user
+                        db_user = DBUser(
+                            device_id=device_id,
+                            uid=user_data['uid'],
+                            name=user_data['name'],
+                            privilege=user_data['privilege'],
+                            password=user_data.get('password'),
+                            group_id=user_data.get('group_id'),
+                            user_id=user_data['user_id'],
+                            card=user_data.get('card')
+                        )
+                        db.add(db_user)
+                    
+                    records_synced += 1
+                
+                db.commit()
+                
+                # Sync attendance
+                attendance_records = manager.get_attendance() or []
+                logger.info(f"Syncing {len(attendance_records)} attendance records from {device_config.name}")
+                
+                for record in attendance_records:
+                    record_data = record if isinstance(record, dict) else {
+                        'uid': record.uid,
+                        'user_id': record.user_id,
+                        'timestamp': record.timestamp,
+                        'status': record.status,
+                        'punch': record.punch
+                    }
+                    
+                    # Get user from DB
+                    db_user = db.query(DBUser).filter(
+                        DBUser.device_id == device_id,
+                        DBUser.uid == record_data['uid']
+                    ).first()
+                    
+                    if not db_user:
+                        logger.warning(f"User {record_data['uid']} not found for attendance record")
+                        continue
+                    
+                    # Check if attendance record exists
+                    timestamp = record_data['timestamp']
+                    if isinstance(timestamp, str):
+                        timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    
+                    existing = db.query(DBAttendance).filter(
+                        DBAttendance.device_id == device_id,
+                        DBAttendance.uid == record_data['uid'],
+                        DBAttendance.timestamp == timestamp
+                    ).first()
+                    
+                    if not existing:
+                        db_attendance = DBAttendance(
+                            device_id=device_id,
+                            user_id=db_user.id,
+                            uid=record_data['uid'],
+                            user_id_str=record_data['user_id'],
+                            timestamp=timestamp,
+                            status=record_data['status'],
+                            punch=record_data['punch']
+                        )
+                        db.add(db_attendance)
+                        records_synced += 1
+                
+                db.commit()
+                
+                # Update device last sync time
+                db_device.last_sync = datetime.utcnow()
+                db.commit()
+                
+                # Log successful sync
+                sync_log.status = 'success'
+                sync_log.records_synced = records_synced
+                sync_log.completed_at = datetime.utcnow()
+                db.add(sync_log)
+                db.commit()
+                
+                logger.info(f"Successfully synced {records_synced} records from {device_config.name}")
+        
+        except Exception as e:
+            logger.error(f"Error syncing device {device_config.name}: {e}")
+            with get_db_session() as db:
+                sync_log.status = 'error'
+                sync_log.error_message = str(e)
+                sync_log.completed_at = datetime.utcnow()
+                db.add(sync_log)
+                db.commit()
+    
+    async def trigger_sync(self, device_id: str = None):
+        """
+        Trigger an immediate sync
+        
+        Args:
+            device_id: Specific device ID to sync, or None to sync all
+        """
+        if device_id:
+            await self.sync_device(device_id)
+        else:
+            await self.sync_all_devices()
+
+
+# Global sync service instance
+sync_service = DeviceSyncService(sync_interval=300)  # 5 minutes

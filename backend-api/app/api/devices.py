@@ -1,11 +1,17 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from datetime import datetime, timedelta
 from app.services.device_store import device_store, Device
 from app.services.device_manager import ZKTecoDeviceManager
+from app.database import get_db
+from app.database.schema import Device as DBDevice, User as DBUser, Attendance as DBAttendance
+from app.services.sync_service import sync_service
 
 router = APIRouter()
 
@@ -135,23 +141,14 @@ async def get_device_attendance(
     return {"attendance": attendance, "count": len(attendance)}
 
 @router.get("/statistics")
-async def get_statistics():
-    """Get dashboard statistics across all devices"""
-    devices = device_store.get_all()
-    total_devices = len(devices)
-    total_users = 0
-    today_attendance = 0
-    active_devices = 0
-    
-    from datetime import datetime, timedelta
+async def get_statistics(db: Session = Depends(get_db)):
+    """Get dashboard statistics from database (fast!)"""
     today = datetime.now().date()
     week_ago = today - timedelta(days=7)
     
-    weekly_attendance = {i: 0 for i in range(7)}
-    device_status = {"online": 0, "offline": 0}
-    recent_devices = []
+    # Get total devices
+    total_devices = db.query(DBDevice).filter(DBDevice.is_active == True).count()
     
-    # If no devices, return empty statistics
     if total_devices == 0:
         days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         weekly_data = [{"day": days[i], "count": 0} for i in range(7)]
@@ -170,79 +167,61 @@ async def get_statistics():
             "recent_devices": []
         }
     
-    # Helper function to process a single device
-    def process_device(device):
-        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=3)
-        info = manager.get_device_info()
-        
-        device_data = {
-            "name": device.name,
-            "ip": device.ip,
-            "port": device.port,
-            "serial_number": device.serial_number or "N/A",
-            "status": "offline",
-            "user_count": 0,
-            "users": [],
-            "attendance": []
-        }
-        
-        if info:
-            device_data["status"] = "online"
-            serial_num = info.get("serial_number", "N/A") if isinstance(info, dict) else getattr(info, "serial_number", "N/A")
-            device_data["serial_number"] = serial_num
-            
-            users = manager.get_users() or []
-            device_data["user_count"] = len(users)
-            device_data["users"] = users
-            
-            attendance = manager.get_attendance() or []
-            device_data["attendance"] = attendance
-        
-        return device_data
+    # Get total users
+    total_users = db.query(DBUser).count()
     
-    # Process all devices in parallel using ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(5, total_devices)) as executor:
-        device_results = list(executor.map(process_device, devices))
+    # Get today's attendance count
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
+    today_attendance = db.query(DBAttendance).filter(
+        DBAttendance.timestamp >= today_start,
+        DBAttendance.timestamp <= today_end
+    ).count()
     
-    # Process results
-    for device_data in device_results:
-        if device_data["status"] == "online":
-            active_devices += 1
+    # Get weekly attendance
+    weekly_attendance = {i: 0 for i in range(7)}
+    week_start = datetime.combine(week_ago, datetime.min.time())
+    
+    weekly_records = db.query(
+        func.date(DBAttendance.timestamp).label('date'),
+        func.count(DBAttendance.id).label('count')
+    ).filter(
+        DBAttendance.timestamp >= week_start
+    ).group_by(func.date(DBAttendance.timestamp)).all()
+    
+    for record in weekly_records:
+        record_date = record.date if isinstance(record.date, datetime) else datetime.strptime(str(record.date), '%Y-%m-%d').date()
+        days_ago = (today - record_date).days
+        if 0 <= days_ago < 7:
+            weekly_attendance[6 - days_ago] = record.count
+    
+    # Get device status and recent devices
+    all_devices = db.query(DBDevice).filter(DBDevice.is_active == True).all()
+    device_status = {"online": 0, "offline": 0}
+    recent_devices = []
+    active_devices = 0
+    
+    for device in all_devices:
+        # Check if device was recently synced (within last 10 minutes)
+        is_online = device.last_sync and (datetime.utcnow() - device.last_sync).seconds < 600
+        
+        if is_online:
             device_status["online"] += 1
-            total_users += device_data["user_count"]
-            
-            # Count today's and weekly attendance
-            for record in device_data["attendance"]:
-                # Handle both dict and Attendance object
-                if hasattr(record, 'timestamp'):
-                    record_date = record.timestamp.date()
-                elif isinstance(record, dict):
-                    timestamp = record.get("timestamp")
-                    if isinstance(timestamp, str):
-                        record_date = datetime.fromisoformat(timestamp.replace('Z', '+00:00')).date()
-                    else:
-                        record_date = timestamp.date()
-                else:
-                    continue
-                
-                if record_date == today:
-                    today_attendance += 1
-                
-                # Weekly attendance
-                if record_date >= week_ago:
-                    days_ago = (today - record_date).days
-                    if 0 <= days_ago < 7:
-                        weekly_attendance[6 - days_ago] += 1
+            active_devices += 1
         else:
             device_status["offline"] += 1
         
+        # Get user count for this device
+        user_count = db.query(DBUser).filter(DBUser.device_id == device.id).count()
+        
         recent_devices.append({
-            "name": device_data["name"],
-            "serial_number": device_data["serial_number"],
-            "ip": device_data["ip"],
-            "port": device_data["port"],
-            "status": device_data["status"],
-            "user_count": device_data["user_count"]
+            "name": device.name,
+            "serial_number": device.serial_number or "N/A",
+            "ip": device.ip,
+            "port": device.port,
+            "status": "online" if is_online else "offline",
+            "user_count": user_count,
+            "last_sync": device.last_sync.isoformat() if device.last_sync else None
         })
     
     # Format weekly attendance for chart
@@ -264,3 +243,10 @@ async def get_statistics():
         "device_status": status_data,
         "recent_devices": recent_devices[:5]  # Last 5 devices
     }
+
+
+@router.post("/sync")
+async def trigger_sync(device_id: Optional[str] = None):
+    """Trigger manual sync of devices"""
+    await sync_service.trigger_sync(device_id)
+    return {"message": "Sync triggered successfully"}
