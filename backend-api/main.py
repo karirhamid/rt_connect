@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from app.core import settings
 from app.api import device_router, users_router, attendance_router
 from app.api.devices import router as devices_router
+from app.api.organization import router as organization_router
 from app.database import init_db
 from app.services.sync_service import sync_service
 
@@ -27,12 +28,7 @@ async def lifespan(app: FastAPI):
     
     logger.info("Starting background sync service...")
     await sync_service.start()
-    logger.info("Background sync service started")
-    
-    # Run initial sync
-    logger.info("Running initial device sync...")
-    await sync_service.sync_all_devices()
-    logger.info("Initial sync completed")
+    logger.info("Background sync service started - will sync every 5 minutes")
     
     yield
     
@@ -72,6 +68,7 @@ app.include_router(devices_router, prefix="/api", tags=["Devices Management"])
 app.include_router(device_router, prefix="/api/device", tags=["Device"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendance"])
+app.include_router(organization_router, prefix="/api", tags=["Organization"])
 
 
 @app.get("/")

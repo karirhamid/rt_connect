@@ -1,8 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Settings, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Settings, Menu, X, HardDrive, Building2, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 import Dashboard from './pages/Dashboard';
 import DeviceSettings from './pages/DeviceSettings';
+import CompanyConfig from './pages/CompanyConfig';
 
 function App() {
   return (
@@ -14,11 +15,16 @@ function App() {
 
 function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const location = useLocation();
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Device Settings', href: '/devices', icon: Settings },
+  ];
+
+  const settingsMenu = [
+    { name: 'Devices', href: '/settings/devices', icon: HardDrive },
+    { name: 'Company Config', href: '/settings/company', icon: Building2 },
   ];
 
   const isActive = (path) => location.pathname === path;
@@ -78,6 +84,44 @@ function AppContent() {
                 </Link>
               );
             })}
+
+            {/* Settings Menu */}
+            <div>
+              <button
+                onClick={() => setSettingsOpen(!settingsOpen)}
+                className="flex items-center justify-between w-full px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <Settings className="w-5 h-5" />
+                  <span>Settings</span>
+                </div>
+                <ChevronDown className={`w-4 h-4 transition-transform ${settingsOpen ? 'transform rotate-180' : ''}`} />
+              </button>
+              
+              {settingsOpen && (
+                <div className="ml-4 mt-2 space-y-1">
+                  {settingsMenu.map((item) => {
+                    const Icon = item.icon;
+                    const active = isActive(item.href);
+                    return (
+                      <Link
+                        key={item.name}
+                        to={item.href}
+                        onClick={() => setSidebarOpen(false)}
+                        className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                          active
+                            ? 'bg-primary-50 text-primary-700 font-medium'
+                            : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" />
+                        {item.name}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </nav>
 
           {/* Footer */}
@@ -104,7 +148,9 @@ function AppContent() {
             <Menu className="w-6 h-6" />
           </button>
           <h2 className="text-xl font-semibold text-gray-800">
-            {navigation.find(item => isActive(item.href))?.name || 'Dashboard'}
+            {navigation.find(item => isActive(item.href))?.name || 
+             settingsMenu.find(item => isActive(item.href))?.name || 
+             'Dashboard'}
           </h2>
         </div>
 
@@ -112,7 +158,8 @@ function AppContent() {
         <main className="p-6">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/devices" element={<DeviceSettings />} />
+            <Route path="/settings/devices" element={<DeviceSettings />} />
+            <Route path="/settings/company" element={<CompanyConfig />} />
           </Routes>
         </main>
       </div>

@@ -213,7 +213,12 @@ async def get_statistics(db: Session = Depends(get_db)):
     for device in all_devices:
         # Check if device was recently synced (within last 10 minutes)
         now = datetime.now(timezone.utc)
-        is_online = device.last_sync and (now - device.last_sync).seconds < 600
+        if device.last_sync:
+            # Ensure device.last_sync is timezone-aware
+            last_sync = device.last_sync if device.last_sync.tzinfo else device.last_sync.replace(tzinfo=timezone.utc)
+            is_online = (now - last_sync).seconds < 600
+        else:
+            is_online = False
         
         if is_online:
             device_status["online"] += 1
@@ -256,6 +261,7 @@ async def get_statistics(db: Session = Depends(get_db)):
 
 
 @router.post("/sync")
+@router.get("/sync")
 async def trigger_sync(device_id: Optional[str] = None):
     """Trigger manual sync of devices"""
     await sync_service.trigger_sync(device_id)

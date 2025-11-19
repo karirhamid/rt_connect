@@ -60,6 +60,10 @@ class DeviceSyncService:
     
     async def _sync_loop(self):
         """Main sync loop"""
+        # Wait before first sync
+        logger.info(f"Background sync will start in {self.sync_interval} seconds")
+        await asyncio.sleep(self.sync_interval)
+        
         while self.is_running:
             try:
                 await self.sync_all_devices()

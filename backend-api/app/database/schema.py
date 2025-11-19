@@ -11,7 +11,7 @@ class Company(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)
-    code = Column(String(50), unique=True, nullable=False)
+    code = Column(String(50), unique=True, nullable=True)
     address = Column(Text, nullable=True)
     phone = Column(String(50), nullable=True)
     email = Column(String(100), nullable=True)
@@ -29,8 +29,9 @@ class Department(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # Self-referencing for hierarchy
     name = Column(String(255), nullable=False)
-    code = Column(String(50), nullable=False)
+    code = Column(String(50), nullable=True)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -38,6 +39,8 @@ class Department(Base):
     
     # Relationships
     company = relationship("Company", back_populates="departments")
+    parent = relationship("Department", remote_side=[id], back_populates="children")
+    children = relationship("Department", back_populates="parent", cascade="all, delete-orphan")
     positions = relationship("Position", back_populates="department", cascade="all, delete-orphan")
     employees = relationship("Employee", back_populates="department")
 
@@ -48,7 +51,7 @@ class Position(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
     name = Column(String(255), nullable=False)
-    code = Column(String(50), nullable=False)
+    code = Column(String(50), nullable=True)
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
