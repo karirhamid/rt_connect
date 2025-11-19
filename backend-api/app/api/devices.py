@@ -34,7 +34,7 @@ async def get_devices():
 
 @router.post("/devices")
 async def add_device(device_data: DeviceCreate):
-    """Add a new device"""
+    """Add a new device and sync it immediately"""
     device_id = str(uuid.uuid4())
     device = Device(
         id=device_id,
@@ -45,12 +45,21 @@ async def add_device(device_data: DeviceCreate):
         serial_number=device_data.serial_number
     )
     device_store.add(device)
-    return {"message": "Device added successfully", "device": device.dict()}
+    
+    # Trigger immediate sync for the new device
+    await sync_service.sync_device(device_id)
+    
+    return {"message": "Device added and synced successfully", "device": device.dict()}
 
 @router.delete("/devices/{device_id}")
-async def delete_device(device_id: str):
-    """Delete a device"""
+async def delete_device(device_id: str, db: Session = Depends(get_db)):
+    """Delete a device and its data from database"""
     if device_store.delete(device_id):
+        # Delete device and related data from database
+        db_device = db.query(DBDevice).filter(DBDevice.id == device_id).first()
+        if db_device:
+            db.delete(db_device)
+            db.commit()
         return {"message": "Device deleted successfully"}
     raise HTTPException(status_code=404, detail="Device not found")
 
