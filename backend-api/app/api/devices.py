@@ -6,11 +6,11 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.services.device_store import device_store, Device
 from app.services.device_manager import ZKTecoDeviceManager
 from app.database import get_db
-from app.database.schema import Device as DBDevice, User as DBUser, Attendance as DBAttendance
+from app.database.schema import Device as DBDevice, Employee as DBEmployee, Attendance as DBAttendance
 from app.services.sync_service import sync_service
 
 router = APIRouter()
@@ -176,8 +176,8 @@ async def get_statistics(db: Session = Depends(get_db)):
             "recent_devices": []
         }
     
-    # Get total users
-    total_users = db.query(DBUser).count()
+    # Get total users (employees)
+    total_users = db.query(DBEmployee).count()
     
     # Get today's attendance count
     today_start = datetime.combine(today, datetime.min.time())
@@ -212,7 +212,8 @@ async def get_statistics(db: Session = Depends(get_db)):
     
     for device in all_devices:
         # Check if device was recently synced (within last 10 minutes)
-        is_online = device.last_sync and (datetime.utcnow() - device.last_sync).seconds < 600
+        now = datetime.now(timezone.utc)
+        is_online = device.last_sync and (now - device.last_sync).seconds < 600
         
         if is_online:
             device_status["online"] += 1
@@ -220,8 +221,8 @@ async def get_statistics(db: Session = Depends(get_db)):
         else:
             device_status["offline"] += 1
         
-        # Get user count for this device
-        user_count = db.query(DBUser).filter(DBUser.device_id == device.id).count()
+        # Get employee count (all employees in system)
+        user_count = db.query(DBEmployee).count()
         
         recent_devices.append({
             "name": device.name,

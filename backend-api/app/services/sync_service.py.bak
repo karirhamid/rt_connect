@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List
 from sqlalchemy.orm import Session
 from app.database import get_db_session
 from app.database.schema import (
@@ -16,11 +16,6 @@ from app.services.device_store import device_store
 from app.services.device_manager import ZKTecoDeviceManager
 
 logger = logging.getLogger(__name__)
-
-# Default organizational IDs (created by create_defaults.py)
-DEFAULT_COMPANY_ID = 1
-DEFAULT_DEPARTMENT_ID = 1
-DEFAULT_POSITION_ID = 1
 
 
 class DeviceSyncService:
@@ -99,7 +94,7 @@ class DeviceSyncService:
             logger.warning(f"Device {device_id} not found")
             return
         
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.utcnow()
         sync_log = SyncLog(
             device_id=device_id,
             sync_type='full',
@@ -143,7 +138,7 @@ class DeviceSyncService:
                 
                 records_synced = 0
                 
-                # Sync users to employees table
+                # Sync users
                 users = manager.get_users() or []
                 logger.info(f"Syncing {len(users)} users from {device_config.name}")
                 
@@ -158,40 +153,40 @@ class DeviceSyncService:
                         'card': user.card
                     }
                     
-                    # Check if employee exists by device_user_id and user_id
-                    db_employee = db.query(DBEmployee).filter(
-                        DBEmployee.device_user_id == user_data['uid'],
-                        DBEmployee.user_id == user_data['user_id']
+                    # Check if user exists
+                    db_user = db.query(DBUser).filter(
+                        DBUser.device_id == device_id,
+                        DBUser.uid == user_data['uid']
                     ).first()
                     
-                    if db_employee:
-                        # Update existing employee
-                        db_employee.name = user_data['name']
-                        db_employee.privilege = user_data['privilege']
-                        db_employee.password = user_data.get('password')
-                        db_employee.group_id = user_data.get('group_id')
-                        db_employee.card_number = user_data.get('card')
-                        db_employee.synced_at = datetime.now(timezone.utc)
+                    if db_user:
+                        # Update existing user
+                        db_user.name = user_data['name']
+                        db_user.privilege = user_data['privilege']
+                        db_user.password = user_data.get('password')
+                        db_user.group_id = user_data.get('group_id')
+                        db_user.user_id = user_data['user_id']
+                        db_user.card = user_data.get('card')
+                        db_user.synced_at = datetime.utcnow()
                     else:
-                        # Create new employee with default organization
-                        db_employee = DBEmployee(
-                            company_id=DEFAULT_COMPANY_ID,
-                            department_id=DEFAULT_DEPARTMENT_ID,
-                            position_id=DEFAULT_POSITION_ID,
-                            device_user_id=user_data['uid'],
-                            user_id=user_data['user_id'],
+                        # Create new user
+                        db_user = DBUser(
+                            device_id=device_id,
+                            uid=user_data['uid'],
                             name=user_data['name'],
                             privilege=user_data['privilege'],
                             password=user_data.get('password'),
                             group_id=user_data.get('group_id'),
-                            card_number=user_data.get('card')
+                            user_id=user_data['user_id'],
+                            card=user_data.get('card')
                         )
-                        db.add(db_employee)
-                        records_synced += 1
+                        db.add(db_user)
+                    
+                    records_synced += 1
                 
                 db.commit()
                 
-                # Sync attendance records
+                # Sync attendance
                 attendance_records = manager.get_attendance() or []
                 logger.info(f"Syncing {len(attendance_records)} attendance records from {device_config.name}")
                 
@@ -204,13 +199,14 @@ class DeviceSyncService:
                         'punch': record.punch
                     }
                     
-                    # Get employee from DB
-                    db_employee = db.query(DBEmployee).filter(
-                        DBEmployee.device_user_id == record_data['uid']
+                    # Get user from DB
+                    db_user = db.query(DBUser).filter(
+                        DBUser.device_id == device_id,
+                        DBUser.uid == record_data['uid']
                     ).first()
                     
-                    if not db_employee:
-                        logger.warning(f"Employee with device_user_id {record_data['uid']} not found for attendance record")
+                    if not db_user:
+                        logger.warning(f"User {record_data['uid']} not found for attendance record")
                         continue
                     
                     # Check if attendance record exists
@@ -227,7 +223,7 @@ class DeviceSyncService:
                     if not existing:
                         db_attendance = DBAttendance(
                             device_id=device_id,
-                            employee_id=db_employee.id,
+                            user_id=db_user.id,
                             uid=record_data['uid'],
                             user_id_str=record_data['user_id'],
                             timestamp=timestamp,
@@ -240,13 +236,13 @@ class DeviceSyncService:
                 db.commit()
                 
                 # Update device last sync time
-                db_device.last_sync = datetime.now(timezone.utc)
+                db_device.last_sync = datetime.utcnow()
                 db.commit()
                 
                 # Log successful sync
                 sync_log.status = 'success'
                 sync_log.records_synced = records_synced
-                sync_log.completed_at = datetime.now(timezone.utc)
+                sync_log.completed_at = datetime.utcnow()
                 db.add(sync_log)
                 db.commit()
                 
@@ -257,11 +253,11 @@ class DeviceSyncService:
             with get_db_session() as db:
                 sync_log.status = 'error'
                 sync_log.error_message = str(e)
-                sync_log.completed_at = datetime.now(timezone.utc)
+                sync_log.completed_at = datetime.utcnow()
                 db.add(sync_log)
                 db.commit()
     
-    async def trigger_sync(self, device_id: Optional[str] = None):
+    async def trigger_sync(self, device_id: str = None):
         """
         Trigger an immediate sync
         

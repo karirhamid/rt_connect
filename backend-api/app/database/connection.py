@@ -1,19 +1,26 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
 from app.database.schema import Base
+from typing import Generator
+from urllib.parse import quote_plus
 import os
 
-# Database file path
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "zkteco.db")
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+# PostgreSQL connection parameters
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "hk2025@AnzadbPss.")
+DB_NAME = os.getenv("DB_NAME", "rtzkconnect_db")
 
-# Create engine with connection pooling for SQLite
+# URL-encode the password to handle special characters
+DATABASE_URL = f"postgresql://{DB_USER}:{quote_plus(DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# Create engine with connection pooling for PostgreSQL
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+    pool_size=10,
+    max_overflow=20,
     echo=False
 )
 
@@ -26,7 +33,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
 
-def get_db() -> Session:
+def get_db() -> Generator[Session, None, None]:
     """Get database session for dependency injection"""
     db = SessionLocal()
     try:
