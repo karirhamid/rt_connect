@@ -485,6 +485,8 @@ async def get_employees(
         Department, Employee.department_id == Department.id
     ).outerjoin(
         Position, Employee.position_id == Position.id
+    ).outerjoin(
+        DBDevice, Employee.source_device_id == DBDevice.id
     )
     
     if company_id:

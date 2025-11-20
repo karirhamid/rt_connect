@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Search, Loader } from 'lucide-react';
+import { Plus, Trash2, Search, Loader, Edit } from 'lucide-react';
 import api from '../services/api';
+import Dialog, { Toast } from '../components/Dialog';
 
 export default function DeviceSettings() {
   const [devices, setDevices] = useState([]);
@@ -8,6 +9,9 @@ export default function DeviceSettings() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showDiscovery, setShowDiscovery] = useState(false);
   const [discoveryData, setDiscoveryData] = useState(null);
+  const [editingDevice, setEditingDevice] = useState(null);
+  const [dialog, setDialog] = useState({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
+  const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState({
     ip: '',
     port: '4370',
@@ -32,9 +36,20 @@ export default function DeviceSettings() {
     }
   };
 
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
   const handleDiscovery = async () => {
     if (!formData.ip) {
-      alert('Please enter an IP address');
+      setDialog({
+        isOpen: true,
+        type: 'warning',
+        title: 'Missing Information',
+        message: 'Please enter an IP address to discover the device.',
+        onConfirm: null
+      });
       return;
     }
 
@@ -53,9 +68,15 @@ export default function DeviceSettings() {
       setShowDiscovery(false);
       setShowAddForm(true);
       
-      alert('Device discovered successfully!');
+      showToast('Device discovered successfully! Please review and save the device details.', 'success');
     } catch (error) {
-      alert('Discovery failed: ' + error.message);
+      setDialog({
+        isOpen: true,
+        type: 'error',
+        title: 'Discovery Failed',
+        message: `Unable to discover device: ${error.message}`,
+        onConfirm: null
+      });
     } finally {
       setLoading(false);
     }
@@ -65,38 +86,128 @@ export default function DeviceSettings() {
     e.preventDefault();
     
     if (!formData.ip || !formData.port) {
-      alert('IP and Port are required');
+      setDialog({
+        isOpen: true,
+        type: 'warning',
+        title: 'Missing Information',
+        message: 'IP address and port are required to add a device.',
+        onConfirm: null
+      });
       return;
     }
 
-    setLoading(true);
-    try {
-      await api.addDevice(formData);
-      alert('Device added successfully!');
-      setShowAddForm(false);
-      setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '' });
-      setDiscoveryData(null);
-      fetchDevices();
-    } catch (error) {
-      alert('Failed to add device: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
+    setDialog({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Add Device',
+      message: `Are you sure you want to add device "${formData.name || formData.ip}" to the system?`,
+      confirmText: 'Add Device',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        setDialog({ ...dialog, loading: true });
+        try {
+          await api.addDevice(formData);
+          setDialog({ isOpen: false });
+          showToast('Device added successfully!', 'success');
+          setShowAddForm(false);
+          setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '' });
+          setDiscoveryData(null);
+          fetchDevices();
+        } catch (error) {
+          setDialog({
+            isOpen: true,
+            type: 'error',
+            title: 'Add Failed',
+            message: `Failed to add device: ${error.message}`,
+            onConfirm: null
+          });
+        }
+      }
+    });
   };
 
-  const handleDeleteDevice = async (deviceId) => {
-    if (!confirm('Are you sure you want to delete this device?')) return;
+  const handleEditDevice = (device) => {
+    setEditingDevice(device);
+    setFormData({
+      ip: device.ip,
+      port: device.port,
+      tag: device.tag || '',
+      serial_number: device.serial_number || '',
+      name: device.name || '',
+    });
+    setShowAddForm(true);
+  };
 
-    setLoading(true);
-    try {
-      await api.deleteDevice(deviceId);
-      alert('Device deleted successfully!');
-      fetchDevices();
-    } catch (error) {
-      alert('Failed to delete device: ' + error.message);
-    } finally {
-      setLoading(false);
+  const handleUpdateDevice = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.name) {
+      setDialog({
+        isOpen: true,
+        type: 'warning',
+        title: 'Missing Information',
+        message: 'Device name is required to update the device.',
+        onConfirm: null
+      });
+      return;
     }
+
+    setDialog({
+      isOpen: true,
+      type: 'confirm',
+      title: 'Update Device',
+      message: `Are you sure you want to update device "${editingDevice.name}" with the new information?`,
+      confirmText: 'Update Device',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        setDialog({ ...dialog, loading: true });
+        try {
+          await api.updateDevice(editingDevice.id, formData);
+          setDialog({ isOpen: false });
+          showToast('Device updated successfully!', 'success');
+          setShowAddForm(false);
+          setEditingDevice(null);
+          setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '' });
+          fetchDevices();
+        } catch (error) {
+          setDialog({
+            isOpen: true,
+            type: 'error',
+            title: 'Update Failed',
+            message: `Failed to update device: ${error.message}`,
+            onConfirm: null
+          });
+        }
+      }
+    });
+  };
+
+  const handleDeleteDevice = (device) => {
+    setDialog({
+      isOpen: true,
+      type: 'warning',
+      title: 'Delete Device',
+      message: `Are you sure you want to delete device "${device.name}"? This action cannot be undone and will remove all associated data.`,
+      confirmText: 'Delete Device',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        setDialog({ ...dialog, loading: true });
+        try {
+          await api.deleteDevice(device.id);
+          setDialog({ isOpen: false });
+          showToast('Device deleted successfully!', 'success');
+          fetchDevices();
+        } catch (error) {
+          setDialog({
+            isOpen: true,
+            type: 'error',
+            title: 'Delete Failed',
+            message: `Failed to delete device: ${error.message}`,
+            onConfirm: null
+          });
+        }
+      }
+    });
   };
 
   return (
@@ -185,7 +296,7 @@ export default function DeviceSettings() {
       {showAddForm && (
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-2xl font-bold mb-6 text-gray-900">
-            {discoveryData ? 'Add Discovered Device' : 'Add New Device'}
+            {editingDevice ? 'Edit Device' : discoveryData ? 'Add Discovered Device' : 'Add New Device'}
           </h2>
           
           {discoveryData && (
@@ -200,7 +311,7 @@ export default function DeviceSettings() {
             </div>
           )}
 
-          <form onSubmit={handleAddDevice} className="space-y-4">
+          <form onSubmit={editingDevice ? handleUpdateDevice : handleAddDevice} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -273,12 +384,13 @@ export default function DeviceSettings() {
                 disabled={loading}
                 className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:bg-gray-400"
               >
-                {loading ? 'Adding...' : 'Add Device'}
+                {loading ? (editingDevice ? 'Updating...' : 'Adding...') : (editingDevice ? 'Update Device' : 'Add Device')}
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setShowAddForm(false);
+                  setEditingDevice(null);
                   setDiscoveryData(null);
                   setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '' });
                 }}
@@ -344,13 +456,22 @@ export default function DeviceSettings() {
                       {device.serial_number || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button
-                        onClick={() => handleDeleteDevice(device.id)}
-                        className="text-red-600 hover:text-red-900 flex items-center gap-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        Delete
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => handleEditDevice(device)}
+                          className="text-primary-600 hover:text-primary-900 flex items-center gap-1"
+                        >
+                          <Edit className="w-4 h-4" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDevice(device)}
+                          className="text-red-600 hover:text-red-900 flex items-center gap-1"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -359,6 +480,28 @@ export default function DeviceSettings() {
           </table>
         </div>
       </div>
+
+      {/* Dialog Component */}
+      <Dialog
+        isOpen={dialog.isOpen}
+        onClose={() => setDialog({ isOpen: false })}
+        onConfirm={dialog.onConfirm}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        confirmText={dialog.confirmText}
+        cancelText={dialog.cancelText}
+        loading={dialog.loading}
+      />
+
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }

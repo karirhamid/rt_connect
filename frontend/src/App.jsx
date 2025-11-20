@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Settings, Menu, X, HardDrive, Building2, ChevronDown, Clock, Filter, Users, Globe } from 'lucide-react';
+import { LayoutDashboard, Settings, Menu, X, HardDrive, Building2, ChevronDown, Clock, Filter, Users, Globe, Calendar, UserCog } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
@@ -9,6 +9,9 @@ import AttendanceToday from './pages/AttendanceToday';
 import AttendanceFilter from './pages/AttendanceFilter';
 import EmployeeManagement from './pages/EmployeeManagement';
 import GeneralSettings from './pages/GeneralSettings';
+import ShiftManagement from './pages/ShiftManagement';
+import HolidayCalendar from './pages/HolidayCalendar';
+import BulkShiftAssignment from './pages/BulkShiftAssignment';
 
 function App() {
   return (
@@ -52,6 +55,9 @@ function AppContent() {
     { name: t('general'), href: '/settings/general', icon: Globe },
     { name: t('devices'), href: '/settings/devices', icon: HardDrive },
     { name: t('companyConfig'), href: '/settings/company', icon: Building2 },
+    { name: t('shifts'), href: '/settings/shifts', icon: Clock },
+    { name: t('holidays'), href: '/settings/holidays', icon: Calendar },
+    { name: t('bulkAssignShifts'), href: '/settings/bulk-assign', icon: UserCog },
   ];
 
   const isActive = (path) => location.pathname === path;
@@ -235,6 +241,9 @@ function AppContent() {
             <Route path="/settings/general" element={<GeneralSettings />} />
             <Route path="/settings/devices" element={<DeviceSettings />} />
             <Route path="/settings/company" element={<CompanyConfig />} />
+            <Route path="/settings/shifts" element={<ShiftManagement />} />
+            <Route path="/settings/holidays" element={<HolidayCalendar />} />
+            <Route path="/settings/bulk-assign" element={<BulkShiftAssignment />} />
           </Routes>
         </main>
       </div>

@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Users, Monitor, Clock, Activity } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -25,7 +27,7 @@ export default function Dashboard() {
       setStats(data);
     } catch (error) {
       console.error('Failed to fetch statistics:', error);
-      setError('Failed to load dashboard data. Please check your connection.');
+      setError(t('failedToLoad'));
     } finally {
       setLoading(false);
     }
@@ -89,7 +91,7 @@ export default function Dashboard() {
           onClick={fetchStats}
           className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
         >
-          Retry
+          {t('retry')}
         </button>
       </div>
     );
@@ -98,12 +100,12 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <h1 className="text-3xl font-bold text-gray-900">{t('dashboard')}</h1>
         <button
           onClick={fetchStats}
           className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
         >
-          Refresh
+          {t('refresh')}
         </button>
       </div>
 
@@ -111,25 +113,25 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           icon={<Monitor className="w-8 h-8" />}
-          title="Total Devices"
+          title={t('totalDevices')}
           value={stats?.total_devices || 0}
           color="bg-blue-500"
         />
         <StatCard
           icon={<Users className="w-8 h-8" />}
-          title="Total Users"
+          title={t('totalUsers')}
           value={stats?.total_users || 0}
           color="bg-green-500"
         />
         <StatCard
           icon={<Clock className="w-8 h-8" />}
-          title="Today's Attendance"
+          title={t('todayAttendance')}
           value={stats?.today_attendance || 0}
           color="bg-yellow-500"
         />
         <StatCard
           icon={<Activity className="w-8 h-8" />}
-          title="Active Devices"
+          title={t('activeDevices')}
           value={stats?.active_devices || 0}
           color="bg-red-500"
         />
@@ -139,7 +141,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Attendance Chart */}
         <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold mb-4 text-gray-800">Weekly Attendance</h2>
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">{t('weeklyAttendance')}</h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={stats?.weekly_attendance || []}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -153,7 +155,7 @@ export default function Dashboard() {
 
         {/* Device Status */}
         <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold mb-4 text-gray-800">Device Status</h2>
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">{t('deviceStatus')}</h2>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie
@@ -179,23 +181,23 @@ export default function Dashboard() {
       {/* Recent Devices */}
       <div className="bg-white rounded-lg shadow-md overflow-hidden">
         <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-800">Recent Devices</h2>
+          <h2 className="text-xl font-semibold text-gray-800">{t('recentDevices')}</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Device
+                  {t('device')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  IP Address
+                  {t('ipAddress')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
+                  {t('status')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Users
+                  {t('users')}
                 </th>
               </tr>
             </thead>
@@ -215,7 +217,7 @@ export default function Dashboard() {
                         ? 'bg-green-100 text-green-800' 
                         : 'bg-red-100 text-red-800'
                     }`}>
-                      {device.status}
+                      {t(device.status)}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

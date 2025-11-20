@@ -37,6 +37,16 @@ class ApiService {
     return response.json();
   }
 
+  async updateDevice(deviceId, deviceData) {
+    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(deviceData),
+    });
+    if (!response.ok) throw new Error('Failed to update device');
+    return response.json();
+  }
+
   // Device Operations
   async getDeviceInfo(deviceId) {
     const response = await fetch(`${API_BASE_URL}/api/device/${deviceId}/info`);
@@ -265,6 +275,300 @@ class ApiService {
       const error = await response.json();
       throw new Error(error.detail || 'Failed to delete employee');
     }
+    return response.json();
+  }
+
+  // Device Settings - Time & Timezone
+  async getDeviceTime(deviceId) {
+    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/time`);
+    if (!response.ok) throw new Error('Failed to fetch device time');
+    return response.json();
+  }
+
+  async setDeviceTime(deviceId, timezoneOffset) {
+    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/time`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timezone_offset: timezoneOffset }),
+    });
+    if (!response.ok) throw new Error('Failed to set device time');
+    return response.json();
+  }
+
+  async setAllDevicesTime(timezoneOffset) {
+    const response = await fetch(`${API_BASE_URL}/api/devices/time/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timezone_offset: timezoneOffset }),
+    });
+    if (!response.ok) throw new Error('Failed to set time for all devices');
+    return response.json();
+  }
+
+  // ==================== SHIFT MANAGEMENT ====================
+
+  // Shifts CRUD
+  async getShifts(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.is_active !== undefined) params.append('is_active', filters.is_active);
+    if (filters.shift_type) params.append('shift_type', filters.shift_type);
+    
+    const url = params.toString() 
+      ? `${API_BASE_URL}/api/shifts?${params}`
+      : `${API_BASE_URL}/api/shifts`;
+    
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch shifts');
+    return response.json();
+  }
+
+  async getShift(shiftId) {
+    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}`);
+    if (!response.ok) throw new Error('Failed to fetch shift');
+    return response.json();
+  }
+
+  async createShift(shiftData) {
+    const response = await fetch(`${API_BASE_URL}/api/shifts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(shiftData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to create shift');
+    }
+    return response.json();
+  }
+
+  async updateShift(shiftId, shiftData) {
+    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(shiftData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update shift');
+    }
+    return response.json();
+  }
+
+  async deleteShift(shiftId) {
+    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to delete shift');
+    }
+    return response.json();
+  }
+
+  // Shift Timings
+  async getShiftTimings(shiftId) {
+    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}/timings`);
+    if (!response.ok) throw new Error('Failed to fetch shift timings');
+    return response.json();
+  }
+
+  async addShiftTiming(shiftId, timingData) {
+    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}/timings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(timingData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to add timing');
+    }
+    return response.json();
+  }
+
+  async updateShiftTiming(shiftId, timingId, timingData) {
+    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}/timings/${timingId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(timingData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update timing');
+    }
+    return response.json();
+  }
+
+  async deleteShiftTiming(shiftId, timingId) {
+    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}/timings/${timingId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to delete timing');
+    return response.json();
+  }
+
+  async getShiftEmployees(shiftId, activeOnly = true) {
+    const url = `${API_BASE_URL}/api/shifts/${shiftId}/employees?active_only=${activeOnly}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch shift employees');
+    return response.json();
+  }
+
+  // Employee Shift Assignments
+  async getEmployeeShifts(employeeId, activeOnly = false) {
+    const url = `${API_BASE_URL}/api/employees/${employeeId}/shifts?active_only=${activeOnly}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch employee shifts');
+    return response.json();
+  }
+
+  async getEmployeeCurrentShift(employeeId) {
+    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/current-shift`);
+    if (!response.ok) {
+      if (response.status === 404) return null;
+      throw new Error('Failed to fetch current shift');
+    }
+    return response.json();
+  }
+
+  async assignShiftToEmployee(employeeId, assignmentData) {
+    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/shifts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(assignmentData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to assign shift');
+    }
+    return response.json();
+  }
+
+  async updateEmployeeShiftAssignment(employeeId, assignmentId, assignmentData) {
+    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/shifts/${assignmentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(assignmentData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update assignment');
+    }
+    return response.json();
+  }
+
+  async deleteEmployeeShiftAssignment(employeeId, assignmentId) {
+    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/shifts/${assignmentId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to delete assignment');
+    return response.json();
+  }
+
+  async bulkAssignShifts(bulkData) {
+    const response = await fetch(`${API_BASE_URL}/api/employees/bulk-shift-assignment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bulkData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to bulk assign shifts');
+    }
+    return response.json();
+  }
+
+  async getEmployeeSchedule(employeeId, startDate, endDate) {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate
+    });
+    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/schedule?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch employee schedule');
+    return response.json();
+  }
+
+  // Holiday Management
+  async getHolidays(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.start_date) params.append('start_date', filters.start_date);
+    if (filters.end_date) params.append('end_date', filters.end_date);
+    if (filters.holiday_type) params.append('holiday_type', filters.holiday_type);
+    if (filters.country) params.append('country', filters.country);
+    
+    const url = params.toString() 
+      ? `${API_BASE_URL}/api/holidays?${params}`
+      : `${API_BASE_URL}/api/holidays`;
+    
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch holidays');
+    return response.json();
+  }
+
+  async getHolidaysByYear(year, country = 'MA') {
+    const response = await fetch(`${API_BASE_URL}/api/holidays/year/${year}?country=${country}`);
+    if (!response.ok) throw new Error('Failed to fetch holidays');
+    return response.json();
+  }
+
+  async createHoliday(holidayData) {
+    const response = await fetch(`${API_BASE_URL}/api/holidays`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(holidayData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to create holiday');
+    }
+    return response.json();
+  }
+
+  async updateHoliday(holidayId, holidayData) {
+    const response = await fetch(`${API_BASE_URL}/api/holidays/${holidayId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(holidayData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update holiday');
+    }
+    return response.json();
+  }
+
+  async deleteHoliday(holidayId) {
+    const response = await fetch(`${API_BASE_URL}/api/holidays/${holidayId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to delete holiday');
+    return response.json();
+  }
+
+  async loadMoroccoHolidays(year) {
+    const response = await fetch(`${API_BASE_URL}/api/holidays/load-morocco-holidays/${year}`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to load Morocco holidays');
+    }
+    return response.json();
+  }
+
+  async loadAllMoroccoHolidays() {
+    const response = await fetch(`${API_BASE_URL}/api/holidays/load-all-morocco-holidays`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to load Morocco holidays');
+    }
+    return response.json();
+  }
+
+  async checkHoliday(date, country = 'MA') {
+    const response = await fetch(`${API_BASE_URL}/api/holidays/check/${date}?country=${country}`);
+    if (!response.ok) throw new Error('Failed to check holiday');
     return response.json();
   }
 }

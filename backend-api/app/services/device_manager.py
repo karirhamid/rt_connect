@@ -334,6 +334,41 @@ class ZKTecoDeviceManager:
             raise
         finally:
             self.disconnect()
+    
+    def get_time(self) -> dict:
+        """Get device time and timezone offset"""
+        try:
+            self.connect()
+            device_time = self.conn.get_time()
+            logger.info(f"Device time: {device_time}")
+            
+            return {
+                "device_time": device_time.isoformat() if device_time else None,
+                "timezone_offset": 0  # ZKTeco devices don't directly expose timezone, we'll calculate from time difference
+            }
+        except Exception as e:
+            logger.error(f"Error getting device time: {str(e)}")
+            raise
+        finally:
+            self.disconnect()
+    
+    def set_time(self, timestamp=None) -> bool:
+        """Set device time"""
+        try:
+            from datetime import datetime, timezone as tz
+            
+            self.connect()
+            if timestamp is None:
+                timestamp = datetime.now(tz.utc)
+            
+            self.conn.set_time(timestamp)
+            logger.info(f"Device time set to: {timestamp}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting device time: {str(e)}")
+            raise
+        finally:
+            self.disconnect()
 
 
 # Create a singleton instance

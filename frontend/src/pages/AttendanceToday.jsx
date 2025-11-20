@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Calendar, Clock, Users, TrendingUp, AlertCircle, CheckCircle, Loader2, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 
 function AttendanceToday() {
+  const { t } = useTranslation();
   const [attendanceData, setAttendanceData] = useState([]);
   const [stats, setStats] = useState({
     present: 0,
@@ -77,7 +79,7 @@ function AttendanceToday() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Today's Attendance</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('todaysAttendance')}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {new Date().toLocaleDateString('en-US', { 
               weekday: 'long', 
@@ -90,7 +92,7 @@ function AttendanceToday() {
         <div className="flex items-center gap-4">
           {lastSync && (
             <span className="text-sm text-gray-500">
-              Last updated: {formatTime(lastSync)}
+              {t('lastUpdated')}: {formatTime(lastSync)}
             </span>
           )}
           <button
@@ -99,7 +101,7 @@ function AttendanceToday() {
             className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Syncing...' : 'Sync Now'}
+            {syncing ? t('syncing') : t('syncNow')}
           </button>
         </div>
       </div>
@@ -109,7 +111,7 @@ function AttendanceToday() {
         <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Total Employees</p>
+              <p className="text-sm font-medium text-gray-600">{t('totalEmployees')}</p>
               <p className="text-3xl font-bold text-gray-900 mt-2">{stats.totalEmployees}</p>
             </div>
             <Users className="w-12 h-12 text-blue-500 opacity-20" />
@@ -119,10 +121,10 @@ function AttendanceToday() {
         <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Present Today</p>
+              <p className="text-sm font-medium text-gray-600">{t('presentToday')}</p>
               <p className="text-3xl font-bold text-green-600 mt-2">{stats.present}</p>
               <p className="text-xs text-gray-500 mt-1">
-                {stats.totalEmployees > 0 ? ((stats.present / stats.totalEmployees) * 100).toFixed(1) : 0}% attendance
+                {stats.totalEmployees > 0 ? ((stats.present / stats.totalEmployees) * 100).toFixed(1) : 0}% {t('attendanceRate')}
               </p>
             </div>
             <CheckCircle className="w-12 h-12 text-green-500 opacity-20" />
@@ -132,9 +134,9 @@ function AttendanceToday() {
         <div className="bg-white rounded-lg shadow p-6 border-l-4 border-amber-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Late Arrivals</p>
+              <p className="text-sm font-medium text-gray-600">{t('lateArrivals')}</p>
               <p className="text-3xl font-bold text-amber-600 mt-2">{stats.late}</p>
-              <p className="text-xs text-gray-500 mt-1">After 9:00 AM</p>
+              <p className="text-xs text-gray-500 mt-1">{t('afterTime')}</p>
             </div>
             <Clock className="w-12 h-12 text-amber-500 opacity-20" />
           </div>
@@ -143,9 +145,9 @@ function AttendanceToday() {
         <div className="bg-white rounded-lg shadow p-6 border-l-4 border-red-500">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Absent</p>
+              <p className="text-sm font-medium text-gray-600">{t('absent')}</p>
               <p className="text-3xl font-bold text-red-600 mt-2">{stats.absent}</p>
-              <p className="text-xs text-gray-500 mt-1">No check-in yet</p>
+              <p className="text-xs text-gray-500 mt-1">{t('noCheckInYet')}</p>
             </div>
             <AlertCircle className="w-12 h-12 text-red-500 opacity-20" />
           </div>
@@ -155,31 +157,39 @@ function AttendanceToday() {
       {/* Attendance List */}
       <div className="bg-white rounded-lg shadow">
         <div className="p-6 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Recent Check-ins</h2>
+          <h2 className="text-lg font-semibold text-gray-900">{t('recentCheckIns')}</h2>
         </div>
         
         {loading ? (
-          <div className="p-12 text-center">
-            <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary-600" />
-            <p className="text-gray-500 mt-4">Loading attendance data...</p>
+          <div className="p-6 space-y-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-center space-x-4">
+                <div className="h-12 w-12 bg-gray-200 rounded-full animate-pulse"></div>
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div>
+                  <div className="h-3 bg-gray-200 rounded animate-pulse w-1/2"></div>
+                </div>
+                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+              </div>
+            ))}
           </div>
         ) : attendanceData.length === 0 ? (
           <div className="p-12 text-center">
             <Calendar className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <p className="text-gray-500 text-lg">No attendance records yet today</p>
-            <p className="text-gray-400 text-sm mt-2">Check-ins will appear here in real-time</p>
+            <p className="text-gray-500 text-lg">{t('noAttendanceRecords')}</p>
+            <p className="text-gray-400 text-sm mt-2">{t('checkInsAppear')}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Check In</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Check Out</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Device</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('employee')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('checkIn')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('checkOut')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('status')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('device')}</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -204,7 +214,7 @@ function AttendanceToday() {
                         record.status === 'late' ? 'bg-amber-100 text-amber-800' :
                         'bg-red-100 text-red-800'
                       }`}>
-                        {record.status}
+                        {t(record.status)}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

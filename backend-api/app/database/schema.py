@@ -109,6 +109,8 @@ class Employee(Base):
     position = relationship("Position", back_populates="employees")
     source_device = relationship("Device", foreign_keys=[source_device_id])
     attendance = relationship("Attendance", back_populates="employee", cascade="all, delete-orphan")
+    shift_assignments = relationship("EmployeeShift", back_populates="employee", cascade="all, delete-orphan")
+    shift_exceptions = relationship("ShiftException", back_populates="employee", cascade="all, delete-orphan")
 
 
 class Device(Base):

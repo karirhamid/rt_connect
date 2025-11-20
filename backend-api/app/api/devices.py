@@ -63,6 +63,36 @@ async def delete_device(device_id: str, db: Session = Depends(get_db)):
         return {"message": "Device deleted successfully"}
     raise HTTPException(status_code=404, detail="Device not found")
 
+@router.put("/devices/{device_id}")
+async def update_device(device_id: str, device_data: DeviceCreate, db: Session = Depends(get_db)):
+    """Update device information"""
+    device = device_store.get_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    # Update device in memory store
+    updated_device = Device(
+        id=device_id,
+        name=device_data.name,
+        ip=device_data.ip,
+        port=device_data.port,
+        tag=device_data.tag,
+        serial_number=device_data.serial_number
+    )
+    device_store.update(device_id, updated_device)
+    
+    # Update device in database
+    db_device = db.query(DBDevice).filter(DBDevice.id == device_id).first()
+    if db_device:
+        db_device.name = device_data.name
+        db_device.ip = device_data.ip
+        db_device.port = device_data.port
+        db_device.tag = device_data.tag
+        db_device.serial_number = device_data.serial_number
+        db.commit()
+    
+    return {"message": "Device updated successfully", "device": updated_device.dict()}
+
 @router.post("/device/discover")
 async def discover_device(discovery_data: DeviceDiscovery):
     """Discover device by IP and retrieve information"""
@@ -266,3 +296,92 @@ async def trigger_sync(device_id: Optional[str] = None):
     """Trigger manual sync of devices"""
     await sync_service.trigger_sync(device_id)
     return {"message": "Sync triggered successfully"}
+
+
+@router.get("/devices/{device_id}/time")
+async def get_device_time(device_id: str):
+    """Get time settings from a specific device"""
+    device = device_store.get(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    try:
+        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
+        time_info = manager.get_time()
+        return {
+            "device_id": device_id,
+            "device_name": device.name,
+            **time_info
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get device time: {str(e)}")
+
+
+@router.post("/devices/{device_id}/time")
+async def set_device_time(device_id: str, timezone_offset: Optional[int] = None):
+    """Set time on a specific device based on timezone offset (in hours from UTC)"""
+    device = device_store.get(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    try:
+        from datetime import datetime, timezone as tz, timedelta
+        
+        # Calculate target time based on timezone offset
+        if timezone_offset is not None:
+            target_time = datetime.now(tz.utc) + timedelta(hours=timezone_offset)
+        else:
+            target_time = datetime.now(tz.utc)
+        
+        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
+        manager.set_time(target_time)
+        
+        return {
+            "message": "Device time updated successfully",
+            "device_id": device_id,
+            "device_name": device.name,
+            "new_time": target_time.isoformat(),
+            "timezone_offset": timezone_offset
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to set device time: {str(e)}")
+
+
+@router.post("/devices/time/bulk")
+async def set_all_devices_time(timezone_offset: int):
+    """Set time on all devices based on timezone offset (in hours from UTC)"""
+    devices = device_store.get_all()
+    if not devices:
+        raise HTTPException(status_code=404, detail="No devices found")
+    
+    from datetime import datetime, timezone as tz, timedelta
+    
+    # Calculate target time based on timezone offset
+    target_time = datetime.now(tz.utc) + timedelta(hours=timezone_offset)
+    
+    results = []
+    errors = []
+    
+    for device in devices:
+        try:
+            manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
+            manager.set_time(target_time)
+            results.append({
+                "device_id": device.id,
+                "device_name": device.name,
+                "status": "success"
+            })
+        except Exception as e:
+            errors.append({
+                "device_id": device.id,
+                "device_name": device.name,
+                "error": str(e)
+            })
+    
+    return {
+        "message": f"Time update completed for {len(results)} devices",
+        "timezone_offset": timezone_offset,
+        "new_time": target_time.isoformat(),
+        "successful": results,
+        "failed": errors
+    }

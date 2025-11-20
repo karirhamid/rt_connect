@@ -6,6 +6,10 @@ from app.core import settings
 from app.api import device_router, users_router, attendance_router
 from app.api.devices import router as devices_router
 from app.api.organization import router as organization_router
+from app.api.shifts import router as shifts_router
+from app.api.employee_shifts import router as employee_shifts_router
+from app.api.holidays import router as holidays_router
+from app.api.statistics import router as statistics_router
 from app.database import init_db
 from app.services.sync_service import sync_service
 
@@ -69,6 +73,10 @@ app.include_router(device_router, prefix="/api/device", tags=["Device"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendance"])
 app.include_router(organization_router, prefix="/api", tags=["Organization"])
+app.include_router(shifts_router, tags=["Shift Management"])
+app.include_router(employee_shifts_router, tags=["Employee Shifts"])
+app.include_router(holidays_router, tags=["Holiday Calendar"])
+app.include_router(statistics_router, tags=["Statistics"])
 
 
 @app.get("/")

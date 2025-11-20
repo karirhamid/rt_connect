@@ -26,16 +26,21 @@ DEFAULT_POSITION_ID = 1
 class DeviceSyncService:
     """Background service to sync device data to database"""
     
-    def __init__(self, sync_interval: int = 300):
+    def __init__(self, sync_interval: int = 300, max_retries: int = 3, retry_delay: int = 30):
         """
         Initialize sync service
         
         Args:
             sync_interval: Interval in seconds between syncs (default 5 minutes)
+            max_retries: Maximum retry attempts for failed syncs (default 3)
+            retry_delay: Delay in seconds between retries (default 30)
         """
         self.sync_interval = sync_interval
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         self.is_running = False
         self._task = None
+        self.pending_syncs = {}  # Track pending syncs for offline devices
     
     async def start(self):
         """Start the background sync service"""
@@ -85,11 +90,42 @@ class DeviceSyncService:
         
         for device_config in devices:
             try:
-                await self.sync_device(device_config.id)
+                await self.sync_device_with_retry(device_config.id)
             except Exception as e:
-                logger.error(f"Failed to sync device {device_config.name}: {e}")
+                logger.error(f"Failed to sync device {device_config.name} after {self.max_retries} attempts: {e}")
+                # Add to pending queue for retry on next cycle
+                self.pending_syncs[device_config.id] = {
+                    'device_name': device_config.name,
+                    'failed_at': datetime.now(timezone.utc),
+                    'attempts': 0
+                }
         
         logger.info("Completed sync for all devices")
+    
+    async def sync_device_with_retry(self, device_id: str):
+        """
+        Sync a device with retry logic
+        
+        Args:
+            device_id: Device ID to sync
+        """
+        for attempt in range(self.max_retries):
+            try:
+                await self.sync_device(device_id)
+                # Success - remove from pending queue if present
+                if device_id in self.pending_syncs:
+                    device_name = self.pending_syncs[device_id]['device_name']
+                    del self.pending_syncs[device_id]
+                    logger.info(f"✓ Device {device_name} recovered and synced successfully")
+                return
+            except Exception as e:
+                if attempt < self.max_retries - 1:
+                    wait_time = self.retry_delay * (attempt + 1)  # Exponential backoff
+                    logger.warning(f"Sync attempt {attempt + 1}/{self.max_retries} failed for device {device_id}: {e}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"All {self.max_retries} sync attempts failed for device {device_id}: {e}")
+                    raise
     
     async def sync_device(self, device_id: str):
         """
@@ -129,21 +165,23 @@ class DeviceSyncService:
                     db.commit()
                     db.refresh(db_device)
                 
-                # Connect to device
+                # Connect to device with timeout
+                logger.debug(f"Attempting to connect to device {device_config.name} at {device_config.ip}:{device_config.port}")
                 manager = ZKTecoDeviceManager(
                     ip=device_config.ip,
                     port=device_config.port,
-                    timeout=5
+                    timeout=10  # Increased timeout for reliability
                 )
                 
                 info = manager.get_device_info()
                 if not info:
+                    error_msg = f'Failed to connect to device at {device_config.ip}:{device_config.port}'
                     sync_log.status = 'error'
-                    sync_log.error_message = 'Failed to connect to device'
+                    sync_log.error_message = error_msg
                     db.add(sync_log)
                     db.commit()
-                    logger.warning(f"Could not connect to device {device_config.name}")
-                    return
+                    logger.error(f"Could not connect to device {device_config.name}: {error_msg}")
+                    raise ConnectionError(error_msg)
                 
                 records_synced = 0
                 
@@ -176,6 +214,9 @@ class DeviceSyncService:
                         db_employee.group_id = user_data.get('group_id')
                         db_employee.card_number = user_data.get('card')
                         db_employee.synced_at = datetime.now(timezone.utc)
+                        # Update source device if not set or if it's different
+                        if not db_employee.source_device_id or db_employee.source_device_id != device_id:
+                            db_employee.source_device_id = device_id
                     else:
                         # Create new employee with default organization
                         db_employee = DBEmployee(
@@ -213,6 +254,9 @@ class DeviceSyncService:
                     logger.info(f"Incremental sync: {len(attendance_records)} new records out of {original_count} total (since {last_attendance_sync})")
                 else:
                     logger.info(f"Initial sync: Processing all {len(attendance_records)} attendance records")
+                
+                attendance_added = 0
+                attendance_duplicates = 0
                 
                 for record in attendance_records:
                     record_data = record if isinstance(record, dict) else {
@@ -254,9 +298,13 @@ class DeviceSyncService:
                             punch=record_data['punch']
                         )
                         db.add(db_attendance)
-                        records_synced += 1
+                        attendance_added += 1
+                    else:
+                        attendance_duplicates += 1
                 
                 db.commit()
+                
+                logger.info(f"Attendance sync complete: {attendance_added} added, {attendance_duplicates} duplicates skipped")
                 
                 # Update device last sync time
                 db_device.last_sync = datetime.now(timezone.utc)
@@ -266,21 +314,23 @@ class DeviceSyncService:
                 
                 # Log successful sync
                 sync_log.status = 'success'
-                sync_log.records_synced = records_synced
+                sync_log.records_synced = records_synced + attendance_added
                 sync_log.completed_at = datetime.now(timezone.utc)
                 db.add(sync_log)
                 db.commit()
                 
-                logger.info(f"Successfully synced {records_synced} records from {device_config.name}")
+                logger.info(f"\u2713 Successfully synced device {device_config.name}: {records_synced} users, {attendance_added} attendance records")
         
         except Exception as e:
-            logger.error(f"Error syncing device {device_config.name}: {e}")
+            logger.error(f"Error syncing device {device_config.name}: {e}", exc_info=True)
             with get_db_session() as db:
                 sync_log.status = 'error'
                 sync_log.error_message = str(e)
                 sync_log.completed_at = datetime.now(timezone.utc)
                 db.add(sync_log)
                 db.commit()
+            # Re-raise to trigger retry logic
+            raise
     
     def _get_record_timestamp(self, record) -> datetime:
         """Helper method to extract timestamp from attendance record"""

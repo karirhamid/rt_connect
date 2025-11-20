@@ -312,9 +312,29 @@ function AttendanceFilter() {
       {/* Results Table */}
       <div className="bg-white rounded-lg shadow">
         {loading ? (
-          <div className="p-12 text-center">
-            <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary-600" />
-            <p className="text-gray-500 mt-4">Searching attendance records...</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <th key={i} className="px-6 py-3">
+                      <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                  <tr key={i}>
+                    {[1, 2, 3, 4, 5, 6].map((j) => (
+                      <td key={j} className="px-6 py-4">
+                        <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : attendanceData.length === 0 ? (
           <div className="p-12 text-center">

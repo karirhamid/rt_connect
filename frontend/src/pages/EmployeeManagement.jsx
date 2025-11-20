@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Users, Plus, Edit, Trash2, X, Save, Loader2, CheckCircle, AlertCircle, Search, Building2, Briefcase, Mail, Phone, Calendar } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, X, Save, Loader2, CheckCircle, AlertCircle, Search, Building2, Briefcase, Mail, Phone, Calendar, Clock } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
+import Dialog, { Toast } from '../components/Dialog';
 
 function EmployeeManagement() {
+  const { t } = useTranslation();
   const [employees, setEmployees] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -19,6 +22,9 @@ function EmployeeManagement() {
   const [filterDepartment, setFilterDepartment] = useState('');
   const [filterDevice, setFilterDevice] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [employeeShifts, setEmployeeShifts] = useState({});
+  const [dialog, setDialog] = useState({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     loadData();
@@ -63,7 +69,25 @@ function EmployeeManagement() {
       if (filterDevice) params.device_id = filterDevice;
       
       const employeesRes = await api.getEmployees(params);
-      setEmployees(employeesRes.employees || []);
+      const employeesList = employeesRes.employees || [];
+      setEmployees(employeesList);
+      
+      // Load current shifts for all employees
+      const shiftsMap = {};
+      await Promise.all(
+        employeesList.map(async (emp) => {
+          try {
+            const shift = await api.getEmployeeCurrentShift(emp.id);
+            if (shift) {
+              shiftsMap[emp.id] = shift;
+            }
+          } catch (error) {
+            // Employee may not have a shift assigned
+            console.debug(`No shift for employee ${emp.id}`);
+          }
+        })
+      );
+      setEmployeeShifts(shiftsMap);
     } catch (error) {
       console.error('Failed to load employees:', error);
       showNotification('error', 'Failed to load employees: ' + error.message);
@@ -72,7 +96,12 @@ function EmployeeManagement() {
 
   const showNotification = (type, message) => {
     setNotification({ type, message });
-    setTimeout(() => setNotification(null), 3000);
+    setTimeout(() => setNotification(null), 5000);
+  };
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
   const handleAdd = () => {
@@ -117,29 +146,32 @@ function EmployeeManagement() {
     setShowModal(true);
   };
 
-  const handleDelete = async (id) => {
-    if (!deleteConfirm) {
-      const employee = employees.find(e => e.id === id);
-      setDeleteConfirm({ 
-        id, 
-        name: employee?.name || 'this employee',
-        info: `${employee?.user_id || ''} - ${employee?.department_name || 'No department'}`
-      });
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await api.deleteEmployee(id);
-      await loadData();
-      showNotification('success', 'Employee deleted successfully!');
-    } catch (error) {
-      console.error('Failed to delete:', error);
-      showNotification('error', error.message);
-    } finally {
-      setSaving(false);
-      setDeleteConfirm(null);
-    }
+  const handleDelete = (employee) => {
+    setDialog({
+      isOpen: true,
+      type: 'warning',
+      title: 'Delete Employee',
+      message: `Are you sure you want to delete employee "${employee.name}" (${employee.user_id})? This will permanently remove all their data including attendance records. This action cannot be undone.`,
+      confirmText: 'Delete Employee',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        setDialog({ ...dialog, loading: true });
+        try {
+          await api.deleteEmployee(employee.id);
+          setDialog({ isOpen: false });
+          showToast('Employee deleted successfully!', 'success');
+          await loadData();
+        } catch (error) {
+          setDialog({
+            isOpen: true,
+            type: 'error',
+            title: 'Delete Failed',
+            message: `Failed to delete employee: ${error.message}`,
+            onConfirm: null
+          });
+        }
+      }
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -147,50 +179,76 @@ function EmployeeManagement() {
     
     // Validate required fields
     if (!formData.name || !formData.user_id || !formData.device_user_id) {
-      showNotification('error', 'Please fill in all required fields');
+      setDialog({
+        isOpen: true,
+        type: 'warning',
+        title: 'Missing Information',
+        message: 'Please fill in all required fields: Name, User ID, and Device User ID.',
+        onConfirm: null
+      });
       return;
     }
 
     if (!formData.company_id || !formData.department_id) {
-      showNotification('error', 'Please select company and department');
+      setDialog({
+        isOpen: true,
+        type: 'warning',
+        title: 'Missing Information',
+        message: 'Please select both company and department.',
+        onConfirm: null
+      });
       return;
     }
 
-    setSaving(true);
-    try {
-      const employeeData = {
-        ...formData,
-        device_user_id: parseInt(formData.device_user_id),
-        company_id: parseInt(formData.company_id),
-        department_id: parseInt(formData.department_id),
-        position_id: formData.position_id ? parseInt(formData.position_id) : null,
-        privilege: parseInt(formData.privilege || 0),
-        card_number: formData.card_number ? parseInt(formData.card_number) : null,
-        hire_date: formData.hire_date || null,
-        birth_date: formData.birth_date || null
-      };
+    const action = editingEmployee ? 'update' : 'add';
+    const actionText = editingEmployee ? 'Update' : 'Add';
 
-      if (editingEmployee) {
-        await api.updateEmployee(editingEmployee.id, employeeData);
-        showNotification('success', 'Employee updated successfully!');
-      } else {
-        await api.createEmployee(employeeData);
-        showNotification('success', 'Employee created successfully!');
+    setDialog({
+      isOpen: true,
+      type: 'confirm',
+      title: `${actionText} Employee`,
+      message: `Are you sure you want to ${action} employee "${formData.name}" (${formData.user_id})?`,
+      confirmText: `${actionText} Employee`,
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        setDialog({ ...dialog, loading: true });
+        try {
+          const employeeData = {
+            ...formData,
+            device_user_id: parseInt(formData.device_user_id),
+            company_id: parseInt(formData.company_id),
+            department_id: parseInt(formData.department_id),
+            position_id: formData.position_id ? parseInt(formData.position_id) : null,
+            privilege: parseInt(formData.privilege || 0),
+            card_number: formData.card_number ? parseInt(formData.card_number) : null,
+            hire_date: formData.hire_date || null,
+            birth_date: formData.birth_date || null
+          };
+
+          if (editingEmployee) {
+            await api.updateEmployee(editingEmployee.id, employeeData);
+            showToast('Employee updated successfully!', 'success');
+          } else {
+            await api.createEmployee(employeeData);
+            showToast('Employee created successfully!', 'success');
+          }
+          
+          setDialog({ isOpen: false });
+          setShowModal(false);
+          await loadData();
+        } catch (error) {
+          setDialog({
+            isOpen: true,
+            type: 'error',
+            title: 'Operation Failed',
+            message: error.message.includes('sync_warnings') 
+              ? 'Employee saved but some devices may not be synced. Changes will sync on next device connection.'
+              : `Failed to ${action} employee: ${error.message}`,
+            onConfirm: null
+          });
+        }
       }
-      
-      setShowModal(false);
-      await loadData();
-    } catch (error) {
-      console.error('Failed to save:', error);
-      // Check if there are sync warnings in the response
-      if (error.message.includes('sync_warnings')) {
-        showNotification('warning', 'Employee saved but some devices may not be synced. Changes will sync on next device connection.');
-      } else {
-        showNotification('error', error.message);
-      }
-    } finally {
-      setSaving(false);
-    }
+    });
   };
 
   // Filter employees
@@ -235,17 +293,17 @@ function EmployeeManagement() {
       )}
 
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Employee Management</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage employee information and assignments</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t('employeeManagement')}</h1>
+          <p className="text-gray-600 mt-1">{t('manageEmployees')}</p>
         </div>
         <button
           onClick={handleAdd}
           className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
         >
           <Plus className="w-5 h-5" />
-          Add Employee
+          {t('addEmployee')}
         </button>
       </div>
 
@@ -255,20 +313,20 @@ function EmployeeManagement() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               <Search className="w-4 h-4 inline mr-1" />
-              Search
+              {t('search')}
             </label>
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by name, ID, or email..."
+              placeholder={t('searchByNameIdEmail')}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               <Building2 className="w-4 h-4 inline mr-1" />
-              Filter by Company
+              {t('filterByCompany')}
             </label>
             <select
               value={filterCompany}
@@ -278,7 +336,7 @@ function EmployeeManagement() {
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             >
-              <option value="">All Companies</option>
+              <option value="">{t('allCompanies')}</option>
               {companies.map(company => (
                 <option key={company.id} value={company.id}>{company.name}</option>
               ))}
@@ -287,14 +345,14 @@ function EmployeeManagement() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               <Users className="w-4 h-4 inline mr-1" />
-              Filter by Department
+              {t('filterByDepartment')}
             </label>
             <select
               value={filterDepartment}
               onChange={(e) => setFilterDepartment(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             >
-              <option value="">All Departments</option>
+              <option value="">{t('allDepartments')}</option>
               {departments
                 .filter(d => !filterCompany || d.company_id === parseInt(filterCompany))
                 .map(dept => (
@@ -307,14 +365,14 @@ function EmployeeManagement() {
               <svg className="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
               </svg>
-              Filter by Device
+              {t('filterByDevice')}
             </label>
             <select
               value={filterDevice}
               onChange={(e) => setFilterDevice(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             >
-              <option value="">All Devices</option>
+              <option value="">{t('allDevices')}</option>
               {devices.map(device => (
                 <option key={device.id} value={device.id}>{device.name}</option>
               ))}
@@ -325,7 +383,7 @@ function EmployeeManagement() {
         {(searchTerm || filterCompany || filterDepartment || filterDevice) && (
           <div className="mt-3 flex items-center justify-between">
             <span className="text-sm text-gray-600">
-              Showing {filteredEmployees.length} of {employees.length} employees
+              {t('showing')} {filteredEmployees.length} {t('of')} {employees.length} {t('employees').toLowerCase()}
             </span>
             <button
               onClick={() => {
@@ -336,7 +394,7 @@ function EmployeeManagement() {
               }}
               className="text-sm text-primary-600 hover:text-primary-700"
             >
-              Clear Filters
+              {t('clearFilters')}
             </button>
           </div>
         )}
@@ -345,20 +403,42 @@ function EmployeeManagement() {
       {/* Employee Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         {loading ? (
-          <div className="p-12 text-center">
-            <Loader2 className="w-8 h-8 animate-spin mx-auto text-primary-600" />
-            <p className="text-gray-500 mt-4">Loading employees...</p>
+          <div className="overflow-x-auto">
+            <div className="min-w-full">
+              <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
+                <div className="grid grid-cols-8 gap-4">
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                    <div key={i} className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                  ))}
+                </div>
+              </div>
+              <div className="divide-y divide-gray-200">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="px-6 py-4">
+                    <div className="grid grid-cols-8 gap-4">
+                      <div className="col-span-2 h-10 bg-gray-200 rounded animate-pulse"></div>
+                      <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+                      <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+                      <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+                      <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+                      <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+                      <div className="h-10 bg-gray-200 rounded animate-pulse"></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : filteredEmployees.length === 0 ? (
           <div className="p-12 text-center">
             <Users className="w-16 h-16 mx-auto text-gray-300 mb-4" />
             <p className="text-gray-500 text-lg mb-2">
-              {searchTerm || filterCompany || filterDepartment ? 'No employees found' : 'No employees yet'}
+              {searchTerm || filterCompany || filterDepartment ? t('noEmployeesFound') : t('noEmployeesYet')}
             </p>
             <p className="text-gray-400 text-sm">
               {searchTerm || filterCompany || filterDepartment 
-                ? 'Try adjusting your filters' 
-                : 'Click "Add Employee" to create your first employee'}
+                ? t('tryAdjustingFilters') 
+                : t('clickAddEmployee')}
             </p>
           </div>
         ) : (
@@ -367,28 +447,31 @@ function EmployeeManagement() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Employee
+                    {t('employee')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Contact
+                    {t('contact')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Company
+                    {t('company')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Department
+                    {t('department')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Position
+                    {t('position')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Device
+                    {t('currentShift')}
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Role
+                    {t('device')}
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('role')}
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
+                    {t('actions')}
                   </th>
                 </tr>
               </thead>
@@ -438,6 +521,24 @@ function EmployeeManagement() {
                       {employee.position_name || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      {employeeShifts[employee.id] ? (
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: employeeShifts[employee.id].shift.color }}
+                          />
+                          <span className="text-gray-900 font-medium">
+                            {employeeShifts[employee.id].shift.name}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          No Shift
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {employee.source_device_name ? (
                         <span className="text-gray-900 flex items-center">
                           <svg className="w-4 h-4 mr-1 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -468,12 +569,12 @@ function EmployeeManagement() {
                         <Edit className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(employee.id)}
+                        onClick={() => handleDelete(employee)}
                         disabled={saving}
                         className="text-red-600 hover:text-red-900 disabled:opacity-50"
                         title="Delete employee"
                       >
-                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </td>
                   </tr>
@@ -490,7 +591,7 @@ function EmployeeManagement() {
           <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full my-8">
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <h3 className="text-lg font-semibold text-gray-900">
-                {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
+                {editingEmployee ? t('editEmployee') : t('addEmployee')}
               </h3>
               <button
                 onClick={() => setShowModal(false)}
@@ -506,12 +607,12 @@ function EmployeeManagement() {
                 <div>
                   <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
                     <Users className="w-5 h-5 text-primary-600" />
-                    Basic Information
+                    {t('basicInformation')}
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Full Name <span className="text-red-500">*</span>
+                        {t('fullName')} <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -523,7 +624,7 @@ function EmployeeManagement() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        User ID <span className="text-red-500">*</span>
+                        {t('userId')} <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -535,7 +636,7 @@ function EmployeeManagement() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Device User ID <span className="text-red-500">*</span>
+                        {t('deviceUserId')} <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"
@@ -547,7 +648,7 @@ function EmployeeManagement() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Card Number
+                        {t('cardNumber')}
                       </label>
                       <input
                         type="number"
@@ -563,11 +664,11 @@ function EmployeeManagement() {
                 <div>
                   <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
                     <Mail className="w-5 h-5 text-primary-600" />
-                    Contact Information
+                    {t('contactInformation')}
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('email')}</label>
                       <input
                         type="email"
                         value={formData.email || ''}
@@ -576,7 +677,7 @@ function EmployeeManagement() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('phone')}</label>
                       <input
                         type="text"
                         value={formData.phone || ''}
@@ -585,7 +686,7 @@ function EmployeeManagement() {
                       />
                     </div>
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('address')}</label>
                       <textarea
                         value={formData.address || ''}
                         onChange={(e) => setFormData({ ...formData, address: e.target.value })}
@@ -600,12 +701,12 @@ function EmployeeManagement() {
                 <div>
                   <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
                     <Building2 className="w-5 h-5 text-primary-600" />
-                    Organization
+                    {t('organization')}
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Company <span className="text-red-500">*</span>
+                        {t('company')} <span className="text-red-500">*</span>
                       </label>
                       <select
                         value={formData.company_id || ''}
@@ -618,7 +719,7 @@ function EmployeeManagement() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         required
                       >
-                        <option value="">Select Company</option>
+                        <option value="">{t('selectCompany')}</option>
                         {companies.map(company => (
                           <option key={company.id} value={company.id}>{company.name}</option>
                         ))}
@@ -626,7 +727,7 @@ function EmployeeManagement() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Department <span className="text-red-500">*</span>
+                        {t('department')} <span className="text-red-500">*</span>
                       </label>
                       <select
                         value={formData.department_id || ''}
@@ -639,21 +740,21 @@ function EmployeeManagement() {
                         required
                         disabled={!formData.company_id}
                       >
-                        <option value="">Select Department</option>
+                        <option value="">{t('selectDepartment')}</option>
                         {availableDepartments.map(dept => (
                           <option key={dept.id} value={dept.id}>{dept.name}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Position</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('position')}</label>
                       <select
                         value={formData.position_id || ''}
                         onChange={(e) => setFormData({ ...formData, position_id: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         disabled={!formData.department_id}
                       >
-                        <option value="">Select Position</option>
+                        <option value="">{t('selectPosition')}</option>
                         {availablePositions.map(pos => (
                           <option key={pos.id} value={pos.id}>{pos.name}</option>
                         ))}
@@ -666,35 +767,35 @@ function EmployeeManagement() {
                 <div>
                   <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-primary-600" />
-                    Additional Details
+                    {t('additionalDetails')}
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('role')}</label>
                       <select
                         value={formData.privilege || 0}
                         onChange={(e) => setFormData({ ...formData, privilege: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                       >
-                        <option value="0">User</option>
-                        <option value="14">Admin</option>
+                        <option value="0">{t('user')}</option>
+                        <option value="14">{t('admin')}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('gender')}</label>
                       <select
                         value={formData.gender || ''}
                         onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                       >
-                        <option value="">Select Gender</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
+                        <option value="">{t('selectGender')}</option>
+                        <option value="Male">{t('male')}</option>
+                        <option value="Female">{t('female')}</option>
+                        <option value="Other">{t('other')}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Hire Date</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('hireDate')}</label>
                       <input
                         type="date"
                         value={formData.hire_date || ''}
@@ -703,7 +804,7 @@ function EmployeeManagement() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Birth Date</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('birthDate')}</label>
                       <input
                         type="date"
                         value={formData.birth_date || ''}
@@ -722,7 +823,7 @@ function EmployeeManagement() {
                   onClick={() => setShowModal(false)}
                   className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"
@@ -732,12 +833,12 @@ function EmployeeManagement() {
                   {saving ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Saving...
+                      {t('saving')}
                     </>
                   ) : (
                     <>
                       <Save className="w-4 h-4" />
-                      Save Employee
+                      {t('saveEmployee')}
                     </>
                   )}
                 </button>
@@ -747,66 +848,26 @@ function EmployeeManagement() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fadeIn">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full transform transition-all animate-slideUp">
-            <div className="flex items-center gap-4 p-6 bg-red-50 border-b border-red-100 rounded-t-xl">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <AlertCircle className="w-6 h-6 text-red-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold text-gray-900">Delete Employee</h3>
-                <p className="text-sm text-gray-600 mt-0.5">This action cannot be undone</p>
-              </div>
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Dialog Component */}
+      <Dialog
+        isOpen={dialog.isOpen}
+        onClose={() => setDialog({ isOpen: false })}
+        onConfirm={dialog.onConfirm}
+        title={dialog.title}
+        message={dialog.message}
+        type={dialog.type}
+        confirmText={dialog.confirmText}
+        cancelText={dialog.cancelText}
+        loading={dialog.loading}
+      />
 
-            <div className="p-6 space-y-4">
-              <p className="text-gray-700">
-                Are you sure you want to delete employee{' '}
-                <span className="font-semibold text-red-600">{deleteConfirm.name}</span>?
-              </p>
-              <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
-                {deleteConfirm.info}
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setDeleteConfirm(null)}
-                  disabled={saving}
-                  className="flex-1 px-4 py-2.5 border-2 border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(deleteConfirm.id)}
-                  disabled={saving}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
-                >
-                  {saving ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Deleting...
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-4 h-4" />
-                      Delete
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
       )}
     </div>
   );
