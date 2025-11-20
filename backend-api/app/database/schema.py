@@ -95,6 +95,7 @@ class Employee(Base):
     address = Column(Text, nullable=True)
     emergency_contact_name = Column(String(255), nullable=True)
     emergency_contact_phone = Column(String(50), nullable=True)
+    source_device_id = Column(String, ForeignKey("devices.id"), nullable=True)  # Track which device this employee was synced from
     
     # Status and metadata
     is_active = Column(Boolean, default=True)
@@ -106,6 +107,7 @@ class Employee(Base):
     company = relationship("Company", back_populates="employees")
     department = relationship("Department", back_populates="employees")
     position = relationship("Position", back_populates="employees")
+    source_device = relationship("Device", foreign_keys=[source_device_id])
     attendance = relationship("Attendance", back_populates="employee", cascade="all, delete-orphan")
 
 
@@ -121,6 +123,7 @@ class Device(Base):
     serial_number = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     last_sync = Column(DateTime, nullable=True)
+    last_attendance_sync = Column(DateTime, nullable=True)  # Track last attendance sync for incremental updates
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships

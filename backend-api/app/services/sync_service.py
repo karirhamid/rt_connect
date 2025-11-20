@@ -188,16 +188,31 @@ class DeviceSyncService:
                             privilege=user_data['privilege'],
                             password=user_data.get('password'),
                             group_id=user_data.get('group_id'),
-                            card_number=user_data.get('card')
+                            card_number=user_data.get('card'),
+                            source_device_id=device_id  # Track which device this employee came from
                         )
                         db.add(db_employee)
                         records_synced += 1
                 
                 db.commit()
                 
-                # Sync attendance records
+                # Sync attendance records (incremental - only new records)
+                # Get last sync timestamp for this device
+                last_attendance_sync = db_device.last_attendance_sync
+                
                 attendance_records = manager.get_attendance() or []
-                logger.info(f"Syncing {len(attendance_records)} attendance records from {device_config.name}")
+                logger.info(f"Fetched {len(attendance_records)} total attendance records from {device_config.name}")
+                
+                # Filter to only new records if we have a last sync timestamp
+                if last_attendance_sync:
+                    original_count = len(attendance_records)
+                    attendance_records = [
+                        rec for rec in attendance_records
+                        if self._get_record_timestamp(rec) > last_attendance_sync
+                    ]
+                    logger.info(f"Incremental sync: {len(attendance_records)} new records out of {original_count} total (since {last_attendance_sync})")
+                else:
+                    logger.info(f"Initial sync: Processing all {len(attendance_records)} attendance records")
                 
                 for record in attendance_records:
                     record_data = record if isinstance(record, dict) else {
@@ -245,6 +260,8 @@ class DeviceSyncService:
                 
                 # Update device last sync time
                 db_device.last_sync = datetime.now(timezone.utc)
+                # Update last attendance sync to current time for incremental syncs
+                db_device.last_attendance_sync = datetime.now(timezone.utc)
                 db.commit()
                 
                 # Log successful sync
@@ -264,6 +281,18 @@ class DeviceSyncService:
                 sync_log.completed_at = datetime.now(timezone.utc)
                 db.add(sync_log)
                 db.commit()
+    
+    def _get_record_timestamp(self, record) -> datetime:
+        """Helper method to extract timestamp from attendance record"""
+        if isinstance(record, dict):
+            timestamp = record['timestamp']
+        else:
+            timestamp = record.timestamp
+        
+        if isinstance(timestamp, str):
+            timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        
+        return timestamp
     
     async def trigger_sync(self, device_id: Optional[str] = None):
         """

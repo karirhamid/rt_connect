@@ -69,6 +69,37 @@ class ApiService {
     return response.json();
   }
 
+  // Attendance Management
+  async getTodayAttendance() {
+    const response = await fetch(`${API_BASE_URL}/api/attendance/today`);
+    if (!response.ok) throw new Error('Failed to fetch today\'s attendance');
+    return response.json();
+  }
+
+  async getAttendanceFiltered(filters) {
+    const params = new URLSearchParams();
+    if (filters.startDate) params.append('start_date', filters.startDate);
+    if (filters.endDate) params.append('end_date', filters.endDate);
+    if (filters.employeeId) params.append('employee_id', filters.employeeId);
+    if (filters.employeeName) params.append('employee_name', filters.employeeName);
+    if (filters.departmentId) params.append('department_id', filters.departmentId);
+    if (filters.companyId) params.append('company_id', filters.companyId);
+    if (filters.status && filters.status !== 'all') params.append('status', filters.status);
+
+    const response = await fetch(`${API_BASE_URL}/api/attendance/filter?${params}`);
+    if (!response.ok) throw new Error('Failed to filter attendance');
+    return response.json();
+  }
+
+  async triggerSync(deviceId = null) {
+    const url = deviceId 
+      ? `${API_BASE_URL}/api/sync?device_id=${deviceId}`
+      : `${API_BASE_URL}/api/sync`;
+    const response = await fetch(url, { method: 'POST' });
+    if (!response.ok) throw new Error('Failed to trigger sync');
+    return response.json();
+  }
+
   // Organization Management - Companies
   async getCompanies() {
     const response = await fetch(`${API_BASE_URL}/api/companies`);
@@ -183,6 +214,57 @@ class ApiService {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to delete position');
+    return response.json();
+  }
+
+  // Employee Management
+  async getEmployees(filters = {}) {
+    let url = `${API_BASE_URL}/api/employees`;
+    const params = new URLSearchParams();
+    if (filters.company_id) params.append('company_id', filters.company_id);
+    if (filters.department_id) params.append('department_id', filters.department_id);
+    if (filters.device_id) params.append('device_id', filters.device_id);
+    if (params.toString()) url += '?' + params.toString();
+    
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch employees');
+    return response.json();
+  }
+
+  async createEmployee(employeeData) {
+    const response = await fetch(`${API_BASE_URL}/api/employees`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(employeeData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to create employee');
+    }
+    return response.json();
+  }
+
+  async updateEmployee(employeeId, employeeData) {
+    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(employeeData),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update employee');
+    }
+    return response.json();
+  }
+
+  async deleteEmployee(employeeId) {
+    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to delete employee');
+    }
     return response.json();
   }
 }

@@ -1,6 +1,34 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Kufi+Arabic:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  /* Default font */
+  body {
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+
+  /* Arabic font when .font-arabic class is applied to html */
+  .font-arabic body,
+  .font-arabic * {
+    font-family: 'Noto Kufi Arabic', sans-serif !important;
+  }
+
+  /* RTL support */
+  [dir='rtl'] {
+    text-align: right;
+  }
+
+  [dir='rtl'] .rtl\:text-left {
+    text-align: left;
+  }
+
+  [dir='rtl'] .rtl\:text-right {
+    text-align: right;
+  }
+}
 
 @layer utilities {
   @keyframes fadeIn {
@@ -29,5 +57,9 @@
 
   .animate-slideUp {
     animation: slideUp 0.3s ease-out;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-in;
   }
 }

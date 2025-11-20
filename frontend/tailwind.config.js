@@ -20,6 +20,9 @@ export default {
           900: '#1e3a8a',
         },
       },
+      fontFamily: {
+        arabic: ['Noto Kufi Arabic', 'sans-serif'],
+      },
     },
   },
   plugins: [],

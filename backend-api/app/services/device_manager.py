@@ -162,6 +162,65 @@ class ZKTecoDeviceManager:
         finally:
             self.disconnect()
     
+    def update_user(self, uid: int, name: str, privilege: int = 0, password: str = "", 
+                    group_id: str = "", user_id: str = "", card: int = 0) -> bool:
+        """Update an existing user on the device
+        
+        IMPORTANT: This only updates the SPECIFIC user by UID.
+        Other users on the device are NOT affected.
+        
+        Args:
+            uid: Device user ID (unique identifier)
+            name: User name
+            privilege: 0=User, 14=Admin
+            password: Optional password
+            group_id: Optional group ID
+            user_id: String user identifier
+            card: Card number
+        
+        Returns:
+            True if successful, raises exception otherwise
+        """
+        try:
+            self.connect()
+            
+            # Log the operation for audit trail
+            logger.info(f"Updating user UID={uid} on device: name='{name}', privilege={privilege}")
+            
+            # ZKTeco doesn't have a direct update method, so we delete and re-add
+            # SAFETY: Only deletes the SPECIFIC user by UID, not all users
+            user_existed = False
+            try:
+                self.conn.delete_user(uid=uid)
+                user_existed = True
+                logger.debug(f"Deleted existing user UID={uid} before update")
+            except Exception as del_err:
+                # User might not exist on device, which is OK for new users
+                logger.debug(f"User UID={uid} not found on device (creating new): {del_err}")
+                pass
+            
+            # Add the user with updated information
+            # SAFETY: Only adds/updates this specific user
+            self.conn.set_user(
+                uid=uid,
+                name=name,
+                privilege=privilege,
+                password=password,
+                group_id=group_id,
+                user_id=user_id,
+                card=card
+            )
+            
+            action = "updated" if user_existed else "created"
+            logger.info(f"User {name} (UID: {uid}) {action} successfully on device")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating user UID={uid} on device: {str(e)}")
+            raise
+        finally:
+            self.disconnect()
+    
     def delete_user(self, uid: int) -> bool:
         """Delete a user from the device"""
         try:
