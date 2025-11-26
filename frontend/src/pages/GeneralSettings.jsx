@@ -20,7 +20,15 @@ function GeneralSettings() {
   const tabs = [
     { id: 'language', name: 'Language', icon: Globe },
     { id: 'regional', name: 'Time & Timezone', icon: Clock },
+    { id: 'sync', name: 'Sync', icon: RefreshCw },
   ];
+
+  // Sync settings state
+  const [syncEnabled, setSyncEnabled] = useState(true);
+  const [syncInterval, setSyncInterval] = useState(300);
+  const [requireSyncConfirmation, setRequireSyncConfirmation] = useState(true);
+  const [validateTimestamps, setValidateTimestamps] = useState(true);
+  const [loadingSync, setLoadingSync] = useState(false);
 
   useEffect(() => {
     // Apply RTL for Arabic
@@ -39,7 +47,45 @@ function GeneralSettings() {
     if (activeTab === 'regional') {
       loadDevices();
     }
+    if (activeTab === 'sync') {
+      loadGeneralSettings();
+    }
   }, [activeTab]);
+
+  const loadGeneralSettings = async () => {
+    setLoadingSync(true);
+    try {
+      const settings = await api.getGeneralSettings();
+      setSyncEnabled(!!settings.sync_enabled);
+      setSyncInterval(Number(settings.sync_interval_sec || 300));
+      setRequireSyncConfirmation(!!settings.require_sync_confirmation);
+      setValidateTimestamps(settings.validate_timestamps !== undefined ? !!settings.validate_timestamps : true);
+    } catch (err) {
+      console.error('Failed to load settings:', err);
+      showNotification('error', 'Failed to load general settings');
+    } finally {
+      setLoadingSync(false);
+    }
+  };
+
+  const saveGeneralSettings = async () => {
+    setLoadingSync(true);
+    try {
+      const payload = { 
+        sync_enabled: !!syncEnabled, 
+        sync_interval_sec: Math.max(60, Number(syncInterval||300)),
+        require_sync_confirmation: !!requireSyncConfirmation,
+        validate_timestamps: !!validateTimestamps
+      };
+      await api.updateGeneralSettings(payload);
+      showNotification('success', 'Sync settings saved');
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      showNotification('error', 'Failed to save sync settings');
+    } finally {
+      setLoadingSync(false);
+    }
+  };
 
   const loadDevices = async () => {
     setLoadingDevices(true);
@@ -454,6 +500,132 @@ function GeneralSettings() {
                   </div>
                 </div>
               </div>
+          </div>
+        )}
+
+        {activeTab === 'sync' && (
+          <div className="p-6 space-y-6">
+            <div className="mb-2">
+               <h2 className="text-lg font-semibold text-gray-900 mb-1">Sync Settings</h2>
+               <p className="text-sm text-gray-600">Configure how employee data is synced from devices to the database.</p>
+            </div>
+
+             {/* Sync Confirmation Setting */}
+             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+               <div className="flex items-start justify-between">
+                 <div className="flex-1">
+                   <h3 className="text-md font-semibold text-gray-900 mb-2">Sync Confirmation</h3>
+                   <p className="text-sm text-gray-600 mb-2">
+                     Control how employee data is added to the database when syncing from devices.
+                   </p>
+                   <div className="mt-3 space-y-2">
+                     <label className="flex items-start gap-3 cursor-pointer">
+                       <input
+                         type="radio"
+                         name="syncMode"
+                         checked={requireSyncConfirmation}
+                         onChange={() => setRequireSyncConfirmation(true)}
+                         className="mt-1 w-4 h-4 text-primary-600 focus:ring-primary-500"
+                       />
+                       <div className="flex-1">
+                         <div className="font-medium text-gray-900">Confirm before adding data</div>
+                         <div className="text-sm text-gray-600">
+                           Show a preview of fetched employees and require confirmation before adding to database. 
+                           <span className="text-primary-600 font-medium"> Recommended for data control.</span>
+                         </div>
+                       </div>
+                     </label>
+                     <label className="flex items-start gap-3 cursor-pointer">
+                       <input
+                         type="radio"
+                         name="syncMode"
+                         checked={!requireSyncConfirmation}
+                         onChange={() => setRequireSyncConfirmation(false)}
+                         className="mt-1 w-4 h-4 text-primary-600 focus:ring-primary-500"
+                       />
+                       <div className="flex-1">
+                         <div className="font-medium text-gray-900">Add automatically</div>
+                         <div className="text-sm text-gray-600">
+                           Sync and add employee data immediately without confirmation. Faster but less control.
+                         </div>
+                       </div>
+                     </label>
+                   </div>
+                 </div>
+               </div>
+             </div>
+
+             {/* Timestamp Validation Setting */}
+             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+               <div className="flex items-center justify-between">
+                 <div className="flex-1">
+                   <h3 className="text-md font-semibold text-gray-900 mb-2">Timestamp Validation</h3>
+                   <p className="text-sm text-gray-600">
+                     Automatically detect and correct malformed timestamps from devices (e.g., wrong date format, invalid years, day/month swaps).
+                     <span className="text-yellow-600 font-medium"> Helps fix common device date/time issues.</span>
+                   </p>
+                 </div>
+                 <div className="flex items-center gap-2 ml-4">
+                   <label className="text-sm font-medium text-gray-700">Enabled</label>
+                   <button
+                     onClick={() => setValidateTimestamps(prev => !prev)}
+                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${validateTimestamps ? 'bg-primary-600' : 'bg-gray-300'}`}
+                     aria-pressed={validateTimestamps}
+                   >
+                     <span
+                       className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${validateTimestamps ? 'translate-x-6' : 'translate-x-1'}`}
+                     />
+                   </button>
+                 </div>
+               </div>
+             </div>
+
+             {/* Background Auto Sync Setting */}
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+               <h3 className="text-md font-semibold text-gray-900 mb-3">Background Auto Sync</h3>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Auto Sync Every</p>
+                  <div className="mt-2 flex items-center gap-3">
+                    <input
+                      type="number"
+                      min={60}
+                      step={60}
+                      value={syncInterval}
+                      onChange={(e) => setSyncInterval(Number(e.target.value))}
+                      className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                    <span className="text-sm text-gray-600">seconds (min 60)</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">Enabled</label>
+                  <button
+                    onClick={() => setSyncEnabled(prev => !prev)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${syncEnabled ? 'bg-primary-600' : 'bg-gray-300'}`}
+                    aria-pressed={syncEnabled}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${syncEnabled ? 'translate-x-5' : 'translate-x-1'}`}
+                    />
+                  </button>
+                </div>
+              </div>
+              <div className="mt-3 text-xs text-gray-500">
+                When enabled, the server syncs all devices automatically at the specified interval. Disable to rely only on manual sync from the Devices page.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={saveGeneralSettings}
+                disabled={loadingSync}
+                className="flex items-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium disabled:opacity-50"
+              >
+                {loadingSync ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+                {loadingSync ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
           </div>
         )}
       </div>

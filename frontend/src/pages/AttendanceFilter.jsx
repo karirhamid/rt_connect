@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Search, Filter, Download, Calendar, Users, Building2, Loader2, X, FileText } from 'lucide-react';
+import { Search, Filter, Download, Calendar, Users, Building2, Loader2, X, FileText, Edit2, Trash2, Save } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 
 function AttendanceFilter() {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState({
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
@@ -19,6 +21,12 @@ function AttendanceFilter() {
   const [loading, setLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({
+    date: '',
+    time: '',
+    status: 0
+  });
 
   useEffect(() => {
     loadFiltersData();
@@ -101,6 +109,54 @@ function AttendanceFilter() {
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     return `${hours}h ${minutes}m`;
+  };
+
+  const handleEdit = (record) => {
+    setEditingId(record.id);
+    setEditForm({
+      date: record.date,
+      time: record.time,
+      status: record.status
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditForm({ date: '', time: '', status: 0 });
+  };
+
+  const handleSaveEdit = async (recordId) => {
+    try {
+      const timestamp = `${editForm.date}T${editForm.time}`;
+      await api.updateAttendance(recordId, {
+        timestamp: timestamp,
+        status: editForm.status
+      });
+      
+      // Refresh data
+      await handleSearch();
+      setEditingId(null);
+      alert(t('recordUpdated'));
+    } catch (error) {
+      console.error('Failed to update attendance:', error);
+      alert(`${t('updateFailed')}: ` + error.message);
+    }
+  };
+
+  const handleDelete = async (recordId, employeeName) => {
+    if (!confirm(`${t('confirmDelete')} ${employeeName}?`)) {
+      return;
+    }
+    
+    try {
+      await api.deleteAttendance(recordId);
+      // Refresh data
+      await handleSearch();
+      alert(t('recordDeleted'));
+    } catch (error) {
+      console.error('Failed to delete attendance:', error);
+      alert(`${t('deleteFailed')}: ` + error.message);
+    }
   };
 
   return (
@@ -347,21 +403,41 @@ function AttendanceFilter() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Check In</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Check Out</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Work Hours</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Device</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('date')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('time')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('employee')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('type')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('device')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('actions')}</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {attendanceData.map((record, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50">
+                {attendanceData.map((record) => (
+                  <tr key={record.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatDate(record.timestamp)}
+                      {editingId === record.id ? (
+                        <input
+                          type="date"
+                          value={editForm.date}
+                          onChange={(e) => setEditForm({...editForm, date: e.target.value})}
+                          className="px-2 py-1 border border-gray-300 rounded"
+                        />
+                      ) : (
+                        formatDate(record.timestamp)
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {editingId === record.id ? (
+                        <input
+                          type="time"
+                          value={editForm.time}
+                          onChange={(e) => setEditForm({...editForm, time: e.target.value})}
+                          className="px-2 py-1 border border-gray-300 rounded"
+                        />
+                      ) : (
+                        formatTime(record.timestamp)
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{record.employee_name}</div>
@@ -370,26 +446,62 @@ function AttendanceFilter() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {record.department}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {record.check_in ? formatTime(record.check_in) : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {record.check_out ? formatTime(record.check_out) : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {calculateWorkHours(record.check_in, record.check_out)}
-                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        record.status === 'present' ? 'bg-green-100 text-green-800' :
-                        record.status === 'late' ? 'bg-amber-100 text-amber-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {record.status}
-                      </span>
+                      {editingId === record.id ? (
+                        <select
+                          value={editForm.status}
+                          onChange={(e) => setEditForm({...editForm, status: parseInt(e.target.value)})}
+                          className="px-2 py-1 border border-gray-300 rounded text-sm"
+                        >
+                          <option value={0}>{t('checkIn')}</option>
+                          <option value={1}>{t('checkOut')}</option>
+                        </select>
+                      ) : (
+                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          record.punch === 0 ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {record.punch === 0 ? t('checkIn') : t('checkOut')}
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {record.device_name}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      {editingId === record.id ? (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleSaveEdit(record.id)}
+                            className="text-green-600 hover:text-green-900 flex items-center gap-1"
+                          >
+                            <Save className="w-4 h-4" />
+                            {t('save')}
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="text-gray-600 hover:text-gray-900"
+                          >
+                            {t('cancel')}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleEdit(record)}
+                            className="text-blue-600 hover:text-blue-900 flex items-center gap-1"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                            {t('edit')}
+                          </button>
+                          <button
+                            onClick={() => handleDelete(record.id, record.employee_name)}
+                            className="text-red-600 hover:text-red-900 flex items-center gap-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            {t('delete')}
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}

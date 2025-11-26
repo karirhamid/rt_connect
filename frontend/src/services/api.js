@@ -1,6 +1,25 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 class ApiService {
+  // App Settings
+  async getGeneralSettings() {
+    const response = await fetch(`${API_BASE_URL}/api/settings/general`);
+    if (!response.ok) throw new Error('Failed to fetch general settings');
+    return response.json();
+  }
+
+  async updateGeneralSettings(payload) {
+    const response = await fetch(`${API_BASE_URL}/api/settings/general`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || 'Failed to update general settings');
+    }
+    return response.json();
+  }
   // Device Discovery
   async discoverDevice(ip, port = 4370) {
     const response = await fetch(`${API_BASE_URL}/api/device/discover`, {
@@ -80,8 +99,11 @@ class ApiService {
   }
 
   // Attendance Management
-  async getTodayAttendance() {
-    const response = await fetch(`${API_BASE_URL}/api/attendance/today`);
+  async getTodayAttendance(targetDate = null) {
+    const url = targetDate 
+      ? `${API_BASE_URL}/api/attendance/today?target_date=${targetDate}`
+      : `${API_BASE_URL}/api/attendance/today`;
+    const response = await fetch(url);
     if (!response.ok) throw new Error('Failed to fetch today\'s attendance');
     return response.json();
   }
@@ -101,12 +123,107 @@ class ApiService {
     return response.json();
   }
 
+  async updateAttendance(attendanceId, data) {
+    const params = new URLSearchParams();
+    if (data.timestamp) params.append('timestamp', data.timestamp);
+    if (data.status !== undefined) params.append('status', data.status);
+    if (data.punch !== undefined) params.append('punch', data.punch);
+
+    const response = await fetch(`${API_BASE_URL}/api/attendance/${attendanceId}?${params}`, {
+      method: 'PUT',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update attendance');
+    }
+    return response.json();
+  }
+
+  async deleteAttendance(attendanceId) {
+    const response = await fetch(`${API_BASE_URL}/api/attendance/${attendanceId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to delete attendance');
+    }
+    return response.json();
+  }
+
   async triggerSync(deviceId = null) {
     const url = deviceId 
       ? `${API_BASE_URL}/api/sync?device_id=${deviceId}`
       : `${API_BASE_URL}/api/sync`;
     const response = await fetch(url, { method: 'POST' });
     if (!response.ok) throw new Error('Failed to trigger sync');
+    return response.json();
+  }
+
+  // Manual sync operations
+  async syncEmployeesFromDevice(deviceId, previewOnly = false) {
+    const url = `${API_BASE_URL}/api/devices/${deviceId}/sync-employees${previewOnly ? '?preview_only=true' : ''}`;
+    const response = await fetch(url, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to sync employees');
+    }
+    return response.json();
+  }
+
+  async confirmEmployeeSync(deviceId) {
+    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/confirm-sync`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to confirm sync');
+    }
+    return response.json();
+  }
+
+  async getDeviceSettings(deviceId) {
+    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/settings`);
+    if (!response.ok) throw new Error('Failed to fetch device settings');
+    return response.json();
+  }
+
+  async updateDeviceSettings(deviceId, settings) {
+    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(settings),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to update device settings');
+    }
+    return response.json();
+  }
+
+  async syncAttendanceFromDevice(deviceId, days = 30, previewOnly = false) {
+    const url = `${API_BASE_URL}/api/devices/${deviceId}/sync-attendance?days=${days}${previewOnly ? '&preview_only=true' : ''}`;
+    const response = await fetch(url, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to sync attendance');
+    }
+    return response.json();
+  }
+
+  async confirmAttendanceSync(deviceId, days = 30) {
+    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/confirm-attendance-sync?days=${days}`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to confirm attendance sync');
+    }
     return response.json();
   }
 

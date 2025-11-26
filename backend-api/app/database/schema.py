@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, timezone
@@ -67,10 +67,15 @@ class Employee(Base):
     Employee table that maps to ZKTeco device user structure.
     This combines organizational data (company/department/position) 
     with device-specific fields.
+    
+    Uses composite_id as unique identifier: device prefix (last 3 digits of IP) + counter
+    Example: Device 10.185.1.201 -> IDs 20101, 20102, 20103...
+             Device 10.185.1.202 -> IDs 20201, 20202, 20203...
     """
     __tablename__ = "employees"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)  # Legacy ID, kept for compatibility
+    composite_id = Column(BigInteger, unique=True, nullable=True, index=True)  # New composite key (device prefix + counter)
     
     # Organizational fields
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
@@ -79,7 +84,7 @@ class Employee(Base):
     
     # ZKTeco device fields (from device user structure)
     device_user_id = Column(Integer, nullable=False, index=True)  # uid from device
-    user_id = Column(String(100), nullable=False, index=True)  # user_id string from device
+    user_id = Column(String(100), nullable=False, index=True)  # user_id string from device (can be duplicate across devices)
     name = Column(String(255), nullable=False)
     privilege = Column(Integer, default=0)  # 0=User, 14=Admin
     password = Column(String(100), nullable=True)
@@ -123,6 +128,7 @@ class Device(Base):
     port = Column(Integer, nullable=False)
     tag = Column(String, nullable=True)
     serial_number = Column(String, nullable=True)
+    date_format = Column(String, nullable=True, default="YYYY-MM-DD")  # Date format used by device: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY
     is_active = Column(Boolean, default=True)
     last_sync = Column(DateTime, nullable=True)
     last_attendance_sync = Column(DateTime, nullable=True)  # Track last attendance sync for incremental updates
@@ -172,3 +178,15 @@ class SyncLog(Base):
     
     # Relationships
     device = relationship("Device", back_populates="sync_logs")
+
+
+class AppSettings(Base):
+    """Application-wide settings (single row)."""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sync_enabled = Column(Boolean, default=True, nullable=False)
+    sync_interval_sec = Column(Integer, default=300, nullable=False)  # default 5 minutes
+    require_sync_confirmation = Column(Boolean, default=True, nullable=False)  # Require confirmation before syncing data
+    validate_timestamps = Column(Boolean, default=True, nullable=False)  # Validate and correct malformed timestamps
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

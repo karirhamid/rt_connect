@@ -4,10 +4,10 @@ echo Starting ZKTeco Device Management API
 echo ========================================
 echo.
 
-cd /d "%~dp0backend-api"
+cd /d "%~dp0"
 
 REM Check if virtual environment exists
-if not exist "..\venv\Scripts\python.exe" (
+if not exist "venv\Scripts\python.exe" (
     echo Error: Virtual environment not found!
     echo Please run: python -m venv venv
     echo Then run: venv\Scripts\pip install -r backend-api\requirements.txt
@@ -24,4 +24,4 @@ echo ========================================
 echo.
 
 REM Run the FastAPI application
-"..\venv\Scripts\python.exe" main.py
+"venv\Scripts\python.exe" "backend-api\main.py"

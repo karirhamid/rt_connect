@@ -6,44 +6,121 @@ import api from '../services/api';
 function AttendanceToday() {
   const { t } = useTranslation();
   const [attendanceData, setAttendanceData] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [stats, setStats] = useState({
     present: 0,
     late: 0,
     absent: 0,
     totalEmployees: 0
   });
+  const [devices, setDevices] = useState([]);
+  const [deviceData, setDeviceData] = useState({});
   const [loading, setLoading] = useState(true);
   const [lastSync, setLastSync] = useState(null);
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
-    fetchTodayAttendance();
-    // Auto-refresh every 2 minutes
-    const interval = setInterval(fetchTodayAttendance, 120000);
-    return () => clearInterval(interval);
+    loadDevices();
   }, []);
+
+  useEffect(() => {
+    if (devices.length > 0) {
+      fetchTodayAttendance();
+      // Auto-refresh every 2 minutes only if viewing today
+      const isToday = selectedDate === new Date().toISOString().split('T')[0];
+      if (isToday) {
+        const interval = setInterval(fetchTodayAttendance, 120000);
+        return () => clearInterval(interval);
+      }
+    }
+  }, [selectedDate, devices]);
+
+  const loadDevices = async () => {
+    try {
+      const devicesRes = await api.getDevices();
+      setDevices(devicesRes.devices || []);
+    } catch (error) {
+      console.error('Failed to load devices:', error);
+    }
+  };
 
   const fetchTodayAttendance = async () => {
     setLoading(true);
     try {
       const [attendanceRes, statsRes] = await Promise.all([
-        api.getTodayAttendance(),
+        api.getTodayAttendance(selectedDate),
         api.getStatistics()
       ]);
       
-      // Set attendance data
-      setAttendanceData(attendanceRes.attendance || []);
+      // Set attendance data (now returns individual records)
+      const records = attendanceRes.attendance || [];
+      setAttendanceData(records);
       
-      // Calculate stats
-      const attendanceList = attendanceRes.attendance || [];
-      const present = attendanceList.filter(a => a.status === 'present').length;
-      const late = attendanceList.filter(a => a.status === 'late').length;
+      // Group records by device
+      const deviceGroups = {};
+      devices.forEach(device => {
+        deviceGroups[device.id] = {
+          device: device,
+          records: [],
+          employeeRecords: {},
+          stats: { present: 0, late: 0, absent: 0, total: 0 }
+        };
+      });
+      
+      // Distribute records to their respective devices
+      records.forEach(record => {
+        const deviceId = record.device_id;
+        if (deviceGroups[deviceId]) {
+          deviceGroups[deviceId].records.push(record);
+          
+          if (!deviceGroups[deviceId].employeeRecords[record.employee_id]) {
+            deviceGroups[deviceId].employeeRecords[record.employee_id] = {
+              checkIns: [],
+              checkOuts: [],
+              name: record.employee_name
+            };
+          }
+          
+          if (record.punch === 0 || record.type === 'check_in') {
+            deviceGroups[deviceId].employeeRecords[record.employee_id].checkIns.push(record);
+          } else {
+            deviceGroups[deviceId].employeeRecords[record.employee_id].checkOuts.push(record);
+          }
+        }
+      });
+      
+      // Calculate stats for each device
+      Object.values(deviceGroups).forEach(deviceGroup => {
+        let present = 0;
+        let late = 0;
+        Object.values(deviceGroup.employeeRecords).forEach(empRec => {
+          if (empRec.checkIns.length > 0) {
+            const firstCheckIn = empRec.checkIns[0];
+            const checkInTime = new Date(firstCheckIn.timestamp);
+            if (checkInTime.getHours() >= 9 && checkInTime.getMinutes() > 0) {
+              late++;
+            } else {
+              present++;
+            }
+          }
+        });
+        deviceGroup.stats.present = present;
+        deviceGroup.stats.late = late;
+        deviceGroup.stats.total = Object.keys(deviceGroup.employeeRecords).length;
+      });
+      
+      setDeviceData(deviceGroups);
+      
+      // Calculate overall stats
+      const totalPresent = Object.values(deviceGroups).reduce((sum, dg) => sum + dg.stats.present, 0);
+      const totalLate = Object.values(deviceGroups).reduce((sum, dg) => sum + dg.stats.late, 0);
       const totalEmployees = statsRes.total_users || 0;
+      const totalUnique = Object.values(deviceGroups).reduce((sum, dg) => sum + dg.stats.total, 0);
       
       setStats({
-        present: present,
-        late: late,
-        absent: totalEmployees - attendanceList.length,
+        present: totalPresent,
+        late: totalLate,
+        absent: totalEmployees - totalUnique,
         totalEmployees: totalEmployees
       });
       
@@ -80,14 +157,23 @@ function AttendanceToday() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{t('todaysAttendance')}</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {new Date().toLocaleDateString('en-US', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
-            })}
-          </p>
+          <div className="flex items-center gap-4 mt-2">
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              max={new Date().toISOString().split('T')[0]}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+            <p className="text-sm text-gray-500">
+              {new Date(selectedDate).toLocaleDateString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           {lastSync && (
@@ -154,14 +240,10 @@ function AttendanceToday() {
         </div>
       </div>
 
-      {/* Attendance List */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">{t('recentCheckIns')}</h2>
-        </div>
-        
-        {loading ? (
-          <div className="p-6 space-y-4">
+      {/* Attendance by Device */}
+      {loading ? (
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="space-y-4">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="flex items-center space-x-4">
                 <div className="h-12 w-12 bg-gray-200 rounded-full animate-pulse"></div>
@@ -173,60 +255,97 @@ function AttendanceToday() {
               </div>
             ))}
           </div>
-        ) : attendanceData.length === 0 ? (
-          <div className="p-12 text-center">
-            <Calendar className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <p className="text-gray-500 text-lg">{t('noAttendanceRecords')}</p>
-            <p className="text-gray-400 text-sm mt-2">{t('checkInsAppear')}</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('employee')}</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('checkIn')}</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('checkOut')}</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('status')}</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('device')}</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {attendanceData.map((record, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{record.employee_name}</div>
-                      <div className="text-xs text-gray-500">{record.employee_id}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {record.department}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {record.check_in ? formatTime(record.check_in) : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {record.check_out ? formatTime(record.check_out) : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        record.status === 'present' ? 'bg-green-100 text-green-800' :
-                        record.status === 'late' ? 'bg-amber-100 text-amber-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {t(record.status)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {record.device_name}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : attendanceData.length === 0 ? (
+        <div className="bg-white rounded-lg shadow p-12 text-center">
+          <Calendar className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+          <p className="text-gray-500 text-lg">{t('noAttendanceRecords')}</p>
+          <p className="text-gray-400 text-sm mt-2">{t('checkInsAppear')}</p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {devices.map(device => {
+            const deviceInfo = deviceData[device.id];
+            if (!deviceInfo || deviceInfo.records.length === 0) return null;
+            
+            return (
+              <div key={device.id} className="bg-white rounded-lg shadow">
+                {/* Device Header */}
+                <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-primary-50 to-white">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-green-500"></span>
+                        {device.name}
+                      </h2>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {device.ip}:{device.port} • {deviceInfo.stats.total} {t('employees')} • {deviceInfo.records.length} {t('records')}
+                      </p>
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-green-600">{deviceInfo.stats.present}</p>
+                        <p className="text-xs text-gray-500">{t('present')}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-amber-600">{deviceInfo.stats.late}</p>
+                        <p className="text-xs text-gray-500">{t('late')}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Device Records Table */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('time')}</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('employee')}</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('type')}</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('status')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {deviceInfo.records
+                        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                        .map((record, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {record.time || formatTime(record.timestamp)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">{record.employee_name}</div>
+                            <div className="text-xs text-gray-500">ID: {record.user_id_str || record.employee_id}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {record.department || '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                              record.punch === 0 || record.type === 'check_in' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {record.punch === 0 || record.type === 'check_in' ? t('checkIn') : t('checkOut')}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {record.punch === 0 || record.type === 'check_in' ? (
+                              <CheckCircle className="w-5 h-5 text-green-500" />
+                            ) : (
+                              <Clock className="w-5 h-5 text-blue-500" />
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

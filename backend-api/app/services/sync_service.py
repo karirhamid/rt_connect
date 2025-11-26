@@ -200,6 +200,10 @@ class DeviceSyncService:
                         'card': user.card
                     }
                     
+                    # Map device privilege to app privilege: 6?14 (admin), 0?0 (user)
+                    device_privilege = user_data['privilege']
+                    app_privilege = 14 if device_privilege == 6 else 0
+                    
                     # Check if employee exists by device_user_id and user_id
                     db_employee = db.query(DBEmployee).filter(
                         DBEmployee.device_user_id == user_data['uid'],
@@ -209,7 +213,7 @@ class DeviceSyncService:
                     if db_employee:
                         # Update existing employee
                         db_employee.name = user_data['name']
-                        db_employee.privilege = user_data['privilege']
+                        # db_employee.privilege = DON'T UPDATE - preserve manual changes
                         db_employee.password = user_data.get('password')
                         db_employee.group_id = user_data.get('group_id')
                         db_employee.card_number = user_data.get('card')
@@ -226,7 +230,7 @@ class DeviceSyncService:
                             device_user_id=user_data['uid'],
                             user_id=user_data['user_id'],
                             name=user_data['name'],
-                            privilege=user_data['privilege'],
+                            privilege=app_privilege,  # Use mapped privilege
                             password=user_data.get('password'),
                             group_id=user_data.get('group_id'),
                             card_number=user_data.get('card'),
@@ -359,3 +363,4 @@ class DeviceSyncService:
 
 # Global sync service instance
 sync_service = DeviceSyncService(sync_interval=300)  # 5 minutes
+

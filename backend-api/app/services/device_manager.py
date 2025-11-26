@@ -78,6 +78,11 @@ class ZKTecoDeviceManager:
         """Get device information"""
         try:
             self.connect()
+            # Some devices require disabling before modifying users
+            try:
+                self.conn.disable_device()
+            except Exception as e:
+                logger.debug(f"disable_device failed or not required: {e}")
             
             # Get device information
             serial_number = self.conn.get_serialnumber()
@@ -210,6 +215,10 @@ class ZKTecoDeviceManager:
                 user_id=user_id,
                 card=card
             )
+            try:
+                self.conn.enable_device()
+            except Exception as e:
+                logger.debug(f"enable_device failed or not required: {e}")
             
             action = "updated" if user_existed else "created"
             logger.info(f"User {name} (UID: {uid}) {action} successfully on device")

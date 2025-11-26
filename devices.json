@@ -1,0 +1,20 @@
+[
+  {
+    "id": "a47e627d-b573-45b7-928c-714092440ea6",
+    "name": "Pointeuse201_Technique",
+    "ip": "10.185.1.201",
+    "port": 4370,
+    "tag": "Technique",
+    "serial_number": "OMA6050486050500094",
+    "date_format": "YYYY-MM-DD"
+  },
+  {
+    "id": "99ed5dc6-f072-42ff-9e38-59b57f99ae65",
+    "name": "Pointeuse202_RDC",
+    "ip": "10.185.1.202",
+    "port": 4370,
+    "tag": "RDC",
+    "serial_number": "A2NC180560088",
+    "date_format": "DD/MM/YYYY"
+  }
+]

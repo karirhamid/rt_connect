@@ -3,8 +3,23 @@ from sqlalchemy import func, and_
 from datetime import datetime, timedelta
 from app.database import get_db
 from app.database.schema import Device, Employee, Attendance
+from app.services.device_manager import ZKTecoDeviceManager
+import logging
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
+
+
+def check_device_online(ip: str, port: int, timeout: int = 3) -> bool:
+    """Check if a device is online by attempting to connect"""
+    try:
+        manager = ZKTecoDeviceManager(ip=ip, port=port, timeout=timeout)
+        manager.connect()
+        manager.disconnect()
+        return True
+    except Exception as e:
+        logger.debug(f"Device {ip}:{port} is offline: {str(e)}")
+        return False
 
 
 @router.get("/statistics")
@@ -25,9 +40,19 @@ async def get_dashboard_statistics():
             func.date(Attendance.timestamp) == today
         ).count()
         
-        # Active devices (status check - for now, all are offline since we don't have real-time status)
-        # In a real implementation, you'd ping devices or check last sync time
-        active_devices = 0  # TODO: Implement real device status checking
+        # Get all devices and check their status
+        all_devices = db.query(Device).all()
+        active_devices = 0
+        device_statuses = {}
+        
+        # Check each device's connectivity
+        for device in all_devices:
+            is_online = check_device_online(device.ip, device.port)
+            device_statuses[device.id] = is_online
+            if is_online:
+                active_devices += 1
+        
+        logger.info(f"Device status check: {active_devices}/{len(all_devices)} devices online")
         
         # Weekly attendance data (last 7 days)
         weekly_data = []
@@ -59,17 +84,20 @@ async def get_dashboard_statistics():
         devices = db.query(Device).limit(10).all()
         
         for device in devices:
-            # Count users associated with this device
+            # Count users associated with this device (by source_device_id)
             user_count = db.query(Employee).filter(
-                Employee.device_id == device.id
+                Employee.source_device_id == device.id
             ).count()
+            
+            # Get online status from our check above
+            is_online = device_statuses.get(device.id, False)
             
             recent_devices.append({
                 'name': device.name,
                 'serial_number': device.serial_number,
                 'ip': device.ip,
                 'port': device.port,
-                'status': 'offline',  # TODO: Implement real device status checking
+                'status': 'online' if is_online else 'offline',
                 'user_count': user_count
             })
         

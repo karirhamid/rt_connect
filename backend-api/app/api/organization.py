@@ -12,6 +12,11 @@ import logging
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Default organizational IDs
+DEFAULT_COMPANY_ID = 1
+DEFAULT_DEPARTMENT_ID = 1
+DEFAULT_POSITION_ID = 1
+
 # Pydantic models
 class CompanyCreate(BaseModel):
     name: str
@@ -373,7 +378,7 @@ async def delete_position(position_id: int, db: Session = Depends(get_db)):
 # Helper function to sync employee to devices
 def sync_employee_to_devices(employee: Employee, operation: str = "update"):
     """
-    Sync employee changes to all active devices.
+    Sync employee changes to their source device.
     
     SAFETY GUARANTEE: This function ONLY affects the specific employee
     being synced. Other employees on the devices are NOT modified.
@@ -385,50 +390,97 @@ def sync_employee_to_devices(employee: Employee, operation: str = "update"):
     Returns:
         List of error messages (empty if all successful)
     """
-    devices = device_store.get_all()
     sync_errors = []
     
-    if not devices:
-        logger.warning("No devices registered - employee not synced to any device")
-        return ["No devices available to sync"]
+    # Only sync to the employee's source device
+    if not employee.source_device_id:
+        logger.warning(f"Employee '{employee.name}' has no source_device_id - skipping device sync")
+        return ["Employee has no source device assigned"]
     
-    logger.info(f"Starting sync of employee '{employee.name}' (UID={employee.device_user_id}) to {len(devices)} device(s) - Operation: {operation}")
+    device_config = device_store.get_by_id(str(employee.source_device_id))
+    if not device_config:
+        error_msg = f"Source device {employee.source_device_id} not found in device store"
+        logger.error(error_msg)
+        return [error_msg]
     
-    for device_config in devices:
-        try:
-            manager = ZKTecoDeviceManager(
-                ip=device_config.ip,
-                port=device_config.port,
-                timeout=5
-            )
+    logger.info(f"Starting sync of employee '{employee.name}' (UID={employee.device_user_id}) to device '{device_config.name}' - Operation: {operation}")
+    
+    try:
+        manager = ZKTecoDeviceManager(
+            ip=device_config.ip,
+            port=device_config.port,
+            timeout=5
+        )
+        
+        if operation == "delete":
+            # SAFETY: Only deletes THIS specific employee by UID
+            manager.delete_user(uid=employee.device_user_id)
+            logger.info(f"✓ Deleted employee '{employee.name}' (UID={employee.device_user_id}) from device '{device_config.name}'")
+        else:
+            # For create or update
+            # SAFETY: Only updates THIS specific employee by UID
+            # Map application privilege (14=Admin, 0=User) to device privilege.
+            # Some ZKTeco firmwares use 14 for admin, others 6. Detect and use what's present.
+            device_admin_code = 14
+            try:
+                users_on_device = ZKTecoDeviceManager(ip=device_config.ip, port=device_config.port, timeout=5).get_users()
+                if any(u.privilege == 14 for u in users_on_device):
+                    device_admin_code = 14
+                elif any(u.privilege == 6 for u in users_on_device):
+                    device_admin_code = 6
+                else:
+                    device_admin_code = 14  # default
+            except Exception as e:
+                # If detection fails, default to 14
+                logger.warning(f"Could not detect device admin code on {device_config.name}: {e}. Defaulting to 14")
+                device_admin_code = 14
+
+            device_privilege = 0 if employee.privilege == 0 else device_admin_code if employee.privilege == 14 else employee.privilege
             
-            if operation == "delete":
-                # SAFETY: Only deletes THIS specific employee by UID
-                manager.delete_user(uid=employee.device_user_id)
-                logger.info(f"✓ Deleted employee '{employee.name}' (UID={employee.device_user_id}) from device '{device_config.name}'")
-            else:
-                # For create or update
-                # SAFETY: Only updates THIS specific employee by UID
-                manager.update_user(
-                    uid=employee.device_user_id,
-                    name=employee.name,
-                    privilege=employee.privilege,
-                    password=employee.password or "",
-                    group_id=employee.group_id or "",
-                    user_id=employee.user_id,
-                    card=employee.card_number or 0
-                )
-                logger.info(f"✓ Synced employee '{employee.name}' (UID={employee.device_user_id}, privilege={employee.privilege}) to device '{device_config.name}'")
-                
-        except Exception as e:
-            error_msg = f"Failed to sync to device {device_config.name}: {str(e)}"
-            logger.error(f"✗ {error_msg}")
-            sync_errors.append(error_msg)
+            manager.update_user(
+                uid=employee.device_user_id,
+                name=employee.name,
+                privilege=device_privilege,
+                password=employee.password or "",
+                group_id=employee.group_id or "",
+                user_id=employee.user_id,
+                card=employee.card_number or 0
+            )
+            # Verify admin took effect; if not, try alternate admin code (14 vs 6)
+            if employee.privilege == 14:
+                try:
+                    verify_mgr = ZKTecoDeviceManager(ip=device_config.ip, port=device_config.port, timeout=5)
+                    users = verify_mgr.get_users()
+                    me = next((u for u in users if str(u.user_id) == str(employee.user_id) or int(u.uid) == int(employee.device_user_id)), None)
+                    if me and me.privilege not in (6, 14):
+                        for alt_admin in [14, 6, 3, 1]:
+                            if alt_admin == device_privilege:
+                                continue
+                            logger.info(f"Admin not applied with code {device_privilege}; retrying with {alt_admin}")
+                            manager.update_user(
+                                uid=employee.device_user_id,
+                                name=employee.name,
+                                privilege=alt_admin,
+                                password=employee.password or "",
+                                group_id=employee.group_id or "",
+                                user_id=employee.user_id,
+                                card=employee.card_number or 0
+                            )
+                            users2 = verify_mgr.get_users()
+                            me2 = next((u for u in users2 if str(u.user_id) == str(employee.user_id) or int(u.uid) == int(employee.device_user_id)), None)
+                            if me2 and me2.privilege in (6, 14, 3, 1):
+                                break
+                except Exception as e:
+                    logger.warning(f"Admin verification/retry failed: {e}")
+            logger.info(f"✓ Synced employee '{employee.name}' (UID={employee.device_user_id}, app_privilege={employee.privilege}, device_privilege={device_privilege}) to device '{device_config.name}'")
+            
+    except Exception as e:
+        error_msg = f"Failed to sync to device {device_config.name}: {str(e)}"
+        logger.error(f"✗ {error_msg}")
+        sync_errors.append(error_msg)
     
     if not sync_errors:
-        logger.info(f"✓ Successfully synced employee '{employee.name}' to all {len(devices)} device(s)")
-    else:
-        logger.warning(f"Partial sync failure for employee '{employee.name}': {len(sync_errors)}/{len(devices)} devices failed")
+        logger.info(f"✓ Successfully synced employee '{employee.name}' to device '{device_config.name}'")
     
     return sync_errors
 
@@ -441,6 +493,7 @@ class EmployeeCreate(BaseModel):
     company_id: int
     department_id: int
     position_id: Optional[int] = None
+    source_device_id: Optional[str] = None  # Which device this employee belongs to
     privilege: int = 0
     password: Optional[str] = None
     group_id: Optional[str] = None
@@ -459,6 +512,7 @@ class EmployeeUpdate(BaseModel):
     company_id: Optional[int] = None
     department_id: Optional[int] = None
     position_id: Optional[int] = None
+    source_device_id: Optional[str] = None  # Allow updating which device the employee belongs to
     privilege: Optional[int] = None
     password: Optional[str] = None
     group_id: Optional[str] = None
@@ -470,6 +524,124 @@ class EmployeeUpdate(BaseModel):
     gender: Optional[str] = None
     address: Optional[str] = None
 
+class BulkPrivilegeUpdate(BaseModel):
+    employee_ids: List[int]
+    privilege: int  # 0=user, 14=admin
+
+
+@router.post("/employees/sync-from-devices")
+async def sync_employees_from_devices(db: Session = Depends(get_db)):
+    """Force sync all employees from all devices"""
+    try:
+        devices = device_store.get_all()
+        results = {
+            'devices': {},
+            'total_fetched': 0,
+            'total_added': 0,
+            'total_updated': 0,
+            'details': []
+        }
+        
+        for device_config in devices:
+            device_result = {
+                'name': device_config.name,
+                'fetched': 0,
+                'added': 0,
+                'updated': 0,
+                'errors': [],
+                'users': []
+            }
+            
+            try:
+                # Connect to device
+                manager = ZKTecoDeviceManager(
+                    ip=device_config.ip,
+                    port=device_config.port,
+                    timeout=10
+                )
+                
+                info = manager.get_device_info()
+                if not info:
+                    device_result['errors'].append('Failed to connect to device')
+                    results['devices'][device_config.id] = device_result
+                    continue
+                
+                # Get all users from device
+                users = manager.get_users() or []
+                device_result['fetched'] = len(users)
+                results['total_fetched'] += len(users)
+                
+                # Store user details for debugging
+                device_result['users'] = [
+                    {
+                        'uid': user.uid,
+                        'user_id': user.user_id,
+                        'name': user.name
+                    } for user in users[:10]  # Show first 10 for preview
+                ]
+                
+                # Process each user
+                for user in users:
+                    user_data = {
+                        'uid': user.uid,
+                        'user_id': user.user_id,
+                        'name': user.name,
+                        'privilege': user.privilege,
+                        'password': user.password,
+                        'group_id': user.group_id,
+                        'card': user.card
+                    }
+                    
+                    # Check if employee exists by user_id
+                    db_employee = db.query(Employee).filter(
+                        Employee.user_id == user_data['user_id']
+                    ).first()
+                    
+                    if db_employee:
+                        # Update existing employee
+                        db_employee.name = user_data['name']
+                        db_employee.device_user_id = user_data['uid']
+                        db_employee.privilege = user_data['privilege']
+                        db_employee.password = user_data.get('password')
+                        db_employee.group_id = user_data.get('group_id')
+                        db_employee.card_number = user_data.get('card')
+                        db_employee.synced_at = datetime.now(timezone.utc)
+                        device_result['updated'] += 1
+                        results['total_updated'] += 1
+                    else:
+                        # Create new employee
+                        db_employee = Employee(
+                            company_id=DEFAULT_COMPANY_ID,
+                            department_id=DEFAULT_DEPARTMENT_ID,
+                            position_id=DEFAULT_POSITION_ID,
+                            device_user_id=user_data['uid'],
+                            user_id=user_data['user_id'],
+                            name=user_data['name'],
+                            privilege=user_data['privilege'],
+                            password=user_data.get('password'),
+                            group_id=user_data.get('group_id'),
+                            card_number=user_data.get('card'),
+                            source_device_id=device_config.id
+                        )
+                        db.add(db_employee)
+                        device_result['added'] += 1
+                        results['total_added'] += 1
+                
+                db.commit()
+                
+            except Exception as e:
+                error_msg = f"Error syncing device {device_config.name}: {str(e)}"
+                device_result['errors'].append(error_msg)
+                logger.error(error_msg)
+            
+            results['devices'][device_config.id] = device_result
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in employee sync: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/employees")
 async def get_employees(
@@ -478,7 +650,10 @@ async def get_employees(
     device_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Get all employees with optional filters"""
+    """Get all employees with optional filters
+    
+    Returns all employees registered in the system, optionally filtered by device source
+    """
     query = db.query(Employee).join(
         Company, Employee.company_id == Company.id
     ).join(
@@ -494,6 +669,7 @@ async def get_employees(
     if department_id:
         query = query.filter(Employee.department_id == department_id)
     if device_id:
+        # Show employees whose source device matches
         query = query.filter(Employee.source_device_id == device_id)
     
     employees = query.all()
@@ -501,6 +677,7 @@ async def get_employees(
     return {"employees": [
         {
             "id": e.id,
+            "composite_id": e.composite_id,
             "device_user_id": e.device_user_id,
             "user_id": e.user_id,
             "name": e.name,
@@ -546,13 +723,18 @@ async def create_employee(employee: EmployeeCreate, db: Session = Depends(get_db
         if not position:
             raise HTTPException(status_code=404, detail="Position not found")
     
-    # Check if user_id or device_user_id already exists
-    existing = db.query(Employee).filter(
-        (Employee.user_id == employee.user_id) | 
-        (Employee.device_user_id == employee.device_user_id)
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Employee with this user_id or device_user_id already exists")
+    # Check if user_id or device_user_id already exists for the same device
+    # (allows same IDs on different devices due to composite key system)
+    if employee.source_device_id:
+        existing = db.query(Employee).filter(
+            Employee.source_device_id == employee.source_device_id,
+            (
+                (Employee.user_id == employee.user_id) | 
+                (Employee.device_user_id == employee.device_user_id)
+            )
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Employee with this user_id or device_user_id already exists for this device")
     
     db_employee = Employee(
         device_user_id=employee.device_user_id,
@@ -561,6 +743,7 @@ async def create_employee(employee: EmployeeCreate, db: Session = Depends(get_db
         company_id=employee.company_id,
         department_id=employee.department_id,
         position_id=employee.position_id,
+        source_device_id=employee.source_device_id,
         privilege=employee.privilege,
         password=employee.password,
         group_id=employee.group_id,
@@ -605,23 +788,25 @@ async def update_employee(employee_id: int, employee: EmployeeUpdate, db: Sessio
     
     # Update fields if provided
     if employee.device_user_id is not None:
-        # Check for duplicates
+        # Check for duplicates within the same device
         existing = db.query(Employee).filter(
             Employee.device_user_id == employee.device_user_id,
+            Employee.source_device_id == db_employee.source_device_id,
             Employee.id != employee_id
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Device user ID already exists")
+            raise HTTPException(status_code=400, detail="Device user ID already exists for this device")
         db_employee.device_user_id = employee.device_user_id
     
     if employee.user_id is not None:
-        # Check for duplicates
+        # Check for duplicates within the same device (user_id can be duplicate across devices)
         existing = db.query(Employee).filter(
             Employee.user_id == employee.user_id,
+            Employee.source_device_id == db_employee.source_device_id,
             Employee.id != employee_id
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail="User ID already exists")
+            raise HTTPException(status_code=400, detail="User ID already exists for this device")
         db_employee.user_id = employee.user_id
     
     if employee.name is not None:
@@ -632,6 +817,8 @@ async def update_employee(employee_id: int, employee: EmployeeUpdate, db: Sessio
         db_employee.department_id = employee.department_id
     if employee.position_id is not None:
         db_employee.position_id = employee.position_id
+    if employee.source_device_id is not None:
+        db_employee.source_device_id = employee.source_device_id
     if employee.privilege is not None:
         db_employee.privilege = employee.privilege
     if employee.password is not None:
@@ -657,8 +844,17 @@ async def update_employee(employee_id: int, employee: EmployeeUpdate, db: Sessio
     db.commit()
     db.refresh(db_employee)
     
-    # Sync changes to all devices
-    sync_errors = sync_employee_to_devices(db_employee, operation="update")
+    # Sync changes to devices (only if employee has a source device)
+    sync_errors = []
+    try:
+        if db_employee.source_device_id:
+            sync_errors = sync_employee_to_devices(db_employee, operation="update")
+        else:
+            logger.info(f"Employee '{db_employee.name}' has no source device - skipping device sync")
+    except Exception as e:
+        error_msg = f"Device sync failed but database updated: {str(e)}"
+        logger.error(error_msg)
+        sync_errors = [error_msg]
     
     response = {
         "message": "Employee updated successfully",
@@ -670,9 +866,56 @@ async def update_employee(employee_id: int, employee: EmployeeUpdate, db: Sessio
     
     if sync_errors:
         response["sync_warnings"] = sync_errors
-        logger.warning(f"Employee updated in DB but some devices failed: {sync_errors}")
+        logger.warning(f"Employee updated in DB but device sync had issues: {sync_errors}")
     
     return response
+
+@router.post("/employees/bulk/privilege")
+async def bulk_update_privilege(payload: BulkPrivilegeUpdate, db: Session = Depends(get_db)):
+    """Bulk promote/demote employees and sync each to its source device.
+
+    Constraints:
+    - Only privileges 0 (User) and 14 (Admin) are allowed.
+    - Each employee is synced individually; failures reported per employee.
+    """
+    if payload.privilege not in (0, 14):
+        raise HTTPException(status_code=400, detail="Invalid privilege. Use 0 (User) or 14 (Admin).")
+
+    results = {
+        "target_privilege": payload.privilege,
+        "updated": [],
+        "errors": []
+    }
+
+    for emp_id in payload.employee_ids:
+        emp = db.query(Employee).filter(Employee.id == emp_id).first()
+        if not emp:
+            results["errors"].append({"employee_id": emp_id, "error": "Not found"})
+            continue
+        try:
+            old_priv = emp.privilege
+            if old_priv == payload.privilege:
+                results["updated"].append({"employee_id": emp.id, "name": emp.name, "status": "unchanged"})
+                continue
+            emp.privilege = payload.privilege
+            emp.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(emp)
+            sync_errors = []
+            if emp.source_device_id:
+                sync_errors = sync_employee_to_devices(emp, operation="update")
+            results["updated"].append({
+                "employee_id": emp.id,
+                "name": emp.name,
+                "old_privilege": old_priv,
+                "new_privilege": emp.privilege,
+                "sync_errors": sync_errors
+            })
+        except Exception as e:
+            db.rollback()
+            results["errors"].append({"employee_id": emp_id, "error": str(e)})
+
+    return results
 
 
 @router.delete("/employees/{employee_id}")

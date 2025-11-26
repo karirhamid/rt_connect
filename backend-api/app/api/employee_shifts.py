@@ -3,7 +3,7 @@ Employee Shift Assignment API Endpoints
 Handles assigning shifts to employees
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_
 from typing import List, Optional
 from datetime import date, datetime, timedelta
@@ -95,18 +95,20 @@ async def get_employee_shifts(
     return assignments
 
 
-@router.get("/{employee_id}/current-shift", response_model=EmployeeShiftResponse)
+@router.get("/{employee_id}/current-shift", response_model=Optional[EmployeeShiftResponse])
 async def get_employee_current_shift(
     employee_id: int,
     db: Session = Depends(get_db)
 ):
-    """Get employee's current active shift"""
+    """Get employee's current active shift (returns null if no shift assigned)"""
     employee = db.query(Employee).filter(Employee.id == employee_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
     today = date.today()
-    current_shift = db.query(EmployeeShift).filter(
+    current_shift = db.query(EmployeeShift).options(
+        joinedload(EmployeeShift.shift)
+    ).filter(
         EmployeeShift.employee_id == employee_id,
         EmployeeShift.effective_from <= today,
         or_(
@@ -115,9 +117,7 @@ async def get_employee_current_shift(
         )
     ).first()
     
-    if not current_shift:
-        raise HTTPException(status_code=404, detail="No active shift assignment found")
-    
+    # Return None instead of 404 if no shift assigned
     return current_shift
 
 

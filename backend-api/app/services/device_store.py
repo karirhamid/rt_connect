@@ -10,6 +10,7 @@ class Device(BaseModel):
     port: int
     tag: Optional[str] = None
     serial_number: Optional[str] = None
+    date_format: Optional[str] = "YYYY-MM-DD"  # YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY
 
 class DeviceStore:
     def __init__(self, file_path: str = "devices.json"):
@@ -18,16 +19,45 @@ class DeviceStore:
         self.load_devices()
     
     def load_devices(self):
-        """Load devices from JSON file"""
+        """Load devices from JSON file and from database"""
+        # First try JSON file for backwards compatibility
         if os.path.exists(self.file_path):
             try:
                 with open(self.file_path, 'r') as f:
                     data = json.load(f)
                     self.devices = [Device(**d) for d in data]
+                    return
             except Exception as e:
-                print(f"Error loading devices: {e}")
-                self.devices = []
-        else:
+                print(f"Error loading devices from JSON: {e}")
+        
+        # If no JSON file, try loading from database
+        try:
+            from app.database.connection import SessionLocal
+            from app.database.schema import Device as DBDevice
+            
+            db = SessionLocal()
+            db_devices = db.query(DBDevice).filter(DBDevice.is_active == True).all()
+            
+            self.devices = [
+                Device(
+                    id=str(d.id),
+                    name=d.name,
+                    ip=d.ip,
+                    port=d.port,
+                    tag=d.tag,
+                    serial_number=d.serial_number,
+                    date_format=d.date_format if hasattr(d, 'date_format') else "YYYY-MM-DD"
+                )
+                for d in db_devices
+            ]
+            db.close()
+            
+            # Save to JSON for faster loading next time
+            if self.devices:
+                self.save_devices()
+                
+        except Exception as e:
+            print(f"Error loading devices from database: {e}")
             self.devices = []
     
     def save_devices(self):
