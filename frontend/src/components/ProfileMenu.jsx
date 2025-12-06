@@ -7,21 +7,21 @@ function Avatar({ profile }){
   if (profile && profile.pictureUrl) {
     return <img src={profile.pictureUrl} alt="avatar" className={`${size} rounded-full object-cover`} />;
   }
-  // default gender-based icon
-  if (profile && profile.gender === 'female'){
-    return (
-      <div className={`${size} rounded-full bg-pink-200 flex items-center justify-center text-pink-700 font-semibold`}>♀</div>
-    );
-  }
-  if (profile && profile.gender === 'male'){
-    return (
-      <div className={`${size} rounded-full bg-blue-200 flex items-center justify-center text-blue-700 font-semibold`}>♂</div>
-    );
-  }
-  // fallback: initials or generic user icon
-  if (profile && (profile.firstName || profile.lastName)){
-    const initials = `${(profile.firstName||'')[0] || ''}${(profile.lastName||'')[0] || ''}`.toUpperCase();
-    return <div className={`${size} rounded-full bg-gray-200 flex items-center justify-center text-gray-700 font-semibold`}>{initials}</div>;
+  // show initials: first letter of first name + first letter of last name
+  if (profile) {
+    const f = (profile.firstName || '').trim();
+    const l = (profile.lastName || '').trim();
+    let initials = '';
+    if (f && l) {
+      initials = `${f[0]}${l[0]}`.toUpperCase();
+    } else if (f) {
+      initials = f.slice(0,2).toUpperCase();
+    } else if (l) {
+      initials = l.slice(0,2).toUpperCase();
+    }
+    if (initials) {
+      return <div className={`${size} rounded-full bg-gray-200 flex items-center justify-center text-gray-700 font-semibold`}>{initials}</div>;
+    }
   }
   return <div className={`${size} rounded-full bg-gray-200 flex items-center justify-center text-gray-700`}><User className="w-4 h-4" /></div>;
 }
