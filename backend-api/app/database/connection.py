@@ -25,7 +25,11 @@ engine = create_engine(
 )
 
 # Create session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Set expire_on_commit=False so ORM instances keep their loaded attribute
+# values after the session commits. This prevents DetachedInstanceError when
+# code returns model instances from short-lived sessions and accesses simple
+# attributes (like `username`) later in the request handling.
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
 
 
 def init_db():

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     API_TITLE: str = "ZKTeco Device Management API"
-    API_VERSION: str = "1.0.0"
+    API_VERSION: str = "1.0.1"
     
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./zkteco.db"
