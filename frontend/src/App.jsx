@@ -217,6 +217,7 @@ function AppContent() {
               {navigation.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.href);
+                const iconSizeClass = sidebarCollapsed ? 'w-6 h-6' : 'w-5 h-5';
                 return (
                   <Link
                     key={item.name}
@@ -233,7 +234,7 @@ function AppContent() {
                     }`}
                     title={item.name}
                   >
-                    <Icon className="w-5 h-5" />
+                    <Icon className={iconSizeClass} />
                     <span className={`${sidebarCollapsed ? 'sr-only' : ''}`}>{item.name}</span>
                     {sidebarCollapsed && (
                       <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-white border text-sm shadow-md hidden group-hover:block whitespace-nowrap">
@@ -246,34 +247,50 @@ function AppContent() {
 
               {/* Attendance & Settings (classic) reused from previous layout */}
               <div>
-                <button
-                  onClick={() => setAttendanceOpen(!attendanceOpen)}
-                  className="flex items-center justify-between w-full px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <Clock className="w-5 h-5" />
-                    <span>{t('attendance')}</span>
-                  </div>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${attendanceOpen ? 'transform rotate-180' : ''}`} />
-                </button>
-                {attendanceOpen && (
-                  <div className={`mt-2 space-y-1 ${isRTL ? 'mr-4' : 'ml-4'}`}>
-                    {attendanceMenu.map((item) => {
+                {/* If collapsed, show only icons for attendance menu (centered); otherwise show full submenu */}
+                {!sidebarCollapsed ? (
+                  <>
+                    <button
+                      onClick={() => setAttendanceOpen(!attendanceOpen)}
+                      className="flex items-center justify-between w-full px-4 py-3 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Clock className="w-5 h-5" />
+                        <span>{t('attendance')}</span>
+                      </div>
+                      <ChevronDown className={`w-4 h-4 transition-transform ${attendanceOpen ? 'transform rotate-180' : ''}`} />
+                    </button>
+                    {settingsOpen && (
+                      <div className={`mt-2 space-y-1 ${isRTL ? 'mr-4' : 'ml-4'}`}>
+                        {!sidebarCollapsed ? (
+                          settingsMenu.map(item => {
+                            const Icon = item.icon;
+                            const active = isActive(item.href);
+                            return (
+                              <Link key={item.name} to={item.href} onClick={() => setSidebarOpen(false)} className={`flex items-center gap-3 px-4 py-2 rounded-lg text-sm ${isActive(item.href) ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
+                                <Icon className="w-4 h-4" />
+                                {item.name}
+                              </Link>
+                            )
+                          })
+                        ) : (
+                          <div className="mt-2 flex flex-col items-center gap-2">
+                            {settingsMenu.map(item => (
+                              <Link key={item.name} to={item.href} title={item.name} className="p-2 rounded hover:bg-gray-100">
+                                <item.icon className="w-6 h-6" />
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                ) : (
+                  <div className="mt-3 flex flex-col items-center gap-2">
+                    {attendanceMenu.map(item => {
                       const Icon = item.icon;
-                      const active = isActive(item.href);
                       return (
-                        <Link
-                          key={item.name}
-                          to={item.href}
-                          onClick={() => setSidebarOpen(false)}
-                          className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
-                            active
-                              ? 'bg-primary-50 text-primary-700 font-medium'
-                              : 'text-gray-600 hover:bg-gray-50'
-                          }`}
-                        >
-                          <Icon className="w-4 h-4" />
-                          {item.name}
+                        <Link key={item.name} to={item.href} title={item.name} className="p-2 rounded hover:bg-gray-100">
+                          <Icon className="w-6 h-6" />
                         </Link>
                       );
                     })}
