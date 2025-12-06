@@ -131,6 +131,12 @@ function AppContent() {
     };
   }, [theme]);
 
+  // Sidebar collapse state: when collapsed show only icons; hover shows label tooltip.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebarCollapsed') === 'true'; } catch (e) { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? 'true' : 'false'); } catch (e) {} }, [sidebarCollapsed]);
+
   function AuthControls(){
     const navigate = useNavigate();
     const [token, setToken] = useState(api.getAccessToken());
@@ -147,8 +153,8 @@ function AppContent() {
 
   // Adjust main content margin to match sidebar width for the selected style
   const sidebarWidthClass = sidebarStyle === 'modern'
-    ? (isRTL ? 'lg:mr-72' : 'lg:ml-72')
-    : (isRTL ? 'lg:mr-64' : 'lg:ml-64');
+    ? (isRTL ? (sidebarCollapsed ? 'lg:mr-20' : 'lg:mr-72') : (sidebarCollapsed ? 'lg:ml-20' : 'lg:ml-72'))
+    : (isRTL ? (sidebarCollapsed ? 'lg:mr-16' : 'lg:mr-64') : (sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'));
 
   // If not authenticated, only expose the login route and nothing else
   if (!token) {
@@ -176,29 +182,34 @@ function AppContent() {
 
       {/* Sidebar */}
       {sidebarStyle === 'classic' ? (
-        <div className={`fixed inset-y-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out ${
+        <div className={`fixed inset-y-0 z-50 ${sidebarCollapsed ? 'w-16' : 'w-64'} bg-white shadow-lg transform transition-all duration-300 ease-in-out ${
           isRTL 
             ? `right-0 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}` 
             : `left-0 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
         }`}>
           <div className="flex flex-col h-full">
             {/* Logo */}
-            <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200">
+            <div className="flex items-center justify-between h-16 px-4 lg:px-6 border-b border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">
                   Z
                 </div>
-                <div>
-                  <h1 className="text-lg font-bold text-gray-900">ZKTeco Admin</h1>
-                  <p className="text-xs text-gray-500">RIRAKTECH</p>
-                </div>
+                {!sidebarCollapsed && (
+                  <div>
+                    <h1 className="text-lg font-bold text-gray-900">ZKTeco Admin</h1>
+                    <p className="text-xs text-gray-500">RIRAKTECH</p>
+                  </div>
+                )}
               </div>
-              <button
-                onClick={() => setSidebarOpen(false)}
-                className="lg:hidden text-gray-500 hover:text-gray-700"
-              >
-                <X className="w-6 h-6" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSidebarCollapsed(s => !s)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} className="hidden lg:inline-flex px-2 py-1 rounded hover:bg-gray-100 text-sm text-gray-600">{sidebarCollapsed ? '▶' : '◀'}</button>
+                <button
+                  onClick={() => setSidebarOpen(false)}
+                  className="lg:hidden text-gray-500 hover:text-gray-700"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
             </div>
 
             {/* Navigation (classic) */}
@@ -210,15 +221,25 @@ function AppContent() {
                   <Link
                     key={item.name}
                     to={item.href}
-                    onClick={() => setSidebarOpen(false)}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                    onClick={(e) => {
+                      setSidebarOpen(false);
+                      // if collapsed, clicking icon will expand first instead of navigating
+                      if (sidebarCollapsed) { e.preventDefault(); setSidebarCollapsed(false); }
+                    }}
+                    className={`group relative flex items-center ${sidebarCollapsed ? 'justify-center px-0 py-3' : 'gap-3 px-4 py-3'} rounded-lg transition-colors ${
                       active
                         ? 'bg-primary-50 text-primary-700 font-medium'
                         : 'text-gray-700 hover:bg-gray-50'
                     }`}
+                    title={item.name}
                   >
                     <Icon className="w-5 h-5" />
-                    {item.name}
+                    <span className={`${sidebarCollapsed ? 'sr-only' : ''}`}>{item.name}</span>
+                    {sidebarCollapsed && (
+                      <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2 py-1 rounded bg-white border text-sm shadow-md hidden group-hover:block whitespace-nowrap">
+                        {item.name}
+                      </div>
+                    )}
                   </Link>
                 );
               })}
@@ -311,21 +332,26 @@ function AppContent() {
         </div>
       ) : (
         /* Modern sidebar: grouped, compact, left indicator, clearer active state */
-        <div className={`fixed inset-y-0 z-50 w-72 bg-white shadow-lg transform transition-transform duration-300 ease-in-out ${
+        <div className={`fixed inset-y-0 z-50 ${sidebarCollapsed ? 'w-20' : 'w-72'} bg-white shadow-lg transform transition-all duration-300 ease-in-out ${
           isRTL 
             ? `right-0 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}` 
             : `left-0 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
         }`}>
           <div className="flex flex-col h-full">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="px-4 lg:px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-gradient-to-br from-primary-600 to-primary-400 rounded-lg flex items-center justify-center text-white font-bold text-lg">Z</div>
-                <div>
-                  <h1 className="text-lg font-semibold text-gray-900">ZKTeco Admin</h1>
-                  <p className="text-xs text-gray-500">Unified Attendance</p>
-                </div>
+                {!sidebarCollapsed && (
+                  <div>
+                    <h1 className="text-lg font-semibold text-gray-900">ZKTeco Admin</h1>
+                    <p className="text-xs text-gray-500">Unified Attendance</p>
+                  </div>
+                )}
               </div>
-              <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-gray-600"><X className="w-5 h-5"/></button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSidebarCollapsed(s => !s)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} className="hidden lg:inline-flex px-2 py-1 rounded hover:bg-gray-100 text-sm text-gray-600">{sidebarCollapsed ? '▶' : '◀'}</button>
+                <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-gray-400 hover:text-gray-600"><X className="w-5 h-5"/></button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto">
