@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/shifts", tags=["shifts"])
 
 # ==================== SHIFT CRUD ====================
 
-@router.get("", response_model=List[ShiftListResponse])
+@router.get("", response_model=List[ShiftResponse])
 async def list_shifts(
     is_active: Optional[bool] = None,
     shift_type: Optional[str] = None,

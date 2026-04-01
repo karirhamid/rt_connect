@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { Calendar, Plus, Edit2, Trash2, Save, X, Download, Upload } from 'lucide-react';
 import api from '../services/api';
 import Dialog, { Toast } from '../components/Dialog';
+import { useTranslation } from 'react-i18next';
 
 function HolidayCalendar() {
+  const { t } = useTranslation();
   const [holidays, setHolidays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -24,15 +26,15 @@ function HolidayCalendar() {
   });
 
   const holidayTypes = [
-    { value: 'public_holiday', label: 'Public Holiday', color: '#10B981' },
-    { value: 'national_day', label: 'National Day', color: '#3B82F6' },
-    { value: 'aid', label: 'Aid', color: '#F59E0B' },
-    { value: 'custom', label: 'Custom', color: '#8B5CF6' }
+    { value: 'public_holiday', label: t('publicHoliday'), color: '#10B981' },
+    { value: 'national_day', label: t('nationalDay'), color: '#3B82F6' },
+    { value: 'aid', label: t('aidHoliday'), color: '#F59E0B' },
+    { value: 'custom', label: t('customHoliday'), color: '#8B5CF6' }
   ];
 
   const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
+    t('monthJan'), t('monthFeb'), t('monthMar'), t('monthApr'), t('monthMay'), t('monthJun'),
+    t('monthJul'), t('monthAug'), t('monthSep'), t('monthOct'), t('monthNov'), t('monthDec')
   ];
 
   useEffect(() => {
@@ -45,7 +47,7 @@ function HolidayCalendar() {
       const data = await api.getHolidaysByYear(currentYear);
       setHolidays(data);
     } catch (error) {
-      showNotification('error', 'Failed to load holidays: ' + error.message);
+      showNotification('error', t('failedToLoadData') + ': ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -110,24 +112,24 @@ function HolidayCalendar() {
     e.preventDefault();
     
     const action = editingHoliday ? 'update' : 'create';
-    const actionText = editingHoliday ? 'Update' : 'Create';
+    const actionText = editingHoliday ? t('editHoliday') : t('addHoliday');
     
     setDialog({
       isOpen: true,
       type: 'confirm',
-      title: `${actionText} Holiday`,
-      message: `Are you sure you want to ${action} holiday "${formData.name}" on ${formData.date}?`,
-      confirmText: `${actionText} Holiday`,
-      cancelText: 'Cancel',
+      title: actionText,
+      message: `${actionText}: ${formData.name} - ${formData.date}`,
+      confirmText: actionText,
+      cancelText: t('cancel'),
       onConfirm: async () => {
         setDialog({ ...dialog, loading: true });
         try {
           if (editingHoliday) {
             await api.updateHoliday(editingHoliday.id, formData);
-            showToast('Holiday updated successfully!', 'success');
+            showToast(t('holidayUpdated') || 'Holiday updated!', 'success');
           } else {
             await api.createHoliday(formData);
-            showToast('Holiday created successfully!', 'success');
+            showToast(t('holidayCreated') || 'Holiday created!', 'success');
           }
           
           setDialog({ isOpen: false });
@@ -137,8 +139,8 @@ function HolidayCalendar() {
           setDialog({
             isOpen: true,
             type: 'error',
-            title: 'Operation Failed',
-            message: `Failed to ${action} holiday: ${error.message}`,
+            title: t('operationFailed'),
+            message: `${t('operationFailed')}: ${error.message}`,
             onConfirm: null
           });
         }
@@ -150,23 +152,23 @@ function HolidayCalendar() {
     setDialog({
       isOpen: true,
       type: 'warning',
-      title: 'Delete Holiday',
-      message: `Are you sure you want to delete holiday "${holiday.name}" on ${holiday.date}? This action cannot be undone.`,
-      confirmText: 'Delete Holiday',
-      cancelText: 'Cancel',
+      title: t('delete'),
+      message: `${t('confirmDeletion')}: ${holiday.name} - ${holiday.date}. ${t('actionCannotBeUndone')}`,
+      confirmText: t('delete'),
+      cancelText: t('cancel'),
       onConfirm: async () => {
         setDialog({ ...dialog, loading: true });
         try {
           await api.deleteHoliday(holiday.id);
           setDialog({ isOpen: false });
-          showToast('Holiday deleted successfully!', 'success');
+          showToast(t('holidayDeleted') || 'Holiday deleted!', 'success');
           loadHolidays();
         } catch (error) {
           setDialog({
             isOpen: true,
             type: 'error',
-            title: 'Delete Failed',
-            message: `Failed to delete holiday: ${error.message}`,
+            title: t('deleteFailedTitle'),
+            message: `${t('deleteFailedTitle')}: ${error.message}`,
             onConfirm: null
           });
         }
@@ -259,36 +261,35 @@ function HolidayCalendar() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Holiday Calendar</h1>
-          <p className="text-gray-600 mt-1">Morocco public holidays and custom dates</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('holidayCalendar')}</h1>
+          <p className="text-gray-600 mt-1">{t('moroccoHolidays')}</p>
         </div>
         <button
           onClick={() => handleOpenModal()}
           className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
         >
           <Plus className="w-5 h-5" />
-          Add Holiday
+          {t('addHoliday')}
         </button>
       </div>
 
       {/* Year Navigation */}
-      <div className="bg-white rounded-lg shadow-md p-4">
-        <div className="flex items-center justify-between">
+      <div className="bg-white rounded-lg shadow-md p-4 flex items-center justify-between">
           <button
             onClick={() => setCurrentYear(currentYear - 1)}
             className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            ← {currentYear - 1}
+            ← {t('previous')}
           </button>
           <h2 className="text-xl font-bold text-gray-900">{currentYear}</h2>
           <button
             onClick={() => setCurrentYear(currentYear + 1)}
             className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            {currentYear + 1} →
+            {t('next')} →
           </button>
         </div>
-      </div>
+      
 
       {/* Month Navigation */}
       <div className="bg-white rounded-lg shadow-md p-4">
@@ -304,7 +305,7 @@ function HolidayCalendar() {
             }}
             className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            ← Previous
+            ← {t('previousMonth')}
           </button>
           <h3 className="text-lg font-semibold text-gray-900">{months[currentMonth]}</h3>
           <button
@@ -318,7 +319,7 @@ function HolidayCalendar() {
             }}
             className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            Next →
+            {t('nextMonth')} →
           </button>
         </div>
       </div>
@@ -327,7 +328,7 @@ function HolidayCalendar() {
       <div className="bg-white rounded-lg shadow-md overflow-hidden">
         {/* Day Headers */}
         <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+          {[t('sun'), t('mon'), t('tue'), t('wed'), t('thu'), t('fri'), t('sat')].map((day) => (
             <div key={day} className="p-3 text-center text-sm font-semibold text-gray-700">
               {day}
             </div>
@@ -343,7 +344,7 @@ function HolidayCalendar() {
       <div className="bg-white rounded-lg shadow-md overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900">
-            Holidays in {currentYear} ({holidays.length})
+            {t('holidaysInYear', { year: currentYear })} ({holidays.length})
           </h3>
         </div>
         <div className="divide-y divide-gray-200">
@@ -362,7 +363,7 @@ function HolidayCalendar() {
                       day: 'numeric',
                       year: 'numeric'
                     })}
-                    {holiday.is_paid && <span className="ml-2 text-green-600">• Paid</span>}
+                    {holiday.is_paid && <span className="ml-2 text-green-600">• {t('paidHoliday')}</span>}
                   </p>
                 </div>
               </div>
@@ -387,11 +388,11 @@ function HolidayCalendar() {
 
       {/* Add/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
               <h2 className="text-xl font-bold text-gray-900">
-                {editingHoliday ? 'Edit Holiday' : 'Add Holiday'}
+                {editingHoliday ? t('editHoliday') : t('addHoliday')}
               </h2>
               <button onClick={handleCloseModal} className="text-gray-400 hover:text-gray-600">
                 <X className="w-6 h-6" />
@@ -401,7 +402,7 @@ function HolidayCalendar() {
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Holiday Name *
+                  {t('holidayName')} *
                 </label>
                 <input
                   type="text"
@@ -409,13 +410,13 @@ function HolidayCalendar() {
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   required
-                  placeholder="e.g., New Year's Day"
+                  placeholder={t('holidayNamePlaceholder')}
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Date *
+                  {t('date')} *
                 </label>
                 <input
                   type="date"
@@ -428,7 +429,7 @@ function HolidayCalendar() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Holiday Type *
+                  {t('holidayType')} *
                 </label>
                 <select
                   value={formData.holiday_type}
@@ -445,7 +446,7 @@ function HolidayCalendar() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Description
+                  {t('description')}
                 </label>
                 <textarea
                   value={formData.description}
@@ -464,7 +465,7 @@ function HolidayCalendar() {
                   className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
                 />
                 <label htmlFor="is_paid" className="text-sm font-medium text-gray-700">
-                  Paid Holiday
+                  {t('paidHoliday')}
                 </label>
               </div>
 
@@ -474,14 +475,14 @@ function HolidayCalendar() {
                   className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
                 >
                   <Save className="w-5 h-5" />
-                  {editingHoliday ? 'Update Holiday' : 'Add Holiday'}
+                  {editingHoliday ? t('updateHoliday') : t('addHoliday')}
                 </button>
                 <button
                   type="button"
                   onClick={handleCloseModal}
                   className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
                 >
-                  Cancel
+                  {t('cancel')}
                 </button>
               </div>
             </form>

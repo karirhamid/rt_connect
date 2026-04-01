@@ -42,3 +42,19 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Windows executables / installers
+*.exe
+*.msi
+
+# Frontend build output
+frontend/dist/
+frontend/node_modules/
+
+# Backups
+backups/
+Thumbs.db

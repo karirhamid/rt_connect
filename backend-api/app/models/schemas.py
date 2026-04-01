@@ -14,6 +14,7 @@ class DeviceInfo(BaseModel):
     attendance_count: int
     ip_address: str
     mac_address: str
+    date_format: str = "YYYY-MM-DD"  # Detected date format: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY
 
 
 class User(BaseModel):

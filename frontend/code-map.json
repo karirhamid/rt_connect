@@ -1,0 +1,110 @@
+{
+  "generatedAt": "2025-12-06T00:00:00Z",
+  "entry": "src/main.jsx",
+  "files": {
+    "src/main.jsx": {
+      "purpose": "App bootstrap. Imports global styles and i18n and mounts <App/>.",
+      "keyExports": ["default"],
+      "editNotes": "Rarely changed. If changing render root or StrictMode, verify HMR and root element ID."
+    },
+    "src/App.jsx": {
+      "purpose": "Top-level routing and navigation. Defines routes and sidebar menus.",
+      "routes": ["/","/employees","/attendance/today","/attendance/filter","/settings/general","/settings/devices","/settings/company","/settings/shifts","/settings/holidays","/settings/bulk-assign"],
+      "keyDeps": ["react-router-dom","react-i18next"],
+      "editNotes": "Changes here impact navigation and route wiring. Add new pages by importing and adding Routes and navigation entries. Keep translation keys for menu labels in sync with i18n.js."
+    },
+    "src/i18n.js": {
+      "purpose": "Central translations for FR/EN/AR and i18next initialization.",
+      "languages": ["fr","en","ar"],
+      "default": "fr",
+      "editNotes": "Add keys in all language objects simultaneously. Changing fallbackLng or detection affects app language selection. Arabic requires RTL handling in App/GeneralSettings pages."
+    },
+    "src/services/api.js": {
+      "purpose": "Encapsulates all backend interactions (REST fetch calls).",
+      "envVar": "VITE_API_URL",
+      "defaultBase": "http://localhost:8000",
+      "importantEndpoints": [
+        "/api/settings/general",
+        "/api/statistics",
+        "/api/devices",
+        "/api/attendance/filter",
+        "/api/sync",
+        "/api/companies",
+        "/api/employees"
+      ],
+      "editNotes": "If endpoint shapes change, update callers. API methods return JSON or throw; errors often bubble up to UI where Dialogs are used. Avoid changing method names without updating consumers."
+    },
+    "src/components/Dialog.jsx": {
+      "purpose": "Modal dialog and Toast components used across app for confirmations and messages.",
+      "keyProps": ["isOpen","onClose","onConfirm","title","message","type","confirmText","cancelText","loading"],
+      "editNotes": "Used everywhere; keep API stable. Changing text or structure requires updating calls providing confirmText/cancelText."
+    },
+    "src/pages/Dashboard.jsx": {
+      "purpose": "Displays site stats, charts, and recent devices. Fetches /api/statistics and respects sync_enabled via GET /api/settings/general.",
+      "keyFunctions": ["fetchStats"],
+      "autoRefresh": {
+        "controlledBy": "GET /api/settings/general -> sync_enabled",
+        "intervalMs": 300000
+      },
+      "editNotes": "Avoid heavy DOM updates on auto-refresh. Manual refresh button triggers fetchStats(true) which shows loading."
+    },
+    "src/pages/GeneralSettings.jsx": {
+      "purpose": "Manage system-level settings: language, timezone, and sync settings (sync_enabled, sync_interval_sec, require_sync_confirmation, validate_timestamps).",
+      "apiCalls": ["getGeneralSettings","updateGeneralSettings"],
+      "keyState": ["syncEnabled","syncInterval","requireSyncConfirmation","validateTimestamps"],
+      "editNotes": "This is single source for user-controlled global flags. Changing state shape requires updating Dashboard and DeviceSettings where these settings are read."
+    },
+    "src/pages/DeviceSettings.jsx": {
+      "purpose": "CRUD for devices, discovery, and sync operations (employees and attendance). Uses many API methods: getDevices, addDevice, updateDevice, deleteDevice, discoverDevice, syncEmployeesFromDevice, syncAttendanceFromDevice, confirmEmployeeSync, confirmAttendanceSync.",
+      "keyPatterns": ["preview -> confirm flow when require_sync_confirmation=true","loadingStates map keyed by `${id}-employees` or `${id}-logs`"],
+      "editNotes": "Complex page; edits here affect device sync flows. Keep confirmation logic aligned with GeneralSettings.require_sync_confirmation. When adding new sync behavior, modify api.js then DeviceSettings handlers."
+    },
+    "src/pages/CompanyConfig.jsx": {
+      "purpose": "Manage companies, hierarchical departments, and positions. Renders organization hierarchy and table views.",
+      "apiCalls": ["getCompanies","getDepartments","getPositions","createCompany","updateCompany","deleteCompany","createDepartment","updateDepartment","deleteDepartment","createPosition","updatePosition","deletePosition"],
+      "editNotes": "Department hierarchy logic is sensitive; changes to department shape (parent_id/company_id fields) require tree-building updates. Many labels use i18n keys added during prior refactor."
+    },
+    "src/pages/ShiftManagement.jsx": {
+      "purpose": "Manage shifts and their metadata. Uses getShifts, createShift, updateShift, deleteShift (api methods must exist).",
+      "keyState": ["shifts","formData","editingShift"],
+      "editNotes": "Modal flows and dialog confirmations; if adding shift timings storage, coordinate backend API changes and update loadShifts."
+    },
+    "src/pages/HolidayCalendar.jsx": {
+      "purpose": "View and manage holidays per year and month. Uses api.getHolidaysByYear, createHoliday, updateHoliday, deleteHoliday.",
+      "keyState": ["holidays","currentYear","currentMonth","showModal","formData"],
+      "editNotes": "Calendar rendering is UI-heavy; keep date formats consistent with backend (YYYY-MM-DD)."
+    },
+    "src/pages/BulkShiftAssignment.jsx": {
+      "purpose": "Assign shifts to many employees at once. Uses getEmployees, getShifts, createBulkAssignment endpoints.",
+      "keyState": ["selectedEmployees","selectedShift","effectiveFrom","effectiveTo","results"],
+      "editNotes": "Batch operations should have safeguards (preview, dry-run). Backend expects arrays and may return per-row errors; surface them in UI."
+    },
+    "src/pages/EmployeeManagement.jsx": {
+      "purpose": "Full employee CRUD, filters, and per-employee current shift fetches.",
+      "apiCalls": ["getEmployees","createEmployee","updateEmployee","deleteEmployee","getEmployeeCurrentShift"],
+      "editNotes": "Large file. When changing employee fields, update i18n keys and validation in forms. Device sync warnings are surfaced via error payloads."
+    },
+    "src/pages/AttendanceFilter.jsx": {
+      "purpose": "Filter and edit attendance records. Uses getAttendanceFiltered, updateAttendance, deleteAttendance.",
+      "keyState": ["filters","attendanceData","editingId","editForm"],
+      "editNotes": "Export functionality is TODO. Editing records calls updateAttendance with timestamp + status. Ensure date/time formatting matches backend expectations."
+    },
+    "src/pages/AttendanceToday.jsx": {
+      "purpose": "Shows today's attendance (fast view). Uses getTodayAttendance.",
+      "editNotes": "Lightweight; used for quick monitoring."
+    }
+  },
+  "globalNotes": {
+    "i18nBestPractice": "Add new translation keys to all language sections in src/i18n.js. Use t('key') everywhere. Avoid embedding literals.",
+    "apiSafety": "Prefer adding new ApiService methods when endpoints change. Keep method names stable to make refactors easier.",
+    "componentSafety": "Use small commits. If modifying shared components (Dialog, Toast), run the app and exercise flows that use them.",
+    "recommendedWorkflow": [
+      "Create feature branch",
+      "Run dev server: cd frontend; npm install; npm run dev",
+      "Make small, focused changes",
+      "Run lint: npm run lint",
+      "Manually test affected pages and adjacent pages",
+      "Push branch and open a PR"
+    ]
+  }
+}

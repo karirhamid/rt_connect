@@ -190,3 +190,51 @@ class AppSettings(Base):
     require_sync_confirmation = Column(Boolean, default=True, nullable=False)  # Require confirmation before syncing data
     validate_timestamps = Column(Boolean, default=True, nullable=False)  # Validate and correct malformed timestamps
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+# RBAC Models: Users, Roles, Permissions
+from sqlalchemy import Table
+
+user_roles = Table(
+    'user_roles', Base.metadata,
+    Column('user_id', Integer, ForeignKey('users.id', ondelete='CASCADE'), primary_key=True),
+    Column('role_id', Integer, ForeignKey('roles.id', ondelete='CASCADE'), primary_key=True)
+)
+
+role_permissions = Table(
+    'role_permissions', Base.metadata,
+    Column('role_id', Integer, ForeignKey('roles.id', ondelete='CASCADE'), primary_key=True),
+    Column('permission_id', Integer, ForeignKey('permissions.id', ondelete='CASCADE'), primary_key=True)
+)
+
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(80), unique=True, nullable=False, index=True)
+    email = Column(String(120), unique=True, nullable=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    roles = relationship('Role', secondary=user_roles, back_populates='users')
+
+
+class Role(Base):
+    __tablename__ = 'roles'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(80), unique=True, nullable=False)
+    description = Column(Text, nullable=True)
+
+    users = relationship('User', secondary=user_roles, back_populates='roles')
+    permissions = relationship('Permission', secondary=role_permissions, back_populates='roles')
+
+
+class Permission(Base):
+    __tablename__ = 'permissions'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(150), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+
+    roles = relationship('Role', secondary=role_permissions, back_populates='permissions')

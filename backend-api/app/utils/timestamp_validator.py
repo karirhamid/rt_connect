@@ -27,7 +27,7 @@ def validate_and_correct_timestamp(
         Tuple of (corrected_timestamp, error_message)
         If no error, error_message is None
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
     
     # Ensure timestamp is timezone-aware
     if timestamp.tzinfo is None:

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { User, ChevronDown } from 'lucide-react';
 import api from '../services/api';
 
@@ -27,6 +28,7 @@ function Avatar({ profile }){
 }
 
 export default function ProfileMenu(){
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [user, setUser] = useState(null);
@@ -90,8 +92,8 @@ export default function ProfileMenu(){
             </div>
           </div>
           <div className="p-2">
-            <button onClick={()=>{ setProfileOpen(true); setOpen(false); }} className="w-full text-left px-3 py-2 rounded hover:bg-gray-50">Edit profile</button>
-            <button onClick={doLogout} className="w-full text-left px-3 py-2 rounded hover:bg-gray-50 text-red-600">Logout</button>
+            <button onClick={()=>{ setProfileOpen(true); setOpen(false); }} className="w-full text-left px-3 py-2 rounded hover:bg-gray-50">{t('editProfile')}</button>
+            <button onClick={doLogout} className="w-full text-left px-3 py-2 rounded hover:bg-gray-50 text-red-600">{t('logout')}</button>
           </div>
         </div>
       )}
@@ -99,28 +101,28 @@ export default function ProfileMenu(){
       {profileOpen && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-black bg-opacity-40">
           <div className="bg-white rounded-lg w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold mb-4">Complete your profile</h3>
+            <h3 className="text-lg font-semibold mb-4">{t('completeProfile')}</h3>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm text-gray-600">First name</label>
+                <label className="block text-sm text-gray-600">{t('firstName')}</label>
                 <input value={profile.firstName} onChange={(e)=>setProfile({...profile, firstName: e.target.value})} className="w-full border rounded px-3 py-2 mt-1" />
               </div>
               <div>
-                <label className="block text-sm text-gray-600">Last name</label>
+                <label className="block text-sm text-gray-600">{t('lastName')}</label>
                 <input value={profile.lastName} onChange={(e)=>setProfile({...profile, lastName: e.target.value})} className="w-full border rounded px-3 py-2 mt-1" />
               </div>
               <div>
-                <label className="block text-sm text-gray-600">Gender</label>
+                <label className="block text-sm text-gray-600">{t('gender')}</label>
                 <select value={profile.gender} onChange={(e)=>setProfile({...profile, gender: e.target.value})} className="w-full border rounded px-3 py-2 mt-1">
-                  <option value="">Prefer not to say</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
+                  <option value="">{t('preferNotToSay')}</option>
+                  <option value="male">{t('male')}</option>
+                  <option value="female">{t('female')}</option>
                 </select>
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={()=>setProfileOpen(false)} className="px-4 py-2 rounded border">Cancel</button>
-              <button onClick={saveProfile} className="px-4 py-2 rounded bg-primary-600 text-white">Save</button>
+              <button onClick={()=>setProfileOpen(false)} className="px-4 py-2 rounded border">{t('cancel')}</button>
+              <button onClick={saveProfile} className="px-4 py-2 rounded bg-primary-600 text-white">{t('save')}</button>
             </div>
           </div>
         </div>

@@ -8,6 +8,23 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Suppress noisy dev-client logs (e.g. [vite] connecting/connected)
+      (function () {
+        const origLog = console.log.bind(console);
+        const origInfo = console.info.bind(console);
+        const origDebug = console.debug ? console.debug.bind(console) : null;
+        function shouldFilter(args){
+          try{
+            const s = String(args[0] || '');
+            return s.includes('[vite]') || s.includes('Download the React DevTools');
+          }catch(e){return false}
+        }
+        console.log = function(...args){ if(shouldFilter(args)) return; return origLog(...args); };
+        console.info = function(...args){ if(shouldFilter(args)) return; return origInfo(...args); };
+        if(origDebug) console.debug = function(...args){ if(shouldFilter(args)) return; return origDebug(...args); };
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

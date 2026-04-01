@@ -89,23 +89,23 @@ async def debug_compare_device_vs_db(db: Session = Depends(get_db)):
                 manager = ZKTecoDeviceManager(
                     ip=device_config.ip,
                     port=device_config.port,
-                    timeout=10
+                    timeout=15
                 )
                 
-                # Get device info to verify connection
-                info = manager.get_device_info()
-                if not info:
-                    device_info['error'] = 'Failed to connect'
-                else:
-                    # Get all attendance and filter for today
-                    all_records = manager.get_attendance() or []
-                    today_records = [
-                        r for r in all_records
-                        if hasattr(r, 'timestamp') and 
-                        r.timestamp.date() == date.today()
-                    ]
-                    device_info['device_records'] = len(today_records)
-                    device_info['device_status'] = 'Connected'
+                # Use single connection for info + attendance
+                with manager.session() as mgr:
+                    info = mgr.get_device_info()
+                    if not info:
+                        device_info['error'] = 'Failed to connect'
+                    else:
+                        all_records = mgr.get_attendance() or []
+                        today_records = [
+                            r for r in all_records
+                            if hasattr(r, 'timestamp') and 
+                            r.timestamp.date() == date.today()
+                        ]
+                        device_info['device_records'] = len(today_records)
+                        device_info['device_status'] = 'Connected'
                     
             except Exception as e:
                 device_info['error'] = str(e)
@@ -159,21 +159,23 @@ async def force_sync_today(db: Session = Depends(get_db)):
             }
             
             try:
-                # Connect to device
+                # Use single connection for info + attendance
                 manager = ZKTecoDeviceManager(
                     ip=device_config.ip,
                     port=device_config.port,
-                    timeout=10
+                    timeout=15
                 )
                 
-                info = manager.get_device_info()
-                if not info:
-                    device_result['errors'].append('Failed to connect to device')
-                    results['devices'][device_config.id] = device_result
-                    continue
+                with manager.session() as mgr:
+                    info = mgr.get_device_info()
+                    if not info:
+                        device_result['errors'].append('Failed to connect to device')
+                        results['devices'][device_config.id] = device_result
+                        continue
+                    
+                    # Get all attendance records and filter for today
+                    all_records = mgr.get_attendance() or []
                 
-                # Get all attendance records and filter for today
-                all_records = manager.get_attendance() or []
                 today_records = [
                     r for r in all_records
                     if hasattr(r, 'timestamp') and r.timestamp.date() == date.today()

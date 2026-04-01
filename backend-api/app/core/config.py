@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     API_TITLE: str = "ZKTeco Device Management API"
     API_VERSION: str = "1.0.1"
+    # Comma-separated list of allowed origins for CORS (use exact origins when
+    # credentials are required). Example: "http://localhost:5173,http://localhost:5174"
+    ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177,http://localhost:5178,http://localhost:5179"
     
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./zkteco.db"

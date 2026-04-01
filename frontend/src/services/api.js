@@ -1,6 +1,104 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 class ApiService {
+  constructor(){
+    this._accessToken = null;
+    this._refreshToken = null;
+    try{
+      this._accessToken = localStorage.getItem('access_token');
+      // refresh token is stored in an HttpOnly secure cookie in production;
+      // do not store it in localStorage. Keep in-memory reference only.
+      this._refreshToken = null;
+    }catch(e){}
+  }
+
+  setAccessToken(token){
+    this._accessToken = token;
+    try{ if(token) localStorage.setItem('access_token', token); else localStorage.removeItem('access_token'); }catch(e){}
+  }
+
+  setRefreshToken(token){
+    // No-op: refresh tokens are kept in HttpOnly cookies. Keep a transient
+    // in-memory token only if explicitly provided (not persisted).
+    this._refreshToken = token || null;
+  }
+
+  getAccessToken(){ return this._accessToken; }
+
+  async authFetch(path, options = {}){
+    const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+    options.headers = options.headers || {};
+    // Ensure credentials are included so refresh cookie (HttpOnly) is sent.
+    options.credentials = options.credentials || 'include';
+    if (this._accessToken) options.headers['Authorization'] = `Bearer ${this._accessToken}`;
+    let resp = await fetch(url, options);
+    // If access token expired (401), attempt a cookie-based refresh and retry once.
+    // We don't rely on an in-memory `_refreshToken` because refresh tokens
+    // are stored in an HttpOnly cookie on the server; `refreshAccessToken`
+    // will call the refresh endpoint with `credentials: 'include'`.
+    if (resp.status === 401) {
+      try {
+        const refreshed = await this.refreshAccessToken();
+        if (refreshed) {
+          options.headers['Authorization'] = `Bearer ${this._accessToken}`;
+          resp = await fetch(url, options);
+        } else {
+          // Refresh endpoint returned non-ok; clear tokens
+          this.logout();
+        }
+      } catch (e) {
+        this.logout();
+        throw e;
+      }
+    }
+    return resp;
+  }
+
+  async login(username, password){
+    const resp = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ username, password })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(()=>({}));
+      throw new Error(err.detail || 'Login failed');
+    }
+    const data = await resp.json();
+    if (data.access_token) this.setAccessToken(data.access_token);
+    // backend sets the refresh token as an HttpOnly cookie; no localStorage.
+    return data;
+  }
+
+  logout(){ this.setAccessToken(null); this.setRefreshToken(null); }
+
+  async logoutRemote(){
+    try{
+      await fetch(`${API_BASE_URL}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+    }catch(e){}
+    this.setAccessToken(null);
+    this.setRefreshToken(null);
+  }
+
+  async refreshAccessToken(){
+    // Use HttpOnly refresh cookie to obtain a new access token. `credentials: 'include'`
+    // ensures the browser sends the cookie to the refresh endpoint.
+    const resp = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+    if (!resp.ok) {
+      // clear tokens
+      this.logout();
+      return false;
+    }
+    const data = await resp.json();
+    if (data.access_token) this.setAccessToken(data.access_token);
+    // The refresh token cookie is rotated by the server; do not store it client-side.
+    return true;
+  }
+
   // App Settings
   async getGeneralSettings() {
     const response = await fetch(`${API_BASE_URL}/api/settings/general`);
@@ -20,15 +118,30 @@ class ApiService {
     }
     return response.json();
   }
-  // Device Discovery
+  // Device Discovery (with 25s client-side timeout as safety net)
   async discoverDevice(ip, port = 4370) {
-    const response = await fetch(`${API_BASE_URL}/api/device/discover`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ip, port }),
-    });
-    if (!response.ok) throw new Error('Failed to discover device');
-    return response.json();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/device/discover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, port }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to discover device');
+      }
+      return response.json();
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error('Discovery timed out — check the IP address and make sure the device is powered on.');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   // Devices Management
@@ -44,7 +157,10 @@ class ApiService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(deviceData),
     });
-    if (!response.ok) throw new Error('Failed to add device');
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to add device');
+    }
     return response.json();
   }
 
@@ -204,27 +320,51 @@ class ApiService {
     return response.json();
   }
 
-  async syncAttendanceFromDevice(deviceId, days = 30, previewOnly = false) {
-    const url = `${API_BASE_URL}/api/devices/${deviceId}/sync-attendance?days=${days}${previewOnly ? '&preview_only=true' : ''}`;
-    const response = await fetch(url, {
-      method: 'POST',
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to sync attendance');
+  async syncAttendanceFromDevice(deviceId, days = 30, previewOnly = false, { startDate, endDate } = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
+    const params = new URLSearchParams({ days: String(days) });
+    if (previewOnly) params.set('preview_only', 'true');
+    if (startDate) params.set('start_date', startDate);
+    if (endDate) params.set('end_date', endDate);
+    const url = `${API_BASE_URL}/api/devices/${deviceId}/sync-attendance?${params}`;
+    try {
+      const response = await fetch(url, { method: 'POST', signal: controller.signal });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to sync attendance');
+      }
+      return response.json();
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('Attendance sync timed out — the device may be slow. Please try again.');
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    return response.json();
   }
 
-  async confirmAttendanceSync(deviceId, days = 30) {
-    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/confirm-attendance-sync?days=${days}`, {
-      method: 'POST',
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to confirm attendance sync');
+  async confirmAttendanceSync(deviceId, days = 30, { startDate, endDate } = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
+    const params = new URLSearchParams({ days: String(days) });
+    if (startDate) params.set('start_date', startDate);
+    if (endDate) params.set('end_date', endDate);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/confirm-attendance-sync?${params}`, {
+        method: 'POST',
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Failed to confirm attendance sync');
+      }
+      return response.json();
+    } catch (err) {
+      if (err.name === 'AbortError') throw new Error('Attendance sync timed out — the device may be slow. Please try again.');
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    return response.json();
   }
 
   // Organization Management - Companies
@@ -419,6 +559,94 @@ class ApiService {
       body: JSON.stringify({ timezone_offset: timezoneOffset }),
     });
     if (!response.ok) throw new Error('Failed to set time for all devices');
+    return response.json();
+  }
+
+  // -------------------- Users / Roles / Permissions (RBAC) --------------------
+  async listSystemUsers() {
+    const response = await this.authFetch('/api/users/users');
+    if (!response.ok) throw new Error('Failed to fetch users');
+    return response.json();
+  }
+
+  async createSystemUser(userData) {
+    const response = await this.authFetch('/api/users/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create user');
+    }
+    return response.json();
+  }
+
+  async updateSystemUser(userId, userData) {
+    const response = await this.authFetch(`/api/users/users/${userId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update user');
+    }
+    return response.json();
+  }
+
+  async deleteSystemUser(userId) {
+    const response = await this.authFetch(`/api/users/users/${userId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to delete user');
+    }
+    return response.json();
+  }
+
+  async getRoles() {
+    const response = await this.authFetch('/api/users/roles');
+    if (!response.ok) throw new Error('Failed to fetch roles');
+    return response.json();
+  }
+
+  async createRole(roleData) {
+    const response = await this.authFetch('/api/users/roles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(roleData),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create role');
+    }
+    return response.json();
+  }
+
+  async updateRole(roleId, roleData) {
+    const response = await this.authFetch(`/api/users/roles/${roleId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(roleData),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update role');
+    }
+    return response.json();
+  }
+
+  async getPermissions() {
+    const response = await this.authFetch('/api/users/permissions');
+    if (!response.ok) throw new Error('Failed to fetch permissions');
+    return response.json();
+  }
+
+  async getCurrentUser() {
+    const response = await this.authFetch('/api/auth/me');
+    if (!response.ok) throw new Error('Failed to fetch current user');
     return response.json();
   }
 

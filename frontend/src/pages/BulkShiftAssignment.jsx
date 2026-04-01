@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Clock, Users, Save, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 import Dialog, { Toast } from '../components/Dialog';
 
 function BulkShiftAssignment() {
+  const { t } = useTranslation();
   const [employees, setEmployees] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,8 +70,8 @@ function BulkShiftAssignment() {
       setDialog({
         isOpen: true,
         type: 'warning',
-        title: 'No Employees Selected',
-        message: 'Please select at least one employee to assign shifts.',
+        title: t('noEmployeesSelectedTitle'),
+        message: t('noEmployeesSelectedMsg'),
         onConfirm: null
       });
       return;
@@ -79,8 +81,8 @@ function BulkShiftAssignment() {
       setDialog({
         isOpen: true,
         type: 'warning',
-        title: 'No Shift Selected',
-        message: 'Please select a shift to assign to the selected employees.',
+        title: t('noShiftSelectedTitle'),
+        message: t('noShiftSelectedMsg'),
         onConfirm: null
       });
       return;
@@ -91,10 +93,10 @@ function BulkShiftAssignment() {
     setDialog({
       isOpen: true,
       type: 'confirm',
-      title: 'Bulk Assign Shifts',
-      message: `Are you sure you want to assign shift "${selectedShift?.name || 'Unknown'}" to ${selectedEmployees.length} employee(s)?`,
-      confirmText: 'Assign Shifts',
-      cancelText: 'Cancel',
+      title: t('bulkAssignShifts'),
+      message: `${t('bulkAssignShifts')}: ${selectedShift?.name || ''} → ${selectedEmployees.length} ${t('employees').toLowerCase()}`,
+      confirmText: t('bulkAssignShifts'),
+      cancelText: t('cancel'),
       onConfirm: async () => {
         setDialog({ ...dialog, loading: true });
         setResult(null);
@@ -113,7 +115,7 @@ function BulkShiftAssignment() {
           setResult(response);
           
           if (response.successful > 0) {
-            showToast(`Successfully assigned shifts to ${response.successful} employee(s)!`, 'success');
+            showToast(t('assignmentSuccess'), 'success');
             setSelectedEmployees([]);
             setFormData({
               shift_id: '',
@@ -124,14 +126,14 @@ function BulkShiftAssignment() {
           }
           
           if (response.failed > 0) {
-            showToast(`${response.failed} assignment(s) failed. Check the results below.`, 'warning');
+            showToast(t('assignmentFailed'), 'warning');
           }
         } catch (error) {
           setDialog({
             isOpen: true,
             type: 'error',
-            title: 'Assignment Failed',
-            message: `Failed to assign shifts: ${error.message}`,
+            title: t('assignmentFailed'),
+            message: `${t('assignmentFailed')}: ${error.message}`,
             onConfirm: null
           });
           setResult({
@@ -173,8 +175,8 @@ function BulkShiftAssignment() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Bulk Shift Assignment</h1>
-        <p className="text-gray-600 mt-1">Assign the same shift to multiple employees</p>
+        <h1 className="text-2xl font-bold text-gray-900">{t('bulkShiftAssignment')}</h1>
+        <p className="text-gray-600 mt-1">{t('bulkAssignShifts')}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -184,13 +186,13 @@ function BulkShiftAssignment() {
             <div className="p-6 border-b border-gray-200">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-gray-900">
-                  Select Employees ({selectedEmployees.length} selected)
+                  {t('selectEmployees')} ({selectedEmployees.length} {t('employeesSelected')})
                 </h2>
                 <button
                   onClick={handleSelectAll}
                   className="text-sm text-primary-600 hover:text-primary-700 font-medium"
                 >
-                  {selectedEmployees.length === filteredEmployees.length ? 'Deselect All' : 'Select All'}
+                  {selectedEmployees.length === filteredEmployees.length ? t('deselectAll') : t('selectAll')}
                 </button>
               </div>
 
@@ -199,17 +201,17 @@ function BulkShiftAssignment() {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search employees..."
+                placeholder={t('searchEmployees')}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
               />
             </div>
 
             {/* Employee List */}
-            <div className="max-h-[500px] overflow-y-auto">
+            <div className="max-h-[60vh] overflow-y-auto">
               {filteredEmployees.length === 0 ? (
                 <div className="p-12 text-center">
                   <Users className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-                  <p className="text-gray-500">No employees found</p>
+                  <p className="text-gray-500">{t('noEmployeesFound')}</p>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-200">
@@ -252,12 +254,12 @@ function BulkShiftAssignment() {
         <div>
           <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-md p-6 space-y-6 sticky top-6">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Shift Details</h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">{t('shiftDetails')}</h2>
 
               {/* Shift Selection */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Shift *
+                  {t('selectShift')} *
                 </label>
                 <select
                   value={formData.shift_id}
@@ -265,7 +267,7 @@ function BulkShiftAssignment() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   required
                 >
-                  <option value="">Choose shift...</option>
+                  <option value="">{t('chooseShift')}</option>
                   {shifts.map(shift => (
                     <option key={shift.id} value={shift.id}>
                       {shift.name}
@@ -291,7 +293,7 @@ function BulkShiftAssignment() {
               {/* Effective From */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Effective From *
+                  {t('effectiveFrom')} *
                 </label>
                 <input
                   type="date"
@@ -305,7 +307,7 @@ function BulkShiftAssignment() {
               {/* Effective To */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Effective To (Optional)
+                  {t('effectiveTo')}
                 </label>
                 <input
                   type="date"
@@ -313,20 +315,20 @@ function BulkShiftAssignment() {
                   onChange={(e) => setFormData({ ...formData, effective_to: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
-                <p className="text-xs text-gray-500 mt-1">Leave empty for ongoing assignment</p>
+                <p className="text-xs text-gray-500 mt-1">{t('leaveEmpty')}</p>
               </div>
 
               {/* Notes */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes
+                  {t('notes')}
                 </label>
                 <textarea
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   rows="3"
-                  placeholder="Optional notes..."
+                  placeholder={t('optionalNotes')}
                 />
               </div>
 
@@ -339,12 +341,12 @@ function BulkShiftAssignment() {
                 {processing ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    Processing...
+                    {t('processing')}
                   </>
                 ) : (
                   <>
                     <Save className="w-5 h-5" />
-                    Assign to {selectedEmployees.length} Employee{selectedEmployees.length !== 1 ? 's' : ''}
+                    {t('assignTo')} {selectedEmployees.length} {selectedEmployees.length === 1 ? t('employees_one') : t('employees_other')}
                   </>
                 )}
               </button>
@@ -354,13 +356,13 @@ function BulkShiftAssignment() {
           {/* Results */}
           {result && (
             <div className="mt-6 bg-white rounded-lg shadow-md p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Assignment Results</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">{t('assignmentResults')}</h3>
               
               <div className="space-y-3">
                 <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <CheckCircle className="w-5 h-5 text-green-600" />
-                    <span className="font-medium text-green-900">Successful</span>
+                    <span className="font-medium text-green-900">{t('successful')}</span>
                   </div>
                   <span className="font-bold text-green-600">{result.successful}</span>
                 </div>
@@ -369,7 +371,7 @@ function BulkShiftAssignment() {
                   <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
                     <div className="flex items-center gap-2">
                       <AlertCircle className="w-5 h-5 text-red-600" />
-                      <span className="font-medium text-red-900">Failed</span>
+                      <span className="font-medium text-red-900">{t('failed')}</span>
                     </div>
                     <span className="font-bold text-red-600">{result.failed}</span>
                   </div>
@@ -378,11 +380,11 @@ function BulkShiftAssignment() {
 
               {result.results.failed.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-gray-200">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Errors:</h4>
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">{t('errors')}</h4>
                   <div className="space-y-1">
                     {result.results.failed.map((failure, index) => (
                       <p key={index} className="text-xs text-red-600">
-                        Employee ID {failure.employee_id}: {failure.error}
+                        {t('userId')} {failure.employee_id}: {failure.error}
                       </p>
                     ))}
                   </div>

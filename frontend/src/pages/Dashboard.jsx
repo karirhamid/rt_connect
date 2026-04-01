@@ -11,16 +11,34 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+
+  useEffect(() => {
+    // Load auto-refresh setting from backend
+    const loadSettings = async () => {
+      try {
+        const settings = await api.getGeneralSettings();
+        setAutoRefreshEnabled(!!settings.sync_enabled);
+      } catch (err) {
+        console.error('Failed to load sync settings:', err);
+      }
+    };
+    loadSettings();
+  }, []);
 
   useEffect(() => {
     fetchStats();
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchStats, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    // Auto-refresh only if enabled
+    if (autoRefreshEnabled) {
+      const interval = setInterval(() => fetchStats(false), 300000); // 5 minutes
+      return () => clearInterval(interval);
+    }
+  }, [autoRefreshEnabled]);
 
-  const fetchStats = async () => {
-    setLoading(true);
+  const fetchStats = async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const data = await api.getStatistics();
@@ -29,7 +47,9 @@ export default function Dashboard() {
       console.error('Failed to fetch statistics:', error);
       setError(t('failedToLoad'));
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 

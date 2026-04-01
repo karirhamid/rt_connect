@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Search, Loader, Edit, Users, FileText, Download, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Plus, Trash2, Search, Loader, Edit, Users, FileText, Download, RefreshCw, MonitorSmartphone, Database, X, Calendar, CalendarDays, Clock, ArrowRight } from 'lucide-react';
 import api from '../services/api';
 import Dialog, { Toast } from '../components/Dialog';
 
 export default function DeviceSettings() {
+  const { t } = useTranslation();
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -22,6 +24,9 @@ export default function DeviceSettings() {
   });
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [selectedDeviceForLogs, setSelectedDeviceForLogs] = useState(null);
+  const [logsSyncRange, setLogsSyncRange] = useState('month'); // today|yesterday|week|month|all|specific
+  const [logsCustomFrom, setLogsCustomFrom] = useState('');
+  const [logsCustomTo, setLogsCustomTo] = useState('');
   const [syncingEmployees, setSyncingEmployees] = useState({});
   const [syncingLogs, setSyncingLogs] = useState({});
   const [showEmployeePreview, setShowEmployeePreview] = useState(false);
@@ -29,6 +34,9 @@ export default function DeviceSettings() {
   const [showLogsPreview, setShowLogsPreview] = useState(false);
   const [logsPreviewData, setLogsPreviewData] = useState(null);
   const [loadingStates, setLoadingStates] = useState({});
+  // New state: show confirmation panel after discovering device info on add
+  const [pendingAddDevice, setPendingAddDevice] = useState(null); // { formData, discoveryInfo }
+  const [addingDevice, setAddingDevice] = useState(null);  // null | 'sync' | 'add'
 
   useEffect(() => {
     fetchDevices();
@@ -40,7 +48,7 @@ export default function DeviceSettings() {
       const data = await api.getDevices();
       setDevices(data.devices || []);
     } catch (error) {
-      alert('Failed to fetch devices: ' + error.message);
+      alert((t('failedToLoadData') || 'Failed to fetch devices') + ': ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -56,8 +64,8 @@ export default function DeviceSettings() {
       setDialog({
         isOpen: true,
         type: 'warning',
-        title: 'Missing Information',
-        message: 'Please enter an IP address to discover the device.',
+        title: t('missingInformation'),
+        message: t('pleaseEnterIpToDiscover'),
         onConfirm: null
       });
       return;
@@ -68,23 +76,24 @@ export default function DeviceSettings() {
       const data = await api.discoverDevice(formData.ip, formData.port || 4370);
       setDiscoveryData(data);
       
-      // Auto-fill form with discovered data
+      // Auto-fill form with discovered data (including date format from device)
       setFormData({
         ...formData,
         serial_number: data.serial_number || '',
         name: data.model || data.device_name || '',
+        date_format: data.date_format || 'YYYY-MM-DD',
       });
       
       setShowDiscovery(false);
       setShowAddForm(true);
       
-      showToast('Device discovered successfully! Please review and save the device details.', 'success');
+      showToast(t('deviceDiscoveredDetails'), 'success');
     } catch (error) {
       setDialog({
         isOpen: true,
         type: 'error',
-        title: 'Discovery Failed',
-        message: `Unable to discover device: ${error.message}`,
+        title: t('discoveryFailed'),
+        message: `${t('discoveryFailed')}: ${error.message}`,
         onConfirm: null
       });
     } finally {
@@ -99,41 +108,69 @@ export default function DeviceSettings() {
       setDialog({
         isOpen: true,
         type: 'warning',
-        title: 'Missing Information',
-        message: 'IP address and port are required to add a device.',
+        title: t('missingInformation'),
+        message: t('ipAddress') + ' & ' + t('port') + ' ' + (t('required') || 'required') + '.',
         onConfirm: null
       });
       return;
     }
 
-    setDialog({
-      isOpen: true,
-      type: 'confirm',
-      title: 'Add Device',
-      message: `Are you sure you want to add device "${formData.name || formData.ip}" to the system?`,
-      confirmText: 'Add Device',
-      cancelText: 'Cancel',
-      onConfirm: async () => {
-        setDialog({ ...dialog, loading: true });
-        try {
-          await api.addDevice(formData);
-          setDialog({ isOpen: false });
-          showToast('Device added successfully!', 'success');
-          setShowAddForm(false);
-          setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '', date_format: 'YYYY-MM-DD' });
-          setDiscoveryData(null);
-          fetchDevices();
-        } catch (error) {
-          setDialog({
-            isOpen: true,
-            type: 'error',
-            title: 'Add Failed',
-            message: `Failed to add device: ${error.message}`,
-            onConfirm: null
-          });
-        }
-      }
-    });
+    // Step 1: Connect to device and fetch info (users, logs, serial, etc.)
+    setLoading(true);
+    try {
+      const info = await api.discoverDevice(formData.ip, formData.port || 4370);
+      
+      // Auto-fill serial, name & date format if not already set
+      const updatedForm = {
+        ...formData,
+        serial_number: formData.serial_number || info.serial_number || '',
+        name: formData.name || info.device_name || '',
+        date_format: info.date_format || formData.date_format || 'YYYY-MM-DD',
+      };
+      setFormData(updatedForm);
+      
+      // Step 2: Show confirmation panel with device info and action buttons
+      setPendingAddDevice({ formData: updatedForm, discoveryInfo: info });
+    } catch (error) {
+      setDialog({
+        isOpen: true,
+        type: 'error',
+        title: t('error'),
+        message: `${t('discoveryFailed')}: ${error.message}`,
+        onConfirm: null
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmAdd = async (syncData) => {
+    if (!pendingAddDevice) return;
+    setAddingDevice(syncData ? 'sync' : 'add');
+    try {
+      await api.addDevice({ ...pendingAddDevice.formData, sync_data: syncData });
+      showToast(
+        syncData
+          ? (t('deviceAddedSyncStarted') || 'Device added — sync started in background')
+          : (t('deviceAdded') || 'Device added successfully'),
+        'success'
+      );
+      setShowAddForm(false);
+      setPendingAddDevice(null);
+      setDiscoveryData(null);
+      setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '', date_format: 'YYYY-MM-DD' });
+      fetchDevices();
+    } catch (error) {
+      setDialog({
+        isOpen: true,
+        type: 'error',
+        title: t('error'),
+        message: error.message,
+        onConfirm: null
+      });
+    } finally {
+      setAddingDevice(null);
+    }
   };
 
   const handleEditDevice = (device) => {
@@ -156,26 +193,26 @@ export default function DeviceSettings() {
       setDialog({
         isOpen: true,
         type: 'warning',
-        title: 'Missing Information',
-        message: 'Device name is required to update the device.',
+        title: t('missingInformation'),
+        message: `${t('deviceName')} ${t('required') || 'required'}.`,
         onConfirm: null
       });
       return;
     }
 
-    setDialog({
+      setDialog({
       isOpen: true,
       type: 'confirm',
-      title: 'Update Device',
-      message: `Are you sure you want to update device "${editingDevice.name}" with the new information?`,
-      confirmText: 'Update Device',
-      cancelText: 'Cancel',
+        title: t('updateDevice'),
+        message: `${t('updateDevice')}: "${editingDevice.name}"`,
+        confirmText: t('updateDevice'),
+        cancelText: t('cancel'),
       onConfirm: async () => {
         setDialog({ ...dialog, loading: true });
         try {
           await api.updateDevice(editingDevice.id, formData);
           setDialog({ isOpen: false });
-          showToast('Device updated successfully!', 'success');
+          showToast(t('deviceUpdated'), 'success');
           setShowAddForm(false);
           setEditingDevice(null);
           setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '', date_format: 'YYYY-MM-DD' });
@@ -184,8 +221,8 @@ export default function DeviceSettings() {
           setDialog({
             isOpen: true,
             type: 'error',
-            title: 'Update Failed',
-            message: `Failed to update device: ${error.message}`,
+            title: t('error'),
+            message: `${t('updateFailed')}: ${error.message}`,
             onConfirm: null
           });
         }
@@ -197,23 +234,23 @@ export default function DeviceSettings() {
     setDialog({
       isOpen: true,
       type: 'warning',
-      title: 'Delete Device',
-      message: `Are you sure you want to delete device "${device.name}"? This action cannot be undone and will remove all associated data.`,
-      confirmText: 'Delete Device',
-      cancelText: 'Cancel',
+      title: t('deleteDeviceConfirmTitle'),
+      message: t('deleteDeviceConfirmMsg'),
+      confirmText: t('deleteDevice'),
+      cancelText: t('cancel'),
       onConfirm: async () => {
         setDialog({ ...dialog, loading: true });
         try {
           await api.deleteDevice(device.id);
           setDialog({ isOpen: false });
-          showToast('Device deleted successfully!', 'success');
+          showToast(t('deviceDeleted'), 'success');
           fetchDevices();
         } catch (error) {
           setDialog({
             isOpen: true,
             type: 'error',
-            title: 'Delete Failed',
-            message: `Failed to delete device: ${error.message}`,
+            title: t('error'),
+            message: `${t('deleteFailed')}: ${error.message}`,
             onConfirm: null
           });
         }
@@ -225,32 +262,16 @@ export default function DeviceSettings() {
     const key = `${device.id}-employees`;
     setLoadingStates(prev => ({ ...prev, [key]: true }));
     try {
-      // Check global setting for confirmation requirement
-      const settings = await api.getGeneralSettings();
-      
-      if (settings.require_sync_confirmation) {
-        // Fetch preview data only
-        const result = await api.syncEmployeesFromDevice(device.id, true);
-        setEmployeePreviewData({ device, result, requiresConfirmation: true });
-        setShowEmployeePreview(true);
-      } else {
-        // Execute sync directly without confirmation
-        const result = await api.syncEmployeesFromDevice(device.id, false);
-        setEmployeePreviewData({ device, result, requiresConfirmation: false });
-        setShowEmployeePreview(true);
-        
-        if (result.added > 0 || result.updated > 0) {
-          showToast(`Synced ${result.total_fetched} employees from ${device.name}`, 'success');
-        } else {
-          showToast(`All employees already synced from ${device.name}`, 'info');
-        }
-      }
+      // Always fetch preview data — the user reviews before confirming
+      const result = await api.syncEmployeesFromDevice(device.id, true);
+      setEmployeePreviewData({ device, result });
+      setShowEmployeePreview(true);
     } catch (error) {
       setDialog({
         isOpen: true,
         type: 'error',
-        title: 'Fetch Failed',
-        message: `Failed to fetch employees: ${error.message}`,
+        title: t('error'),
+        message: `${t('failedToLoadData')}: ${error.message}`,
         onConfirm: null
       });
     } finally {
@@ -267,24 +288,24 @@ export default function DeviceSettings() {
     try {
       const result = await api.confirmEmployeeSync(employeePreviewData.device.id);
       
-      // Update preview data to show completion
+      // Update preview data to show completion result
       setEmployeePreviewData({ 
         device: employeePreviewData.device, 
-        result, 
-        requiresConfirmation: false 
+        result,
+        syncDone: true
       });
       
-      if (result.added > 0 || result.updated > 0) {
-        showToast(`Successfully synced ${result.total_fetched} employees`, 'success');
+      if (result.added > 0) {
+        showToast(t('addedNewEmployees', { count: result.added }), 'success');
       } else {
-        showToast(`All employees already synced`, 'info');
+        showToast(t('allEmployeesAlreadySynced'), 'info');
       }
     } catch (error) {
       setDialog({
         isOpen: true,
         type: 'error',
-        title: 'Sync Failed',
-        message: `Failed to confirm sync: ${error.message}`,
+        title: t('error'),
+        message: `${t('updateFailed')}: ${error.message}`,
         onConfirm: null
       });
     } finally {
@@ -294,45 +315,56 @@ export default function DeviceSettings() {
 
   const handleOpenLogsModal = (device) => {
     setSelectedDeviceForLogs(device);
+    setLogsSyncRange('month');
+    setLogsCustomFrom('');
+    setLogsCustomTo('');
     setShowLogsModal(true);
   };
 
-  const handleFetchLogsPreview = async (days) => {
+  // Compute days / start_date / end_date from the chosen preset
+  const getDateRangeParams = (range, customFrom, customTo) => {
+    const today = new Date();
+    const fmt = (d) => d.toISOString().split('T')[0];
+    switch (range) {
+      case 'today':
+        return { days: 1, startDate: fmt(today), endDate: fmt(today) };
+      case 'yesterday': {
+        const y = new Date(today); y.setDate(y.getDate() - 1);
+        return { days: 2, startDate: fmt(y), endDate: fmt(y) };
+      }
+      case 'week':
+        return { days: 7 };
+      case 'month':
+        return { days: 30 };
+      case 'all':
+        return { days: 0 };
+      case 'specific':
+        return { days: 0, startDate: customFrom || undefined, endDate: customTo || undefined };
+      default:
+        return { days: 30 };
+    }
+  };
+
+  const handleFetchLogsPreview = async () => {
     if (!selectedDeviceForLogs) return;
-    
+
     const key = `${selectedDeviceForLogs.id}-logs`;
     setLoadingStates(prev => ({ ...prev, [key]: true }));
     setShowLogsModal(false);
-    
+
+    const { days, startDate, endDate } = getDateRangeParams(logsSyncRange, logsCustomFrom, logsCustomTo);
+
     try {
-      // Check global setting for confirmation requirement
-      const settings = await api.getGeneralSettings();
-      
-      if (settings.require_sync_confirmation) {
-        // Fetch preview data only
-        const result = await api.syncAttendanceFromDevice(selectedDeviceForLogs.id, days, true);
-        setLogsPreviewData({ device: selectedDeviceForLogs, result, days, requiresConfirmation: true });
-        setShowLogsPreview(true);
-        setSelectedDeviceForLogs(null);
-      } else {
-        // Execute sync directly without confirmation
-        const result = await api.syncAttendanceFromDevice(selectedDeviceForLogs.id, days, false);
-        setLogsPreviewData({ device: selectedDeviceForLogs, result, days, requiresConfirmation: false });
-        setShowLogsPreview(true);
-        setSelectedDeviceForLogs(null);
-        
-        if (result.added > 0) {
-          showToast(`Synced ${result.total_fetched} attendance records`, 'success');
-        } else {
-          showToast(`All logs already synced`, 'info');
-        }
-      }
+      const result = await api.syncAttendanceFromDevice(selectedDeviceForLogs.id, days, true, { startDate, endDate });
+      setLogsPreviewData({ device: selectedDeviceForLogs, result, days, startDate, endDate, requiresConfirmation: true });
+      setShowLogsPreview(true);
+      setSelectedDeviceForLogs(null);
     } catch (error) {
       setDialog({
         isOpen: true,
         type: 'error',
-        title: 'Fetch Failed',
-        message: `Failed to fetch attendance logs: ${error.message}`,
+        title: t('error'),
+        message: `${t('failedToLoadData')}: ${error.message}`,
         onConfirm: null
       });
       setSelectedDeviceForLogs(null);
@@ -348,27 +380,32 @@ export default function DeviceSettings() {
     setLoadingStates(prev => ({ ...prev, [key]: true }));
     
     try {
-      const result = await api.confirmAttendanceSync(logsPreviewData.device.id, logsPreviewData.days);
+      const result = await api.confirmAttendanceSync(
+        logsPreviewData.device.id, logsPreviewData.days,
+        { startDate: logsPreviewData.startDate, endDate: logsPreviewData.endDate }
+      );
       
       // Update preview data to show completion
       setLogsPreviewData({ 
         device: logsPreviewData.device, 
         result, 
         days: logsPreviewData.days,
+        startDate: logsPreviewData.startDate,
+        endDate: logsPreviewData.endDate,
         requiresConfirmation: false 
       });
       
       if (result.added > 0) {
-        showToast(`Successfully synced ${result.added} attendance records`, 'success');
+        showToast(t('syncSuccessRecords', { count: result.added }), 'success');
       } else {
-        showToast(`All logs already synced`, 'info');
+        showToast(t('allLogsAlreadySynced'), 'info');
       }
     } catch (error) {
       setDialog({
         isOpen: true,
         type: 'error',
-        title: 'Sync Failed',
-        message: `Failed to confirm sync: ${error.message}`,
+        title: t('syncFailed'),
+        message: `${t('failedToConfirmSync')}: ${error.message}`,
         onConfirm: null
       });
     } finally {
@@ -379,21 +416,21 @@ export default function DeviceSettings() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Device Settings</h1>
+        <h1 className="text-3xl font-bold text-gray-900">{t('deviceSettings')}</h1>
         <div className="flex gap-3">
           <button
             onClick={() => setShowDiscovery(true)}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
           >
             <Search className="w-5 h-5" />
-            Discover Device
+            {t('discoverDevice')}
           </button>
           <button
             onClick={() => setShowAddForm(true)}
             className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
           >
             <Plus className="w-5 h-5" />
-            Add Device
+            {t('addDevice')}
           </button>
         </div>
       </div>
@@ -402,11 +439,11 @@ export default function DeviceSettings() {
       {showDiscovery && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold mb-6 text-gray-900">Discover Device</h2>
+            <h2 className="text-2xl font-bold mb-6 text-gray-900">{t('discoverDevice')}</h2>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Device IP Address *
+                  {t('deviceIpAddress')} *
                 </label>
                 <input
                   type="text"
@@ -418,7 +455,7 @@ export default function DeviceSettings() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Port
+                  {t('portLabel')}
                 </label>
                 <input
                   type="text"
@@ -438,12 +475,12 @@ export default function DeviceSettings() {
                 {loading ? (
                   <>
                     <Loader className="w-5 h-5 animate-spin" />
-                    Searching...
+                    {t('loading')}
                   </>
                 ) : (
                   <>
                     <Search className="w-5 h-5" />
-                    Discover
+                    {t('discover')}
                   </>
                 )}
               </button>
@@ -451,7 +488,7 @@ export default function DeviceSettings() {
                 onClick={() => setShowDiscovery(false)}
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
-                Cancel
+                {t('cancel')}
               </button>
             </div>
           </div>
@@ -462,17 +499,105 @@ export default function DeviceSettings() {
       {showAddForm && (
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-2xl font-bold mb-6 text-gray-900">
-            {editingDevice ? 'Edit Device' : discoveryData ? 'Add Discovered Device' : 'Add New Device'}
+            {editingDevice ? t('editDevice') : discoveryData ? t('addDiscoveredDevice') : (t('addNewDevice') || 'Add New Device')}
           </h2>
           
-          {discoveryData && (
+          {discoveryData && !pendingAddDevice && (
             <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <h3 className="font-semibold text-green-800 mb-2">Device Discovered!</h3>
+              <h3 className="font-semibold text-green-800 mb-2">{t('deviceDiscovered')}</h3>
               <div className="text-sm text-green-700 space-y-1">
-                <p><strong>Serial:</strong> {discoveryData.serial_number}</p>
-                <p><strong>Model:</strong> {discoveryData.model}</p>
-                <p><strong>Firmware:</strong> {discoveryData.firmware_version}</p>
-                <p><strong>Platform:</strong> {discoveryData.platform}</p>
+                <p><strong>{t('serialNumber')}:</strong> {discoveryData.serial_number}</p>
+                <p><strong>{t('modelLabel')}:</strong> {discoveryData.device_name}</p>
+                <p><strong>{t('firmwareVersion')}:</strong> {discoveryData.firmware_version}</p>
+                <p><strong>{t('platformLabel')}:</strong> {discoveryData.platform}</p>
+                <p><strong>{t('users') || 'Users'}:</strong> {discoveryData.user_count ?? '—'}</p>
+                <p><strong>{t('attendanceLogs') || 'Attendance Logs'}:</strong> {discoveryData.attendance_count ?? '—'}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Device Info Confirmation Panel — shown after clicking "Add Device" */}
+          {pendingAddDevice && (
+            <div className="mb-6 rounded-lg border-2 border-blue-300 overflow-hidden">
+              <div className="bg-blue-50 px-5 py-3 border-b border-blue-200">
+                <h3 className="font-semibold text-blue-900 flex items-center gap-2">
+                  <MonitorSmartphone className="w-5 h-5" />
+                  {t('deviceInfo') || 'Device Information'}
+                </h3>
+              </div>
+              <div className="p-5 bg-white">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-500">{t('serialNumber') || 'Serial Number'}</span>
+                    <p className="font-semibold text-gray-900">{pendingAddDevice.discoveryInfo.serial_number || '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">{t('deviceName') || 'Device Name'}</span>
+                    <p className="font-semibold text-gray-900">{pendingAddDevice.discoveryInfo.device_name || '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">{t('firmwareVersion')}</span>
+                    <p className="font-semibold text-gray-900">{pendingAddDevice.discoveryInfo.firmware_version || '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">{t('platformLabel')}</span>
+                    <p className="font-semibold text-gray-900">{pendingAddDevice.discoveryInfo.platform || '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">{t('macAddress')}</span>
+                    <p className="font-semibold text-gray-900">{pendingAddDevice.discoveryInfo.mac_address || '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">{t('ipAddress') || 'IP'}</span>
+                    <p className="font-semibold text-gray-900">{pendingAddDevice.discoveryInfo.ip_address || formData.ip}</p>
+                  </div>
+                </div>
+
+                {/* Prominent user / attendance count */}
+                <div className="flex gap-4 mt-5">
+                  <div className="flex-1 rounded-lg bg-indigo-50 border border-indigo-200 p-4 text-center">
+                    <Users className="w-6 h-6 text-indigo-600 mx-auto mb-1" />
+                    <p className="text-2xl font-bold text-indigo-700">{pendingAddDevice.discoveryInfo.user_count ?? 0}</p>
+                    <p className="text-xs text-indigo-500 uppercase tracking-wide">{t('users') || 'Users'}</p>
+                  </div>
+                  <div className="flex-1 rounded-lg bg-amber-50 border border-amber-200 p-4 text-center">
+                    <FileText className="w-6 h-6 text-amber-600 mx-auto mb-1" />
+                    <p className="text-2xl font-bold text-amber-700">{pendingAddDevice.discoveryInfo.attendance_count ?? 0}</p>
+                    <p className="text-xs text-amber-500 uppercase tracking-wide">{t('attendanceLogs') || 'Attendance Logs'}</p>
+                  </div>
+                  <div className="flex-1 rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-center">
+                    <MonitorSmartphone className="w-6 h-6 text-emerald-600 mx-auto mb-1" />
+                    <p className="text-2xl font-bold text-emerald-700">{pendingAddDevice.discoveryInfo.fingerprint_count ?? 0}</p>
+                    <p className="text-xs text-emerald-500 uppercase tracking-wide">{t('fingerprints') || 'Fingerprints'}</p>
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex flex-col sm:flex-row gap-3 mt-6">
+                  <button
+                    onClick={() => handleConfirmAdd(true)}
+                    disabled={!!addingDevice}
+                    className="flex-1 px-5 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400 flex items-center justify-center gap-2 font-medium"
+                  >
+                    {addingDevice === 'sync' ? <Loader className="w-5 h-5 animate-spin" /> : <Database className="w-5 h-5" />}
+                    {t('addAndSyncData') || 'Add & Sync Data'}
+                  </button>
+                  <button
+                    onClick={() => handleConfirmAdd(false)}
+                    disabled={!!addingDevice}
+                    className="flex-1 px-5 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:bg-gray-400 flex items-center justify-center gap-2 font-medium"
+                  >
+                    {addingDevice === 'add' ? <Loader className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
+                    {t('addDeviceOnly') || 'Add Device Only'}
+                  </button>
+                  <button
+                    onClick={() => setPendingAddDevice(null)}
+                    disabled={!!addingDevice}
+                    className="px-5 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    {t('cancel')}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -481,7 +606,7 @@ export default function DeviceSettings() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Device Name *
+                  {t('deviceName')} *
                 </label>
                 <input
                   type="text"
@@ -494,7 +619,7 @@ export default function DeviceSettings() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Tag
+                  {t('tag')}
                 </label>
                 <input
                   type="text"
@@ -506,7 +631,7 @@ export default function DeviceSettings() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  IP Address *
+                  {t('ipAddress')} *
                 </label>
                 <input
                   type="text"
@@ -519,7 +644,7 @@ export default function DeviceSettings() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Port *
+                  {t('port')} *
                 </label>
                 <input
                   type="text"
@@ -532,11 +657,11 @@ export default function DeviceSettings() {
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Serial Number (Optional)
+                  {t('serialNumberOptional')}
                 </label>
                 <input
                   type="text"
-                  placeholder="Auto-filled from discovery"
+                  placeholder="Auto-filled from device"
                   value={formData.serial_number}
                   onChange={(e) => setFormData({ ...formData, serial_number: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -544,7 +669,7 @@ export default function DeviceSettings() {
               </div>
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Date Format *
+                  {t('dateFormat')} *
                 </label>
                 <select
                   value={formData.date_format}
@@ -556,33 +681,41 @@ export default function DeviceSettings() {
                   <option value="DD/MM/YYYY">DD/MM/YYYY (e.g., 26/11/2025)</option>
                   <option value="MM/DD/YYYY">MM/DD/YYYY (e.g., 11/26/2025)</option>
                 </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  Select the date format used by this device. This affects how attendance timestamps are parsed.
-                </p>
+                <p className="text-xs text-gray-500 mt-1">{t('dateFormatHelp')}</p>
               </div>
             </div>
 
-            <div className="flex gap-3 pt-4">
-              <button
-                type="submit"
-                disabled={loading}
-                className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:bg-gray-400"
-              >
-                {loading ? (editingDevice ? 'Updating...' : 'Adding...') : (editingDevice ? 'Update Device' : 'Add Device')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAddForm(false);
-                  setEditingDevice(null);
-                  setDiscoveryData(null);
-                  setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '', date_format: 'YYYY-MM-DD' });
-                }}
-                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
+            {!pendingAddDevice && (
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:bg-gray-400 flex items-center gap-2"
+                >
+                  {loading ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      {t('connecting') || 'Connecting...'}
+                    </>
+                  ) : (
+                    editingDevice ? t('updateDevice') : (t('addDevice'))
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddForm(false);
+                    setEditingDevice(null);
+                    setDiscoveryData(null);
+                    setPendingAddDevice(null);
+                    setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '', date_format: 'YYYY-MM-DD' });
+                  }}
+                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  {t('cancel')}
+                </button>
+              </div>
+            )}
           </form>
         </div>
       )}
@@ -590,29 +723,29 @@ export default function DeviceSettings() {
       {/* Devices List */}
       <div className="bg-white rounded-lg shadow-md overflow-hidden">
         <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-800">Registered Devices</h2>
+          <h2 className="text-xl font-semibold text-gray-800">{t('registeredDevices')}</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Device Name
+                  {t('deviceName')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  IP:Port
+                  {t('ipPort')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Tag
+                  {t('tag')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Serial Number
+                  {t('serialNumber')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date Format
+                  {t('dateFormat')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
+                  {t('actions')}
                 </th>
               </tr>
             </thead>
@@ -620,7 +753,7 @@ export default function DeviceSettings() {
               {devices.length === 0 ? (
                 <tr>
                   <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
-                    No devices registered. Click "Add Device" or "Discover Device" to get started.
+                    {t('noDevicesRegistered')}
                   </td>
                 </tr>
               ) : (
@@ -653,7 +786,7 @@ export default function DeviceSettings() {
                           onClick={() => handleFetchEmployeesPreview(device)}
                           disabled={loadingStates[`${device.id}-employees`]}
                           className="text-blue-600 hover:text-blue-900 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Sync employees from device to database"
+                          title={t('syncUsers')}
                         >
                           {loadingStates[`${device.id}-employees`] ? (
                             <Loader className="w-4 h-4 animate-spin" />
@@ -663,13 +796,13 @@ export default function DeviceSettings() {
                               <Users className="w-4 h-4" />
                             </>
                           )}
-                          <span className="hidden lg:inline">Sync Users</span>
+                          <span className="hidden lg:inline">{t('syncUsers')}</span>
                         </button>
                         <button
                           onClick={() => handleOpenLogsModal(device)}
                           disabled={loadingStates[`${device.id}-logs`]}
                           className="text-green-600 hover:text-green-900 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                          title="Sync attendance logs from device to database"
+                          title={t('syncLogs')}
                         >
                           {loadingStates[`${device.id}-logs`] ? (
                             <Loader className="w-4 h-4 animate-spin" />
@@ -679,23 +812,23 @@ export default function DeviceSettings() {
                               <FileText className="w-4 h-4" />
                             </>
                           )}
-                          <span className="hidden lg:inline">Sync Logs</span>
+                          <span className="hidden lg:inline">{t('syncLogs')}</span>
                         </button>
                         <button
                           onClick={() => handleEditDevice(device)}
                           className="text-primary-600 hover:text-primary-900 flex items-center gap-1"
-                          title="Edit device"
+                          title={t('editDevice')}
                         >
                           <Edit className="w-4 h-4" />
-                          <span className="hidden lg:inline">Edit</span>
+                          <span className="hidden lg:inline">{t('edit')}</span>
                         </button>
                         <button
                           onClick={() => handleDeleteDevice(device)}
                           className="text-red-600 hover:text-red-900 flex items-center gap-1"
-                          title="Delete device"
+                          title={t('deleteDevice')}
                         >
                           <Trash2 className="w-4 h-4" />
-                          <span className="hidden lg:inline">Delete</span>
+                          <span className="hidden lg:inline">{t('delete')}</span>
                         </button>
                       </div>
                     </td>
@@ -729,63 +862,98 @@ export default function DeviceSettings() {
         />
       )}
 
-      {/* Logs Sync Modal */}
+      {/* Logs Sync Modal — date range selector */}
       {showLogsModal && selectedDeviceForLogs && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold mb-4 text-gray-900">Sync Attendance Logs</h2>
-            <p className="text-gray-600 mb-6">
-              Choose how you want to sync attendance logs from <strong>{selectedDeviceForLogs.name}</strong>:
-            </p>
-            
-            <div className="space-y-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">{t('syncAttendanceLogs')}</h2>
+                <p className="text-sm text-gray-500">{selectedDeviceForLogs.name}</p>
+              </div>
               <button
-                onClick={() => handleFetchLogsPreview(30)}
-                disabled={loadingStates[`${selectedDeviceForLogs.id}-logs`]}
-                className="w-full px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-left disabled:opacity-50"
+                onClick={() => { setShowLogsModal(false); setSelectedDeviceForLogs(null); }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
               >
-                <div className="flex items-center gap-3">
-                  {loadingStates[`${selectedDeviceForLogs.id}-logs`] ? (
-                    <Loader className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Download className="w-5 h-5" />
-                  )}
-                  <div>
-                    <div className="font-semibold">Recent Logs (Last 30 Days)</div>
-                    <div className="text-sm text-blue-100">Fast sync - recommended for regular updates</div>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                onClick={() => handleFetchLogsPreview(0)}
-                disabled={loadingStates[`${selectedDeviceForLogs.id}-logs`]}
-                className="w-full px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-left disabled:opacity-50"
-              >
-                <div className="flex items-center gap-3">
-                  {loadingStates[`${selectedDeviceForLogs.id}-logs`] ? (
-                    <Loader className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Download className="w-5 h-5" />
-                  )}
-                  <div>
-                    <div className="font-semibold">All Logs</div>
-                    <div className="text-sm text-green-100">Complete sync - may take longer</div>
-                  </div>
-                </div>
+                <X className="w-5 h-5" />
               </button>
             </div>
-            
-            <div className="mt-6">
+
+            {/* Preset grid */}
+            <div className="px-5 py-4">
+              <label className="block text-xs font-medium text-gray-500 mb-2">{t('selectPeriod')}</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { key: 'today',     icon: Clock,        label: t('today') },
+                  { key: 'yesterday', icon: CalendarDays, label: t('yesterday') },
+                  { key: 'week',      icon: Calendar,     label: t('thisWeek') },
+                  { key: 'month',     icon: Calendar,     label: t('thisMonth') },
+                  { key: 'all',       icon: Database,     label: t('allLogs') },
+                  { key: 'specific',  icon: CalendarDays, label: t('specificRange') },
+                ].map(({ key, icon: Icon, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setLogsSyncRange(key)}
+                    className={`flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border text-sm font-medium transition-all
+                      ${logsSyncRange === key
+                        ? 'border-primary-600 bg-primary-50 text-primary-700 ring-1 ring-primary-600'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Custom date range — shown only when 'specific' */}
+              {logsSyncRange === 'specific' && (
+                <div className="mt-4 flex items-center gap-2">
+                  <div className="flex-1">
+                    <label className="block text-xs text-gray-500 mb-1">{t('from')}</label>
+                    <input
+                      type="date"
+                      value={logsCustomFrom}
+                      onChange={e => setLogsCustomFrom(e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm text-gray-900"
+                    />
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-gray-400 mt-5" />
+                  <div className="flex-1">
+                    <label className="block text-xs text-gray-500 mb-1">{t('to')}</label>
+                    <input
+                      type="date"
+                      value={logsCustomTo}
+                      onChange={e => setLogsCustomTo(e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm text-gray-900"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t bg-gray-50">
               <button
-                onClick={() => {
-                  setShowLogsModal(false);
-                  setSelectedDeviceForLogs(null);
-                }}
+                onClick={() => { setShowLogsModal(false); setSelectedDeviceForLogs(null); }}
                 disabled={loadingStates[`${selectedDeviceForLogs.id}-logs`]}
-                className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
-                Cancel
+                {t('cancel')}
+              </button>
+              <button
+                onClick={handleFetchLogsPreview}
+                disabled={loadingStates[`${selectedDeviceForLogs.id}-logs`] || (logsSyncRange === 'specific' && !logsCustomFrom && !logsCustomTo)}
+                className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {loadingStates[`${selectedDeviceForLogs.id}-logs`] ? (
+                  <Loader className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                {t('syncLogs')}
               </button>
             </div>
           </div>
@@ -794,197 +962,133 @@ export default function DeviceSettings() {
 
       {/* Employee Preview Modal */}
       {showEmployeePreview && employeePreviewData && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Header */}
-            <div className={`bg-gradient-to-r ${employeePreviewData.requiresConfirmation ? 'from-yellow-600 to-yellow-700' : 'from-blue-600 to-blue-700'} text-white p-6`}>
-              <h2 className="text-2xl font-bold mb-2">
-                {employeePreviewData.requiresConfirmation ? 'Confirm Employee Sync' : 'Employee Sync Summary'}
-              </h2>
-              <p className={employeePreviewData.requiresConfirmation ? 'text-yellow-100' : 'text-blue-100'}>
-                Device: {employeePreviewData.device.name}
-              </p>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+            {/* Header — compact */}
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div className="flex items-center gap-3">
+                <div className={`w-2.5 h-2.5 rounded-full ${employeePreviewData.syncDone ? 'bg-green-500' : 'bg-blue-500'}`} />
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {employeePreviewData.syncDone ? t('employeeSyncResult') : t('employeeSyncPreview')}
+                </h2>
+                <span className="text-sm text-gray-500">— {employeePreviewData.device.name}</span>
+              </div>
+              <button
+                onClick={() => { setShowEmployeePreview(false); setEmployeePreviewData(null); }}
+                className="text-gray-400 hover:text-gray-600:text-gray-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-3 gap-4 p-6 bg-gray-50 border-b">
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <div className="text-3xl font-bold text-blue-600">{employeePreviewData.result.total_fetched || 0}</div>
-                <div className="text-sm text-gray-600 mt-1">Total Fetched</div>
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <div className="text-3xl font-bold text-green-600">
-                  {employeePreviewData.result.preview_data 
-                    ? employeePreviewData.result.preview_data.filter(u => u.status === 'new').length 
-                    : employeePreviewData.result.added}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">New Employees</div>
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <div className="text-3xl font-bold text-yellow-600">
-                  {employeePreviewData.result.preview_data 
-                    ? employeePreviewData.result.preview_data.filter(u => u.status === 'update').length 
-                    : employeePreviewData.result.updated}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">Updated</div>
-              </div>
+            {/* Inline stats bar */}
+            <div className="flex items-center gap-6 px-5 py-3 bg-gray-50 border-b text-sm">
+              <span className="text-gray-600">
+                {t('totalOnDevice')}: <strong className="text-gray-900">{employeePreviewData.result.total_fetched || 0}</strong>
+              </span>
+              <span className="text-green-600">
+                {t('newEmployees')}: <strong>{employeePreviewData.syncDone ? (employeePreviewData.result.added || 0) : (employeePreviewData.result.new_count || 0)}</strong>
+              </span>
+              <span className="text-gray-500">
+                {t('existingEmployees')}: <strong>{employeePreviewData.syncDone ? (employeePreviewData.result.skipped || 0) : (employeePreviewData.result.existing_count || 0)}</strong>
+              </span>
             </div>
 
-            {/* Content - Preview Data Table or Summary */}
-            <div className="p-6 flex-1 overflow-y-auto">
-              {employeePreviewData.requiresConfirmation && employeePreviewData.result.preview_data ? (
-                <div className="space-y-4">
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-                    <h3 className="font-semibold text-yellow-900 mb-1">Review Changes Before Syncing</h3>
-                    <p className="text-sm text-yellow-700">
-                      Please review the employee data below before confirming the sync operation.
-                    </p>
-                  </div>
-                  
-                  {/* Preview Data Table */}
-                  <div className="border rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto max-h-96">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-100 sticky top-0">
-                          <tr>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">User ID</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">UID</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">Name</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">Device Role</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">App Role</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {employeePreviewData.result.preview_data.map((user, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                                  user.status === 'new' 
-                                    ? 'bg-green-100 text-green-700' 
-                                    : 'bg-yellow-100 text-yellow-700'
-                                }`}>
-                                  {user.status === 'new' ? 'New' : 'Update'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 font-mono text-gray-900">{user.user_id}</td>
-                              <td className="px-4 py-3 font-mono text-gray-600">{user.uid}</td>
-                              <td className="px-4 py-3">
-                                <div className="font-medium text-gray-900">{user.name}</div>
-                                {user.existing_name && user.existing_name !== user.name && (
-                                  <div className="text-xs text-gray-500">Was: {user.existing_name}</div>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${
-                                  user.privilege === 14 || user.privilege === 6
-                                    ? 'bg-purple-100 text-purple-700'
-                                    : 'bg-gray-100 text-gray-700'
-                                }`}>
-                                  {user.privilege === 14 || user.privilege === 6 ? 'Admin' : 'User'} ({user.privilege})
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${
-                                  user.app_privilege === 14
-                                    ? 'bg-purple-100 text-purple-700'
-                                    : 'bg-gray-100 text-gray-700'
-                                }`}>
-                                  {user.app_privilege === 14 ? 'Admin' : 'User'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              ) : (
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto">
+              {!employeePreviewData.syncDone && employeePreviewData.result.preview_data ? (
                 <>
-                  {/* Sync completed or no confirmation required */}
-                  {(employeePreviewData.result.added === 0 && employeePreviewData.result.updated === 0) ? (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
-                      <div className="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                        <Users className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-blue-900 mb-1">All Employees Already Synced</h3>
-                        <p className="text-sm text-blue-700">
-                          All {employeePreviewData.result.total_fetched} employees from this device are already in your database.
-                          No changes were made.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
-                      <div className="flex-shrink-0 w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                        <Users className="w-5 h-5 text-green-600" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-green-900 mb-1">Sync Completed Successfully</h3>
-                        <p className="text-sm text-green-700">
-                          {employeePreviewData.result.added > 0 && `Added ${employeePreviewData.result.added} new employee${employeePreviewData.result.added > 1 ? 's' : ''}. `}
-                          {employeePreviewData.result.updated > 0 && `Updated ${employeePreviewData.result.updated} existing employee${employeePreviewData.result.updated > 1 ? 's' : ''}.`}
-                        </p>
-                      </div>
+                  {(employeePreviewData.result.new_count || 0) === 0 && (
+                    <div className="mx-5 mt-4 px-3 py-2 bg-gray-100 rounded text-sm text-gray-600">
+                      {t('allEmployeesAlreadySynced')}
                     </div>
                   )}
-
-                  {employeePreviewData.result.errors && employeePreviewData.result.errors.length > 0 && (
-                    <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-red-900 mb-2">Errors ({employeePreviewData.result.errors.length})</h3>
-                      <div className="text-sm text-red-700 space-y-1 max-h-32 overflow-y-auto">
-                        {employeePreviewData.result.errors.slice(0, 5).map((err, idx) => (
-                          <div key={idx}>• {err.name || `User ${err.user_id}`}: {err.error}</div>
-                        ))}
-                        {employeePreviewData.result.errors.length > 5 && (
-                          <div className="text-red-600 font-medium">... and {employeePreviewData.result.errors.length - 5} more</div>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-5 py-2.5">{t('status')}</th>
+                        <th className="px-5 py-2.5">ID</th>
+                        <th className="px-5 py-2.5">{t('name')}</th>
+                        <th className="px-5 py-2.5">{t('deviceRole')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {[...employeePreviewData.result.preview_data]
+                        .sort((a, b) => (a.status === 'new' ? 0 : 1) - (b.status === 'new' ? 0 : 1))
+                        .map((user, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50:bg-gray-750">
+                          <td className="px-5 py-2.5">
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                              user.status === 'new'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              {user.status === 'new' ? t('statusNew') : t('statusExisting')}
+                            </span>
+                          </td>
+                          <td className="px-5 py-2.5 font-mono text-gray-700">{user.user_id}</td>
+                          <td className="px-5 py-2.5 text-gray-900">{user.name}</td>
+                          <td className="px-5 py-2.5">
+                            <span className={`text-xs ${user.privilege === 14 || user.privilege === 6 ? 'text-purple-600' : 'text-gray-500'}`}>
+                              {user.privilege === 14 || user.privilege === 6 ? t('adminLabel') : t('userLabel')}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </>
-              )}
+              ) : employeePreviewData.syncDone ? (
+                <div className="p-5 space-y-3">
+                  <div className={`flex items-center gap-2 text-sm ${(employeePreviewData.result.added || 0) > 0 ? 'text-green-700' : 'text-gray-600'}`}>
+                    <div className={`w-2 h-2 rounded-full ${(employeePreviewData.result.added || 0) > 0 ? 'bg-green-500' : 'bg-gray-400'}`} />
+                    {(employeePreviewData.result.added || 0) > 0
+                      ? <span>{t('addedNewEmployees', { count: employeePreviewData.result.added })} · {t('skippedExisting', { count: employeePreviewData.result.skipped || 0 })}</span>
+                      : <span>{t('allEmployeesAlreadySynced')}</span>
+                    }
+                  </div>
+                  {employeePreviewData.result.errors?.length > 0 && (
+                    <div className="text-sm text-red-600 space-y-0.5">
+                      {employeePreviewData.result.errors.slice(0, 5).map((err, idx) => (
+                        <div key={idx}>{err.name || `User ${err.user_id}`}: {err.error}</div>
+                      ))}
+                      {employeePreviewData.result.errors.length > 5 && <div>+{employeePreviewData.result.errors.length - 5} more</div>}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
 
-            {/* Footer */}
-            <div className="border-t p-6 bg-gray-50 flex justify-end gap-3">
-              {employeePreviewData.requiresConfirmation ? (
+            {/* Footer — compact */}
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t">
+              {!employeePreviewData.syncDone ? (
                 <>
                   <button
-                    onClick={() => {
-                      setShowEmployeePreview(false);
-                      setEmployeePreviewData(null);
-                    }}
-                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                    onClick={() => { setShowEmployeePreview(false); setEmployeePreviewData(null); }}
+                    className="px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-100:bg-gray-700 rounded-lg transition-colors"
                   >
-                    Cancel
+                    {t('cancel')}
                   </button>
-                  <button
-                    onClick={handleConfirmEmployeeSync}
-                    disabled={loadingStates[`${employeePreviewData.device.id}-employees-confirm`]}
-                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {loadingStates[`${employeePreviewData.device.id}-employees-confirm`] ? (
-                      <>
-                        <Loader className="w-4 h-4 animate-spin" />
-                        Confirming...
-                      </>
-                    ) : (
-                      'Confirm & Sync'
-                    )}
-                  </button>
+                  {(employeePreviewData.result.new_count || 0) > 0 && (
+                    <button
+                      onClick={handleConfirmEmployeeSync}
+                      disabled={loadingStates[`${employeePreviewData.device.id}-employees-confirm`]}
+                      className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {loadingStates[`${employeePreviewData.device.id}-employees-confirm`] ? (
+                        <><Loader className="w-3.5 h-3.5 animate-spin" /> {t('confirming')}</>
+                      ) : (
+                        <>{t('confirmAddNew')} ({employeePreviewData.result.new_count})</>
+                      )}
+                    </button>
+                  )}
                 </>
               ) : (
                 <button
-                  onClick={() => {
-                    setShowEmployeePreview(false);
-                    setEmployeePreviewData(null);
-                  }}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                  onClick={() => { setShowEmployeePreview(false); setEmployeePreviewData(null); }}
+                  className="px-4 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800:bg-gray-500 transition-colors"
                 >
-                  Close
+                  {t('close')}
                 </button>
               )}
             </div>
@@ -994,227 +1098,148 @@ export default function DeviceSettings() {
 
       {/* Attendance Logs Preview Modal */}
       {showLogsPreview && logsPreviewData && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Header */}
-            <div className={`bg-gradient-to-r ${logsPreviewData.requiresConfirmation ? 'from-yellow-600 to-yellow-700' : 'from-green-600 to-green-700'} text-white p-6`}>
-              <h2 className="text-2xl font-bold mb-2">
-                {logsPreviewData.requiresConfirmation ? 'Confirm Attendance Sync' : 'Attendance Logs Sync Summary'}
-              </h2>
-              <p className={logsPreviewData.requiresConfirmation ? 'text-yellow-100' : 'text-green-100'}>
-                Device: {logsPreviewData.device.name}
-              </p>
-              <p className={`${logsPreviewData.requiresConfirmation ? 'text-yellow-100' : 'text-green-100'} text-sm`}>
-                Range: {logsPreviewData.days > 0 ? `Last ${logsPreviewData.days} days` : 'All logs'}
-              </p>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col">
+            {/* Header — compact */}
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div className="flex items-center gap-3">
+                <div className={`w-2.5 h-2.5 rounded-full ${logsPreviewData.requiresConfirmation ? 'bg-yellow-500' : 'bg-green-500'}`} />
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {logsPreviewData.requiresConfirmation ? t('confirmSync') || 'Confirm Attendance Sync' : t('syncCompleted') || 'Attendance Sync'}
+                </h2>
+                <span className="text-sm text-gray-500">— {logsPreviewData.device.name}</span>
+              </div>
+              <button
+                onClick={() => { setShowLogsPreview(false); setLogsPreviewData(null); }}
+                className="text-gray-400 hover:text-gray-600:text-gray-200 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-5 gap-4 p-6 bg-gray-50 border-b">
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <div className="text-3xl font-bold text-blue-600">
-                  {logsPreviewData.result.total_fetched || 0}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">Total Fetched</div>
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <div className="text-3xl font-bold text-green-600">
-                  {logsPreviewData.result.preview_data 
-                    ? logsPreviewData.result.new_count 
-                    : logsPreviewData.result.added}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">New Records</div>
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <div className="text-3xl font-bold text-gray-600">
-                  {logsPreviewData.result.preview_data 
-                    ? logsPreviewData.result.duplicate_count 
-                    : logsPreviewData.result.skipped}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">Duplicates</div>
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <div className="text-3xl font-bold text-orange-600">
-                  {logsPreviewData.result.filtered_count || 0}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">Filtered (Old)</div>
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm">
-                <div className="text-3xl font-bold text-red-600">
-                  {logsPreviewData.result.preview_data 
-                    ? logsPreviewData.result.error_count 
-                    : (logsPreviewData.result.errors?.length || 0)}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">Errors</div>
-              </div>
-            </div>
-
-            {/* Content - Preview Data Table or Summary */}
-            <div className="p-6 flex-1 overflow-y-auto">
-              {logsPreviewData.requiresConfirmation && logsPreviewData.result.preview_data ? (
-                <div className="space-y-4">
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-                    <h3 className="font-semibold text-yellow-900 mb-1">Review Attendance Records Before Syncing</h3>
-                    <p className="text-sm text-yellow-700">
-                      Please review the attendance records below before confirming the sync operation.
-                      {logsPreviewData.result.new_count > 0 && ` ${logsPreviewData.result.new_count} new record${logsPreviewData.result.new_count > 1 ? 's' : ''} will be added.`}
-                    </p>
-                  </div>
-                  
-                  {/* Preview Data Table */}
-                  <div className="border rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto max-h-96">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-100 sticky top-0">
-                          <tr>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">User ID</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">Employee</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">Timestamp</th>
-                            <th className="px-4 py-3 text-left font-semibold text-gray-700">Type</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {logsPreviewData.result.preview_data.map((record, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                                  record.error
-                                    ? 'bg-red-100 text-red-700'
-                                    : record.exists 
-                                      ? 'bg-gray-100 text-gray-700' 
-                                      : 'bg-green-100 text-green-700'
-                                }`}>
-                                  {record.error ? 'Error' : record.exists ? 'Duplicate' : 'New'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 font-mono text-gray-900">{record.user_id}</td>
-                              <td className="px-4 py-3">
-                                <div className="font-medium text-gray-900">
-                                  {record.employee_name || 'Unknown'}
-                                </div>
-                                {record.error && (
-                                  <div className="text-xs text-red-600">{record.error}</div>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 text-gray-600">
-                                {new Date(record.timestamp).toLocaleString()}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-1 rounded text-xs font-medium ${
-                                  record.punch === 0 
-                                    ? 'bg-blue-100 text-blue-700' 
-                                    : record.punch === 1 
-                                      ? 'bg-green-100 text-green-700'
-                                      : 'bg-gray-100 text-gray-700'
-                                }`}>
-                                  {record.punch === 0 ? 'Check In' : record.punch === 1 ? 'Check Out' : `Type ${record.punch}`}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {/* Sync completed or no confirmation required */}
-                  {logsPreviewData.result.added === 0 && (!logsPreviewData.result.errors || logsPreviewData.result.errors.length === 0) ? (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
-                      <div className="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                        <FileText className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-blue-900 mb-1">All Logs Already Synced</h3>
-                        <p className="text-sm text-blue-700">
-                          All {logsPreviewData.result.total_fetched} attendance records from this period are already in your database.
-                          {logsPreviewData.result.skipped > 0 && ` ${logsPreviewData.result.skipped} duplicate record${logsPreviewData.result.skipped > 1 ? 's' : ''} were skipped.`}
-                        </p>
-                      </div>
-                    </div>
-                  ) : logsPreviewData.result.added > 0 ? (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
-                      <div className="flex-shrink-0 w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                        <FileText className="w-5 h-5 text-green-600" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-green-900 mb-1">Sync Completed Successfully</h3>
-                        <p className="text-sm text-green-700">
-                          Added {logsPreviewData.result.added} new attendance record{logsPreviewData.result.added > 1 ? 's' : ''} to the database.
-                          {logsPreviewData.result.skipped > 0 && ` Skipped ${logsPreviewData.result.skipped} duplicate${logsPreviewData.result.skipped > 1 ? 's' : ''}.`}
-                        </p>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {logsPreviewData.result.errors && logsPreviewData.result.errors.length > 0 && (
-                    <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-red-900 mb-2">Errors ({logsPreviewData.result.errors.length})</h3>
-                      <div className="text-sm text-red-700 space-y-1 max-h-32 overflow-y-auto">
-                        {logsPreviewData.result.errors.slice(0, 5).map((err, idx) => (
-                          <div key={idx}>• User {err.user_id} at {err.timestamp}: {err.error}</div>
-                        ))}
-                        {logsPreviewData.result.errors.length > 5 && (
-                          <div className="text-red-600 font-medium">... and {logsPreviewData.result.errors.length - 5} more</div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Recommendations */}
-                  {logsPreviewData.result.added > 0 && (
-                    <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-yellow-900 mb-2">💡 Next Steps</h3>
-                      <ul className="text-sm text-yellow-700 space-y-1">
-                        <li>• Visit the Attendance page to view the new records</li>
-                        <li>• Check the Reports section for attendance analysis</li>
-                        <li>• Set up automatic sync to keep data up to date</li>
-                      </ul>
-                    </div>
-                  )}
-                </>
+            {/* Inline stats bar */}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-5 py-3 bg-gray-50 border-b text-sm">
+              <span className="text-gray-600">
+                {t('totalOnDevice')}: <strong className="text-gray-900">{logsPreviewData.result.total_fetched || 0}</strong>
+              </span>
+              <span className="text-green-600">
+                {t('new') || 'New'}: <strong>{logsPreviewData.result.preview_data ? logsPreviewData.result.new_count : logsPreviewData.result.added}</strong>
+              </span>
+              <span className="text-gray-500">
+                {t('duplicates') || 'Duplicates'}: <strong>{logsPreviewData.result.preview_data ? logsPreviewData.result.duplicate_count : logsPreviewData.result.skipped}</strong>
+              </span>
+              {(logsPreviewData.result.filtered_count || 0) > 0 && (
+                <span className="text-orange-500">
+                  {t('filteredOld')}: <strong>{logsPreviewData.result.filtered_count}</strong>
+                </span>
+              )}
+              {((logsPreviewData.result.preview_data ? logsPreviewData.result.error_count : logsPreviewData.result.errors?.length) || 0) > 0 && (
+                <span className="text-red-500">
+                  {t('errorsLabel')}: <strong>{logsPreviewData.result.preview_data ? logsPreviewData.result.error_count : logsPreviewData.result.errors?.length}</strong>
+                </span>
               )}
             </div>
 
-            {/* Footer */}
-            <div className="border-t p-6 bg-gray-50 flex justify-end gap-3">
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto">
+              {logsPreviewData.requiresConfirmation && logsPreviewData.result.preview_data ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-5 py-2.5">{t('status')}</th>
+                      <th className="px-5 py-2.5">User ID</th>
+                      <th className="px-5 py-2.5">{t('employee') || 'Employee'}</th>
+                      <th className="px-5 py-2.5">{t('timestamp') || 'Timestamp'}</th>
+                      <th className="px-5 py-2.5">{t('type') || 'Type'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {logsPreviewData.result.preview_data.map((record, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50:bg-gray-750">
+                        <td className="px-5 py-2.5">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                            record.error
+                              ? 'bg-red-100 text-red-700'
+                              : record.exists
+                                ? 'bg-gray-100 text-gray-500'
+                                : 'bg-green-100 text-green-700'
+                          }`}>
+                            {record.error ? t('error') || 'Error' : record.exists ? t('duplicate') || 'Duplicate' : t('statusNew')}
+                          </span>
+                        </td>
+                        <td className="px-5 py-2.5 font-mono text-gray-700">{record.user_id}</td>
+                        <td className="px-5 py-2.5 text-gray-900">
+                          {record.employee_name || '—'}
+                          {record.error && <div className="text-xs text-red-500">{record.error}</div>}
+                        </td>
+                        <td className="px-5 py-2.5 text-gray-600 tabular-nums">
+                          {new Date(record.timestamp).toLocaleString()}
+                        </td>
+                        <td className="px-5 py-2.5">
+                          <span className={`text-xs ${record.punch === 0 ? 'text-blue-600' : record.punch === 1 ? 'text-green-600' : 'text-gray-500'}`}>
+                            {record.punch === 0 ? t('punchIn') : record.punch === 1 ? t('punchOut') : `#${record.punch}`}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="p-5 space-y-3">
+                  {logsPreviewData.result.added > 0 ? (
+                    <div className="flex items-center gap-2 text-sm text-green-700">
+                      <div className="w-2 h-2 rounded-full bg-green-500" />
+                      <span>
+                        {t('recordsAddedCount', { count: logsPreviewData.result.added })}
+                        {logsPreviewData.result.skipped > 0 && ` · ${t('duplicatesSkipped', { count: logsPreviewData.result.skipped })}`}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <div className="w-2 h-2 rounded-full bg-gray-400" />
+                      <span>{t('allLogsAlreadySynced') || 'All records already synced'}</span>
+                    </div>
+                  )}
+                  {logsPreviewData.result.errors?.length > 0 && (
+                    <div className="text-sm text-red-600 space-y-0.5">
+                      {logsPreviewData.result.errors.slice(0, 5).map((err, idx) => (
+                        <div key={idx}>User {err.user_id}: {err.error}</div>
+                      ))}
+                      {logsPreviewData.result.errors.length > 5 && <div>+{logsPreviewData.result.errors.length - 5} more</div>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer — compact */}
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t">
               {logsPreviewData.requiresConfirmation ? (
                 <>
                   <button
-                    onClick={() => {
-                      setShowLogsPreview(false);
-                      setLogsPreviewData(null);
-                    }}
-                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                    onClick={() => { setShowLogsPreview(false); setLogsPreviewData(null); }}
+                    className="px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-100:bg-gray-700 rounded-lg transition-colors"
                   >
-                    Cancel
+                    {t('cancel')}
                   </button>
                   <button
                     onClick={handleConfirmAttendanceSync}
                     disabled={loadingStates[`${logsPreviewData.device.id}-logs-confirm`]}
-                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium disabled:opacity-50 flex items-center gap-2"
+                    className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
                   >
                     {loadingStates[`${logsPreviewData.device.id}-logs-confirm`] ? (
-                      <>
-                        <Loader className="w-4 h-4 animate-spin" />
-                        Confirming...
-                      </>
+                      <><Loader className="w-3.5 h-3.5 animate-spin" /> {t('confirming') || 'Confirming...'}</>
                     ) : (
-                      'Confirm & Sync'
+                      <>{t('confirmSync') || 'Confirm & Sync'}</>
                     )}
                   </button>
                 </>
               ) : (
                 <button
-                  onClick={() => {
-                    setShowLogsPreview(false);
-                    setLogsPreviewData(null);
-                  }}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+                  onClick={() => { setShowLogsPreview(false); setLogsPreviewData(null); }}
+                  className="px-4 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800:bg-gray-500 transition-colors"
                 >
-                  Close
+                  {t('close')}
                 </button>
               )}
             </div>

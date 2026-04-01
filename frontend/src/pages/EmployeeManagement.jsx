@@ -101,7 +101,7 @@ function EmployeeManagement() {
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), type === 'warning' ? 5000 : 3000);
   };
 
   const handleAdd = () => {
@@ -109,6 +109,8 @@ function EmployeeManagement() {
     setFormData({
       device_user_id: '',
       user_id: '',
+      firstName: '',
+      lastName: '',
       name: '',
       email: '',
       phone: '',
@@ -127,9 +129,15 @@ function EmployeeManagement() {
 
   const handleEdit = (employee) => {
     setEditingEmployee(employee);
+    // Split existing name into first/last (first word = first name, rest = last name)
+    const nameParts = (employee.name || '').trim().split(/\s+/);
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.slice(1).join(' ') || '';
     setFormData({
       device_user_id: employee.device_user_id || '',
       user_id: employee.user_id || '',
+      firstName,
+      lastName,
       name: employee.name || '',
       email: employee.email || '',
       phone: employee.phone || '',
@@ -150,23 +158,23 @@ function EmployeeManagement() {
     setDialog({
       isOpen: true,
       type: 'warning',
-      title: 'Delete Employee',
-      message: `Are you sure you want to delete employee "${employee.name}" (${employee.user_id})? This will permanently remove all their data including attendance records. This action cannot be undone.`,
-      confirmText: 'Delete Employee',
-      cancelText: 'Cancel',
+      title: t('deleteEmployeeTitle'),
+      message: `${t('deleteEmployeeMsg')}: ${employee.name} (${employee.user_id}). ${t('actionCannotBeUndone')}`,
+      confirmText: t('delete'),
+      cancelText: t('cancel'),
       onConfirm: async () => {
         setDialog({ ...dialog, loading: true });
         try {
           await api.deleteEmployee(employee.id);
           setDialog({ isOpen: false });
-          showToast('Employee deleted successfully!', 'success');
+          showToast(t('employeeDeleted') || 'Employee deleted!', 'success');
           await loadData();
         } catch (error) {
           setDialog({
             isOpen: true,
             type: 'error',
-            title: 'Delete Failed',
-            message: `Failed to delete employee: ${error.message}`,
+            title: t('deleteFailedTitle'),
+            message: `${t('deleteFailedTitle')}: ${error.message}`,
             onConfirm: null
           });
         }
@@ -177,13 +185,16 @@ function EmployeeManagement() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    // Combine first + last name into full name
+    const fullName = [formData.firstName, formData.lastName].filter(Boolean).join(' ').trim();
+    
     // Validate required fields
-    if (!formData.name || !formData.user_id || !formData.device_user_id) {
+    if (!fullName || !formData.user_id || !formData.device_user_id) {
       setDialog({
         isOpen: true,
         type: 'warning',
-        title: 'Missing Information',
-        message: 'Please fill in all required fields: Name, User ID, and Device User ID.',
+        title: t('missingInformation') || 'Missing Information',
+        message: t('fillRequiredFields') || 'Please fill in all required fields: First Name, User ID, and Device User ID.',
         onConfirm: null
       });
       return;
@@ -193,28 +204,29 @@ function EmployeeManagement() {
       setDialog({
         isOpen: true,
         type: 'warning',
-        title: 'Missing Information',
-        message: 'Please select both company and department.',
+        title: t('missingInformationTitle'),
+        message: t('fillRequiredFields') || 'Please select both company and department.',
         onConfirm: null
       });
       return;
     }
 
     const action = editingEmployee ? 'update' : 'add';
-    const actionText = editingEmployee ? 'Update' : 'Add';
+    const actionText = editingEmployee ? t('update') || 'Update' : t('add') || 'Add';
 
     setDialog({
       isOpen: true,
       type: 'confirm',
-      title: `${actionText} Employee`,
-      message: `Are you sure you want to ${action} employee "${formData.name}" (${formData.user_id})?`,
-      confirmText: `${actionText} Employee`,
-      cancelText: 'Cancel',
+      title: `${actionText} ${t('employee') || 'Employee'}`,
+      message: `${t('confirmAction') || 'Are you sure you want to'} ${action} "${fullName}" (${formData.user_id})?\n${t('nameSyncedToDevice') || 'Name will be synced to the device.'}`,
+      confirmText: `${actionText} ${t('employee') || 'Employee'}`,
+      cancelText: t('cancel') || 'Cancel',
       onConfirm: async () => {
         setDialog({ ...dialog, loading: true });
         try {
           const employeeData = {
             ...formData,
+            name: fullName,  // Combined first + last name
             device_user_id: parseInt(formData.device_user_id),
             company_id: parseInt(formData.company_id),
             department_id: parseInt(formData.department_id),
@@ -224,13 +236,39 @@ function EmployeeManagement() {
             hire_date: formData.hire_date || null,
             birth_date: formData.birth_date || null
           };
+          // Remove firstName/lastName — backend only needs combined `name`
+          delete employeeData.firstName;
+          delete employeeData.lastName;
 
+          let result;
           if (editingEmployee) {
-            await api.updateEmployee(editingEmployee.id, employeeData);
-            showToast('Employee updated successfully!', 'success');
+            result = await api.updateEmployee(editingEmployee.id, employeeData);
+            if (result.sync_warnings) {
+              const detail = Array.isArray(result.sync_warnings) ? result.sync_warnings.join('; ') : '';
+              const isBusy = detail.toLowerCase().includes('busy') || detail.toLowerCase().includes('in progress');
+              showToast(
+                isBusy
+                  ? (t('deviceBusy') || 'Device busy — changes saved, will sync on next cycle.')
+                  : (t('syncWarning') || 'Employee saved but device sync failed. Changes will sync on next connection.'),
+                'warning'
+              );
+            } else {
+              showToast(t('employeeUpdatedAndSynced') || 'Employee updated and synced to device', 'success');
+            }
           } else {
-            await api.createEmployee(employeeData);
-            showToast('Employee created successfully!', 'success');
+            result = await api.createEmployee(employeeData);
+            if (result.sync_warnings) {
+              const detail = Array.isArray(result.sync_warnings) ? result.sync_warnings.join('; ') : '';
+              const isBusy = detail.toLowerCase().includes('busy') || detail.toLowerCase().includes('in progress');
+              showToast(
+                isBusy
+                  ? (t('deviceBusy') || 'Device busy — changes saved, will sync on next cycle.')
+                  : (t('syncWarning') || 'Employee saved but device sync failed. Changes will sync on next connection.'),
+                'warning'
+              );
+            } else {
+              showToast(t('employeeAddedAndSynced') || 'Employee added and synced to device', 'success');
+            }
           }
           
           setDialog({ isOpen: false });
@@ -240,10 +278,8 @@ function EmployeeManagement() {
           setDialog({
             isOpen: true,
             type: 'error',
-            title: 'Operation Failed',
-            message: error.message.includes('sync_warnings') 
-              ? 'Employee saved but some devices may not be synced. Changes will sync on next device connection.'
-              : `Failed to ${action} employee: ${error.message}`,
+            title: t('operationFailed') || 'Operation Failed',
+            message: `${t('failedTo') || 'Failed to'} ${action}: ${error.message}`,
             onConfirm: null
           });
         }
@@ -338,7 +374,7 @@ function EmployeeManagement() {
             ? 'bg-purple-100 text-purple-800' 
             : 'bg-gray-100 text-gray-800'
         }`}>
-          {employee.privilege === 14 ? 'Admin' : 'User'}
+          {employee.privilege === 14 ? t('adminLabel') : t('userLabel')}
         </span>
       </td>
       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -346,7 +382,7 @@ function EmployeeManagement() {
           onClick={() => handleEdit(employee)}
           disabled={saving}
           className="text-primary-600 hover:text-primary-900 mr-4 disabled:opacity-50"
-          title="Edit employee"
+          title={t('edit')}
         >
           <Edit className="w-4 h-4" />
         </button>
@@ -354,7 +390,7 @@ function EmployeeManagement() {
           onClick={() => handleDelete(employee)}
           disabled={saving}
           className="text-red-600 hover:text-red-900 disabled:opacity-50"
-          title="Delete employee"
+          title={t('delete')}
         >
           <Trash2 className="w-4 h-4" />
         </button>
@@ -635,110 +671,139 @@ function EmployeeManagement() {
 
       {/* Add/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full my-8">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">
-                {editingEmployee ? t('editEmployee') : t('addEmployee')}
-              </h3>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Sticky Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {editingEmployee ? t('editEmployee') : t('addEmployee')}
+                </h3>
+                <p className="text-sm text-gray-500 mt-0.5">{editingEmployee ? t('updateEmployeeDetails') || 'Update employee details' : t('fillEmployeeForm') || 'Fill in the employee information below'}</p>
+              </div>
               <button
                 onClick={() => setShowModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6">
-              <div className="space-y-6">
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
                 {/* Basic Information */}
-                <div>
-                  <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <Users className="w-5 h-5 text-primary-600" />
+                <div className="bg-gray-50 rounded-lg p-5 border border-gray-100">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                    <Users className="w-4 h-4 text-primary-600" />
                     {t('basicInformation')}
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        {t('fullName')} <span className="text-red-500">*</span>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        {t('firstName')} <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
-                        value={formData.name || ''}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        value={formData.firstName || ''}
+                        onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                        placeholder={t('firstName')}
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                        {t('lastName')}
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.lastName || ''}
+                        onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                        placeholder={t('lastName')}
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
+                      />
+                    </div>
+                    {/* Preview: combined name as it will appear on device */}
+                    {(formData.firstName || formData.lastName) && (
+                      <div className="sm:col-span-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
+                        <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                        <span className="text-sm text-blue-700">
+                          {t('nameOnDevice') || 'Name on device'}: <strong>{[formData.firstName, formData.lastName].filter(Boolean).join(' ')}</strong>
+                        </span>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
                         {t('userId')} <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
                         value={formData.user_id || ''}
                         onChange={(e) => setFormData({ ...formData, user_id: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
                         {t('deviceUserId')} <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"
                         value={formData.device_user_id || ''}
                         onChange={(e) => setFormData({ ...formData, device_user_id: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
                         {t('cardNumber')}
                       </label>
                       <input
                         type="number"
                         value={formData.card_number || ''}
                         onChange={(e) => setFormData({ ...formData, card_number: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                       />
                     </div>
                   </div>
                 </div>
 
                 {/* Contact Information */}
-                <div>
-                  <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <Mail className="w-5 h-5 text-primary-600" />
+                <div className="bg-gray-50 rounded-lg p-5 border border-gray-100">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                    <Mail className="w-4 h-4 text-primary-600" />
                     {t('contactInformation')}
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('email')}</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('email')}</label>
                       <input
                         type="email"
                         value={formData.email || ''}
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('phone')}</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('phone')}</label>
                       <input
                         type="text"
                         value={formData.phone || ''}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                       />
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('address')}</label>
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('address')}</label>
                       <textarea
                         value={formData.address || ''}
                         onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                         rows="2"
                       />
                     </div>
@@ -746,14 +811,14 @@ function EmployeeManagement() {
                 </div>
 
                 {/* Organization */}
-                <div>
-                  <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <Building2 className="w-5 h-5 text-primary-600" />
+                <div className="bg-gray-50 rounded-lg p-5 border border-gray-100">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                    <Building2 className="w-4 h-4 text-primary-600" />
                     {t('organization')}
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
                         {t('company')} <span className="text-red-500">*</span>
                       </label>
                       <select
@@ -764,7 +829,7 @@ function EmployeeManagement() {
                           department_id: '',
                           position_id: ''
                         })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                         required
                       >
                         <option value="">{t('selectCompany')}</option>
@@ -774,7 +839,7 @@ function EmployeeManagement() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">
                         {t('department')} <span className="text-red-500">*</span>
                       </label>
                       <select
@@ -784,7 +849,7 @@ function EmployeeManagement() {
                           department_id: e.target.value,
                           position_id: ''
                         })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                         required
                         disabled={!formData.company_id}
                       >
@@ -795,11 +860,11 @@ function EmployeeManagement() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('position')}</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('position')}</label>
                       <select
                         value={formData.position_id || ''}
                         onChange={(e) => setFormData({ ...formData, position_id: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                         disabled={!formData.department_id}
                       >
                         <option value="">{t('selectPosition')}</option>
@@ -812,29 +877,29 @@ function EmployeeManagement() {
                 </div>
 
                 {/* Additional Details */}
-                <div>
-                  <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-primary-600" />
+                <div className="bg-gray-50 rounded-lg p-5 border border-gray-100">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wide">
+                    <Calendar className="w-4 h-4 text-primary-600" />
                     {t('additionalDetails')}
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('role')}</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('role')}</label>
                       <select
                         value={formData.privilege || 0}
                         onChange={(e) => setFormData({ ...formData, privilege: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                       >
                         <option value="0">{t('user')}</option>
                         <option value="14">{t('admin')}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('gender')}</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('gender')}</label>
                       <select
                         value={formData.gender || ''}
                         onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                       >
                         <option value="">{t('selectGender')}</option>
                         <option value="Male">{t('male')}</option>
@@ -843,40 +908,40 @@ function EmployeeManagement() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('hireDate')}</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('hireDate')}</label>
                       <input
                         type="date"
                         value={formData.hire_date || ''}
                         onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">{t('birthDate')}</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('birthDate')}</label>
                       <input
                         type="date"
                         value={formData.birth_date || ''}
                         onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors text-sm"
                       />
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Form Actions */}
-              <div className="flex gap-3 mt-6 pt-6 border-t border-gray-200">
+              {/* Sticky Footer Actions */}
+              <div className="flex gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
                 >
                   {saving ? (
                     <>

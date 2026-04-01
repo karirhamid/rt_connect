@@ -1,0 +1,74 @@
+{
+  "project": "rtzkconnect-frontend",
+  "root": "frontend",
+  "frameworks": ["react", "vite", "tailwindcss"],
+  "entry": "src/main.jsx",
+  "router": "react-router-dom",
+  "i18n": {
+    "file": "src/i18n.js",
+    "languages": ["fr", "en", "ar"],
+    "default": "fr"
+  },
+  "api": {
+    "serviceFile": "src/services/api.js",
+    "envVar": "VITE_API_URL",
+    "defaultBase": "http://localhost:8000",
+    "importantEndpoints": [
+      "/api/settings/general",
+      "/api/statistics",
+      "/api/devices",
+      "/api/attendance/filter",
+      "/api/sync"
+    ]
+  },
+  "routes": [
+    {"path":"/","component":"Dashboard"},
+    {"path":"/employees","component":"EmployeeManagement"},
+    {"path":"/attendance/today","component":"AttendanceToday"},
+    {"path":"/attendance/filter","component":"AttendanceFilter"},
+    {"path":"/settings/general","component":"GeneralSettings"},
+    {"path":"/settings/devices","component":"DeviceSettings"},
+    {"path":"/settings/company","component":"CompanyConfig"},
+    {"path":"/settings/shifts","component":"ShiftManagement"},
+    {"path":"/settings/holidays","component":"HolidayCalendar"},
+    {"path":"/settings/bulk-assign","component":"BulkShiftAssignment"}
+  ],
+  "pages": [
+    "src/pages/Dashboard.jsx",
+    "src/pages/EmployeeManagement.jsx",
+    "src/pages/AttendanceToday.jsx",
+    "src/pages/AttendanceFilter.jsx",
+    "src/pages/GeneralSettings.jsx",
+    "src/pages/DeviceSettings.jsx",
+    "src/pages/CompanyConfig.jsx",
+    "src/pages/ShiftManagement.jsx",
+    "src/pages/HolidayCalendar.jsx",
+    "src/pages/BulkShiftAssignment.jsx"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "keyFiles": [
+    "src/i18n.js",
+    "src/services/api.js",
+    "src/App.jsx",
+    "src/main.jsx",
+    "src/index.css"
+  ],
+  "notes": {
+    "safeEditRecommendations": [
+      "Create a feature branch for all changes: git checkout -b feat/your-change",
+      "Run the dev server and verify locally: npm install; npm run dev",
+      "Use the language selector in General Settings to test i18n changes",
+      "If changing API-related UI, ensure VITE_API_URL points to a test backend",
+      "Run lint before committing: npm run lint",
+      "Commit small, focused changes and run the app to verify",
+      "Prefer editing one page/component at a time and test navigation"
+    ],
+    "whereToToggleAutoSync": "Settings > General (syncEnabled) mapped in src/pages/GeneralSettings.jsx",
+    "dashboardAutoRefresh": "Uses src/pages/Dashboard.jsx and respects sync_enabled from backend via GET /api/settings/general"
+  }
+}

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 import uuid
 import asyncio
+import socket
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -22,6 +23,36 @@ DEFAULT_COMPANY_ID = 1
 DEFAULT_DEPARTMENT_ID = 1
 DEFAULT_POSITION_ID = 1
 
+
+def ensure_device_in_postgres(db: Session, device) -> DBDevice:
+    """Make sure a device from the in-memory store also exists in PostgreSQL.
+    
+    This is needed because devices were historically only stored in the JSON
+    file (device_store). The PL/pgSQL trigger ``assign_composite_id()`` on
+    the employees table requires the device row to be present in PostgreSQL.
+    
+    Returns the existing or newly-created DBDevice row.
+    """
+    existing = db.query(DBDevice).filter(DBDevice.id == device.id).first()
+    if existing:
+        return existing
+    
+    db_device = DBDevice(
+        id=device.id,
+        name=device.name,
+        ip=device.ip,
+        port=int(device.port),
+        tag=getattr(device, "tag", None),
+        serial_number=getattr(device, "serial_number", None),
+        date_format=getattr(device, "date_format", "YYYY-MM-DD"),
+        is_active=True,
+    )
+    db.add(db_device)
+    db.commit()
+    logger.info(f"Inserted missing device '{device.name}' ({device.id}) into PostgreSQL")
+    return db_device
+
+
 class DeviceCreate(BaseModel):
     name: str
     ip: str
@@ -29,6 +60,7 @@ class DeviceCreate(BaseModel):
     tag: Optional[str] = None
     serial_number: Optional[str] = None
     date_format: Optional[str] = "YYYY-MM-DD"  # YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY
+    sync_data: Optional[bool] = False  # If True, sync users+attendance after adding
 
 class DeviceDiscovery(BaseModel):
     ip: str
@@ -40,9 +72,35 @@ async def get_devices():
     devices = device_store.get_all()
     return {"devices": [d.dict() for d in devices]}
 
+def _check_port(ip: str, port: int, timeout: float = 5.0) -> bool:
+    """Test if a TCP port is reachable (quick connectivity check)."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout) as sock:
+            return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
+
+
 @router.post("/devices")
-async def add_device(device_data: DeviceCreate):
-    """Add a new device and sync it immediately"""
+async def add_device(device_data: DeviceCreate, background_tasks: BackgroundTasks,
+                     db: Session = Depends(get_db)):
+    """Add a new device after verifying the device responds on its port.
+    
+    If sync_data=True in the request body, a full sync (users + attendance)
+    is triggered in the background after the device is added.
+    Otherwise the device is just registered with no data sync.
+    """
+    # Quick TCP port check to verify the device is reachable
+    reachable = await asyncio.to_thread(
+        _check_port, device_data.ip, int(device_data.port)
+    )
+    if not reachable:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Device not responding on {device_data.ip}:{device_data.port}. "
+                   "Please verify the IP address, port, and that the device is powered on."
+        )
+    
     device_id = str(uuid.uuid4())
     device = Device(
         id=device_id,
@@ -53,22 +111,61 @@ async def add_device(device_data: DeviceCreate):
         serial_number=device_data.serial_number,
         date_format=device_data.date_format or "YYYY-MM-DD"
     )
+    # Save to in-memory store (JSON file)
     device_store.add(device)
     
-    # Trigger immediate sync for the new device
-    await sync_service.sync_device(device_id)
+    # Also save to PostgreSQL so triggers/FKs can reference the device
+    db_device = DBDevice(
+        id=device_id,
+        name=device_data.name,
+        ip=device_data.ip,
+        port=int(device_data.port),
+        tag=device_data.tag,
+        serial_number=device_data.serial_number,
+        date_format=device_data.date_format or "YYYY-MM-DD",
+        is_active=True
+    )
+    db.add(db_device)
+    db.commit()
     
-    return {"message": "Device added and synced successfully", "device": device.dict()}
+    if device_data.sync_data:
+        def _safe_background_sync(dev_id):
+            try:
+                sync_service._sync_device_blocking(dev_id)
+            except Exception as exc:
+                logger.warning(f"Background sync for device {dev_id} failed: {exc}")
+        background_tasks.add_task(_safe_background_sync, device_id)
+        logger.info(f"Device {device_data.name} ({device_data.ip}:{device_data.port}) added — background sync started")
+        return {"message": "Device added — sync started in background", "device": device.dict()}
+    
+    logger.info(f"Device {device_data.name} ({device_data.ip}:{device_data.port}) added (no sync)")
+    return {"message": "Device added successfully", "device": device.dict()}
 
 @router.delete("/devices/{device_id}")
 async def delete_device(device_id: str, db: Session = Depends(get_db)):
-    """Delete a device and its data from database"""
+    """Delete a device and all its related data (employees, attendance, sync logs)"""
     if device_store.delete(device_id):
-        # Delete device and related data from database
+        # Delete from PostgreSQL: attendance → employees → device (respecting FK order)
+        # First delete attendance records that reference employees of this device
+        db.execute(
+            DBAttendance.__table__.delete().where(
+                DBAttendance.employee_id.in_(
+                    db.query(DBEmployee.id).filter(DBEmployee.source_device_id == device_id)
+                )
+            )
+        )
+        # Also delete attendance records directly linked to the device
+        db.execute(
+            DBAttendance.__table__.delete().where(DBAttendance.device_id == device_id)
+        )
+        # Delete employees synced from this device
+        db.query(DBEmployee).filter(DBEmployee.source_device_id == device_id).delete(synchronize_session=False)
+        # Delete the device itself (cascade handles sync_logs)
         db_device = db.query(DBDevice).filter(DBDevice.id == device_id).first()
         if db_device:
             db.delete(db_device)
-            db.commit()
+        db.commit()
+        logger.info(f"Device {device_id} and all related data deleted from PostgreSQL")
         return {"message": "Device deleted successfully"}
     raise HTTPException(status_code=404, detail="Device not found")
 
@@ -109,17 +206,60 @@ async def update_device(device_id: str, device_data: DeviceCreate, db: Session =
 
 @router.post("/device/discover")
 async def discover_device(discovery_data: DeviceDiscovery):
-    """Discover device by IP and retrieve information"""
+    """Discover device by IP and retrieve information.
+    
+    Uses a short timeout (20s hard limit) since discovery should be fast.
+    Only 1 connection retry to avoid long waits on unreachable IPs.
+    """
+    DISCOVERY_TIMEOUT = 20  # hard limit in seconds
+    
     manager = ZKTecoDeviceManager(
         ip=discovery_data.ip,
         port=discovery_data.port,
-        timeout=10
+        timeout=8,
+        max_retries=1  # single attempt for discovery — fail fast
     )
     
-    info = manager.get_device_info()
-    if not info:
-        raise HTTPException(status_code=400, detail="Failed to connect to device")
+    try:
+        info = await asyncio.wait_for(
+            asyncio.to_thread(manager.get_device_info),
+            timeout=DISCOVERY_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"Discovery hard-timeout for {discovery_data.ip}:{discovery_data.port}")
+        # Force cleanup the manager so the socket/lock are released
+        try:
+            manager.disconnect()
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=408,
+            detail=f"Connection to {discovery_data.ip}:{discovery_data.port} timed out after {DISCOVERY_TIMEOUT}s. "
+                   "Make sure the IP address is correct and the device is powered on."
+        )
+    except TimeoutError as e:
+        logger.warning(f"Discovery timed out for {discovery_data.ip}:{discovery_data.port}: {e}")
+        raise HTTPException(
+            status_code=408,
+            detail=f"Connection to {discovery_data.ip}:{discovery_data.port} timed out. "
+                   "Make sure the IP address is correct and the device is powered on."
+        )
+    except ConnectionError as e:
+        logger.warning(f"Discovery failed for {discovery_data.ip}:{discovery_data.port}: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.warning(f"Discovery failed for {discovery_data.ip}:{discovery_data.port}: "
+                       f"{type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not connect to device at {discovery_data.ip}:{discovery_data.port}: {e}"
+        )
     
+    if not info:
+        raise HTTPException(status_code=400, detail="Device returned no information")
     return info
 
 @router.get("/device/{device_id}/info")
@@ -129,8 +269,11 @@ async def get_device_info(device_id: str):
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
-    info = manager.get_device_info()
+    manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=15)
+    try:
+        info = await asyncio.to_thread(manager.get_device_info)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to get device info: {e}")
     
     if not info:
         raise HTTPException(status_code=400, detail="Failed to connect to device")
@@ -144,8 +287,8 @@ async def get_device_users(device_id: str):
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
-    users = manager.get_users()
+    manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=10)
+    users = await asyncio.to_thread(manager.get_users)
     
     if users is None:
         raise HTTPException(status_code=400, detail="Failed to fetch users")
@@ -164,8 +307,8 @@ async def get_device_attendance(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
-    attendance = manager.get_attendance()
+    manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=15)
+    attendance = await asyncio.to_thread(manager.get_attendance)
     
     if attendance is None:
         raise HTTPException(status_code=400, detail="Failed to fetch attendance")
@@ -306,10 +449,15 @@ async def get_statistics(db: Session = Depends(get_db)):
 
 @router.post("/sync")
 @router.get("/sync")
-async def trigger_sync(device_id: Optional[str] = None):
-    """Trigger manual sync of devices"""
-    await sync_service.trigger_sync(device_id)
-    return {"message": "Sync triggered successfully"}
+async def trigger_sync(device_id: Optional[str] = None, background_tasks: BackgroundTasks = None):
+    """Trigger manual sync of devices (runs in background)"""
+    if device_id:
+        background_tasks.add_task(sync_service._sync_device_blocking, device_id)
+    else:
+        # Sync all devices — each in its own thread via the sync service
+        for device_config in device_store.get_all():
+            background_tasks.add_task(sync_service._sync_device_blocking, device_config.id)
+    return {"message": "Sync triggered in background"}
 
 
 @router.get("/devices/{device_id}/time")
@@ -320,14 +468,16 @@ async def get_device_time(device_id: str):
         raise HTTPException(status_code=404, detail="Device not found")
     
     try:
-        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
-        time_info = manager.get_time()
+        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=10)
+        time_info = await asyncio.to_thread(manager.get_time)
         return {
             "device_id": device_id,
             "device_name": device.name,
             **time_info
         }
     except Exception as e:
+        logger.exception("Failed to get device time for %s: %s", device_id, e)
+        # Surface a generic error to the client; details are in server log
         raise HTTPException(status_code=500, detail=f"Failed to get device time: {str(e)}")
 
 
@@ -347,8 +497,8 @@ async def set_device_time(device_id: str, timezone_offset: Optional[int] = None)
         else:
             target_time = datetime.now(tz.utc)
         
-        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
-        manager.set_time(target_time)
+        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=10)
+        await asyncio.to_thread(manager.set_time, target_time)
         
         return {
             "message": "Device time updated successfully",
@@ -378,8 +528,8 @@ async def set_all_devices_time(timezone_offset: int):
     
     for device in devices:
         try:
-            manager = ZKTecoDeviceManager(ip=device.ip, port=device.port)
-            manager.set_time(target_time)
+            manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=10)
+            await asyncio.to_thread(manager.set_time, target_time)
             results.append({
                 "device_id": device.id,
                 "device_name": device.name,
@@ -407,25 +557,30 @@ async def sync_employees_from_device(
     preview_only: bool = False,
     db: Session = Depends(get_db)
 ):
-    """Manually sync employees from a specific device to the database
+    """Fetch employees from a device and return a preview for user confirmation.
     
-    Args:
-        device_id: Device ID to sync from
-        preview_only: If True, only fetch and return preview data without saving to DB
+    Always returns preview data so the user can review new vs existing employees
+    before confirming the sync. Use confirm-sync to actually persist.
     """
     device = device_store.get_by_id(device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    # Get device settings from DB
-    db_device = db.query(DBDevice).filter(DBDevice.id == device_id).first()
+    # Ensure device row exists in PostgreSQL (required by triggers/FKs)
+    ensure_device_in_postgres(db, device)
     
     try:
-        # Connect to device
-        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=10)
+        # Connect to device with adequate timeout
+        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=15)
         
-        # Get all users from device (this will connect and disconnect)
-        users = manager.get_users() or []
+        # Get all users from device (runs in thread to avoid blocking event loop)
+        try:
+            users = await asyncio.to_thread(manager.get_users) or []
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not fetch users from device {device.name} ({device.ip}): {e}"
+            )
         
         if not users:
             return {
@@ -433,9 +588,7 @@ async def sync_employees_from_device(
                 "device_id": device_id,
                 "device_name": device.name,
                 "total_fetched": 0,
-                "added": 0,
-                "updated": 0,
-                "errors": [],
+                "preview_mode": True,
                 "preview_data": []
             }
         
@@ -447,171 +600,160 @@ async def sync_employees_from_device(
             logger.info(f"  User ID: {user.user_id:4} | UID: {user.uid:4} | Name: {user.name:30} | Privilege: {user.privilege}")
         logger.info(f"="*80)
         
-        # Check global setting for confirmation requirement
-        from app.database.schema import AppSettings
-        settings = db.query(AppSettings).first()
-        require_confirmation = settings.require_sync_confirmation if settings else True
-        
-        # If preview_only or confirmation required, return preview data
-        if preview_only or require_confirmation:
-            preview_data = []
-            for user in users:
-                existing = db.query(DBEmployee).filter(
-                    DBEmployee.source_device_id == device_id,
-                    DBEmployee.device_user_id == user.user_id
-                ).first()
-                
-                app_privilege = 14 if user.privilege in (6, 14) else 0
-                status = "update" if existing else "new"
-                
-                preview_data.append({
-                    "user_id": user.user_id,
-                    "uid": user.uid,
-                    "name": user.name,
-                    "privilege": user.privilege,
-                    "app_privilege": app_privilege,
-                    "status": status,
-                    "existing_name": existing.name if existing else None
-                })
-            
-            return {
-                "success": True,
-                "device_id": device_id,
-                "device_name": device.name,
-                "total_fetched": len(users),
-                "preview_mode": True,
-                "requires_confirmation": require_confirmation,
-                "preview_data": preview_data
-            }
-        
-        # Proceed with actual sync
-        added = 0
-        updated = 0
-        errors = []
-        
-        # Process each user
+        # Build preview: compare each device user against the DB
+        preview_data = []
         for user in users:
-            try:
-                # Check if employee already exists (device_user_id is Integer in DB)
-                existing = db.query(DBEmployee).filter(
-                    DBEmployee.source_device_id == device_id,
-                    DBEmployee.device_user_id == user.user_id  # Compare as integer
-                ).first()
-                
-                if existing:
-                    # Update existing employee only if something changed
-                    has_changes = False
-                    if existing.name != user.name:
-                        existing.name = user.name
-                        has_changes = True
-                    # DON'T sync privilege from device - it's managed in the frontend
-                    # Privilege changes are pushed from frontend → device, not pulled from device → backend
-                    # This preserves manual role assignments made in the UI
-                    
-                    if has_changes:
-                        existing.updated_at = datetime.now(timezone.utc)
-                        updated += 1
-                else:
-                    # Add new employee with default organizational values
-                    # For new employees, map device privilege to app privilege: 6→14 (admin), 0→0 (user)
-                    # Map device admin to app admin. Some firmwares use 14, others use 6.
-                    app_privilege = 14 if user.privilege in (6, 14) else 0
-                    logger.info(f"New employee '{user.name}' (UID={user.user_id}): device_privilege={user.privilege} -> app_privilege={app_privilege}")
-                    new_employee = DBEmployee(
-                        name=user.name,
-                        device_user_id=user.user_id,  # Use integer directly
-                        user_id=str(user.user_id),  # Use string for user_id field
-                        source_device_id=device_id,
-                        privilege=app_privilege,
-                        company_id=DEFAULT_COMPANY_ID,
-                        department_id=DEFAULT_DEPARTMENT_ID,
-                        position_id=DEFAULT_POSITION_ID,
-                        created_at=datetime.now(timezone.utc),
-                        updated_at=datetime.now(timezone.utc)
-                    )
-                    db.add(new_employee)
-                    added += 1
-                    
-            except Exception as e:
-                errors.append({
-                    "user_id": user.user_id,
-                    "name": user.name,
-                    "error": str(e)
-                })
+            existing = db.query(DBEmployee).filter(
+                DBEmployee.source_device_id == device_id,
+                DBEmployee.device_user_id == user.user_id
+            ).first()
+            
+            app_privilege = 14 if user.privilege in (6, 14) else 0
+            status = "existing" if existing else "new"
+            
+            preview_data.append({
+                "user_id": user.user_id,
+                "uid": user.uid,
+                "name": user.name,
+                "privilege": user.privilege,
+                "app_privilege": app_privilege,
+                "status": status,
+                "existing_name": existing.name if existing else None
+            })
         
-        db.commit()
-        
-        logger.info(f"✅ Sync completed: {added} added, {updated} updated, {len(errors)} errors")
+        new_count = sum(1 for u in preview_data if u["status"] == "new")
+        existing_count = sum(1 for u in preview_data if u["status"] == "existing")
         
         return {
             "success": True,
             "device_id": device_id,
             "device_name": device.name,
             "total_fetched": len(users),
-            "added": added,
-            "updated": updated,
-            "errors": errors,
-            "preview_mode": False
+            "new_count": new_count,
+            "existing_count": existing_count,
+            "preview_mode": True,
+            "preview_data": preview_data
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to sync employees: {str(e)}")
+        logger.error(f"Failed to fetch employees for device {device_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch employees: {str(e)}")
 
 
 @router.post("/devices/{device_id}/confirm-sync")
 async def confirm_employee_sync(device_id: str, db: Session = Depends(get_db)):
-    """Confirm and execute employee sync after preview
+    """Confirm employee sync: re-fetch from device and add only NEW employees.
     
-    This endpoint performs the actual sync, bypassing the confirmation requirement.
-    Use after user confirms the preview data.
+    Existing employees (already in the DB for this device) are left untouched.
     """
-    # Temporarily disable global confirmation for this sync
-    from app.database.schema import AppSettings
-    settings = db.query(AppSettings).first()
-    if settings:
-        original_setting = settings.require_sync_confirmation
-        settings.require_sync_confirmation = False
-        db.commit()
-        
+    device = device_store.get_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    # Ensure device row exists in PostgreSQL
+    ensure_device_in_postgres(db, device)
+
+    try:
+        # Re-fetch users from device
+        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=15)
         try:
-            result = await sync_employees_from_device(device_id=device_id, preview_only=False, db=db)
-            return result
-        finally:
-            # Restore original setting
-            settings.require_sync_confirmation = original_setting
-            db.commit()
-    else:
-        # No settings, just call sync
-        return await sync_employees_from_device(device_id=device_id, preview_only=False, db=db)
+            users = await asyncio.to_thread(manager.get_users) or []
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not fetch users from device {device.name} ({device.ip}): {e}"
+            )
+
+        added = 0
+        skipped = 0
+        errors = []
+
+        for user in users:
+            try:
+                existing = db.query(DBEmployee).filter(
+                    DBEmployee.source_device_id == device_id,
+                    DBEmployee.device_user_id == user.user_id
+                ).first()
+
+                if existing:
+                    skipped += 1
+                    continue
+
+                # New employee — insert
+                app_privilege = 14 if user.privilege in (6, 14) else 0
+                logger.info(f"Adding new employee '{user.name}' (UID={user.user_id}): privilege={app_privilege}")
+                new_employee = DBEmployee(
+                    name=user.name,
+                    device_user_id=user.user_id,
+                    user_id=str(user.user_id),
+                    source_device_id=device_id,
+                    privilege=app_privilege,
+                    company_id=DEFAULT_COMPANY_ID,
+                    department_id=DEFAULT_DEPARTMENT_ID,
+                    position_id=DEFAULT_POSITION_ID,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc)
+                )
+                db.add(new_employee)
+                added += 1
+            except Exception as e:
+                errors.append({
+                    "user_id": user.user_id,
+                    "name": user.name,
+                    "error": str(e)
+                })
+
+        db.commit()
+        logger.info(f"✅ Confirm-sync completed: {added} added, {skipped} skipped (existing), {len(errors)} errors")
+
+        return {
+            "success": True,
+            "device_id": device_id,
+            "device_name": device.name,
+            "total_fetched": len(users),
+            "added": added,
+            "skipped": skipped,
+            "errors": errors,
+            "preview_mode": False
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"confirm-sync failed for device {device_id}: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Sync failed: {e}")
 
 
 @router.post("/devices/{device_id}/confirm-attendance-sync")
-async def confirm_attendance_sync(device_id: str, days: int = 30, db: Session = Depends(get_db)):
-    """Confirm and execute attendance sync after preview
-    
-    This endpoint performs the actual sync, bypassing the confirmation requirement.
-    Use after user confirms the preview data.
-    """
-    # Temporarily disable global confirmation for this sync
-    from app.database.schema import AppSettings
-    settings = db.query(AppSettings).first()
-    if settings:
-        original_setting = settings.require_sync_confirmation
-        settings.require_sync_confirmation = False
-        db.commit()
-        
-        try:
-            result = await sync_attendance_from_device(device_id=device_id, days=days, preview_only=False, db=db)
-            return result
-        finally:
-            # Restore original setting
-            settings.require_sync_confirmation = original_setting
-            db.commit()
-    else:
-        # No settings, just call sync
-        return await sync_attendance_from_device(device_id=device_id, days=days, preview_only=False, db=db)
+async def confirm_attendance_sync(
+    device_id: str,
+    days: int = 30,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Confirm and execute attendance sync — re-fetches from device and inserts only new records."""
+    device = device_store.get_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    ensure_device_in_postgres(db, device)
+
+    try:
+        result = await sync_attendance_from_device(
+            device_id=device_id, days=days, preview_only=False,
+            start_date=start_date, end_date=end_date, db=db
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"confirm-attendance-sync failed for device {device_id}: {e}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Attendance sync failed: {e}")
 
 
 class SetPrivilegePayload(BaseModel):
@@ -626,7 +768,8 @@ async def set_user_privilege(device_id: str, payload: SetPrivilegePayload):
         raise HTTPException(status_code=404, detail="Device not found")
     try:
         manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=10)
-        manager.update_user(
+        await asyncio.to_thread(
+            manager.update_user,
             uid=payload.uid,
             name="",  # keep name unchanged by reusing existing? device requires name; we'll fetch existing
             privilege=payload.privilege,
@@ -645,255 +788,286 @@ async def sync_attendance_from_device(
     device_id: str,
     days: int = 30,
     preview_only: bool = False,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Manually sync attendance logs from a specific device
-    
+    """Sync attendance logs from a specific device.
+
+    Performance-optimized:
+      - Single batch query for employees (dict lookup instead of per-record query)
+      - Single batch query for existing attendance (set lookup instead of per-record query)
+      - Records processed in one pass
+      - Hard asyncio timeout on device communication
+
     Args:
         device_id: The device ID to sync from
-        days: Number of days to sync (default: 30 for recent logs, use 0 for all logs)
-        preview_only: If True, only return preview data without syncing
+        days: Number of days to sync (default 30, use 0 for all)
+        preview_only: If True, return preview data without inserting
     """
+    import time as _time
+    from app.utils.timestamp_validator import validate_and_correct_timestamp
+
     device = device_store.get_by_id(device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    
+
+    ensure_device_in_postgres(db, device)
+
+    FETCH_TIMEOUT = 300  # hard limit — K40 with 50k records takes ~150s
+
+    # ── Step 1: Fetch records from device ────────────────────────────────
+    t0 = _time.perf_counter()
     try:
-        # Connect to device
-        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=10)
-        
-        # Get all attendance records from device (this will connect and disconnect)
+        manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=15)
         try:
-            attendance_records = manager.get_attendance() or []
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to get attendance from device: {str(e)}")
-        
-        if not attendance_records:
-            return {
-                "success": True,
-                "device_id": device_id,
-                "device_name": device.name,
-                "total_fetched": 0,
-                "added": 0,
-                "skipped": 0,
-                "errors": []
-            }
-        
-        # Calculate cutoff date for filtering (if needed)
-        cutoff_date = None
-        if days > 0:
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-        
-        # Log fetched attendance records to console
-        logger.info(f"="*80)
-        logger.info(f"ATTENDANCE SYNC - Fetched {len(attendance_records)} records from {device.name} ({device.ip})")
-        if days > 0:
-            logger.info(f"Date range: Last {days} days")
-        else:
-            logger.info(f"Date range: All records")
-        logger.info(f"="*80)
-        
-        # Check global setting for confirmation requirement
-        from app.database.schema import AppSettings
-        from app.utils.timestamp_validator import validate_and_correct_timestamp
-        settings = db.query(AppSettings).first()
-        require_confirmation = settings.require_sync_confirmation if settings else True
-        validate_timestamps = settings.validate_timestamps if (settings and hasattr(settings, 'validate_timestamps')) else True
-        
-        # Process and categorize records
-        preview_data = []
-        filtered_count = 0
-        
-        for record in attendance_records:
+            attendance_records = await asyncio.wait_for(
+                asyncio.to_thread(manager.get_attendance),
+                timeout=FETCH_TIMEOUT
+            ) or []
+        except asyncio.TimeoutError:
             try:
-                # Ensure timestamp is timezone-aware
-                timestamp = record.timestamp
-                if timestamp.tzinfo is None:
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
-                
-                # Validate and correct timestamp if enabled
-                timestamp_error = None
-                if validate_timestamps:
-                    timestamp, timestamp_error = validate_and_correct_timestamp(
-                        timestamp,
-                        device_date_format=device.date_format if hasattr(device, 'date_format') else "YYYY-MM-DD"
-                    )
-                
-                # Apply date filter
-                if cutoff_date is not None:
-                    if timestamp < cutoff_date:
-                        filtered_count += 1
-                        continue  # Skip old records
-                
-                # Find employee
-                employee = db.query(DBEmployee).filter(
-                    DBEmployee.source_device_id == device_id,
-                    DBEmployee.device_user_id == record.user_id
-                ).first()
-                
-                if not employee:
-                    error_msg = "Employee not found"
-                    if timestamp_error:
-                        error_msg = f"{error_msg}; {timestamp_error}"
+                manager.disconnect()
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=408,
+                detail=f"Attendance download from {device.name} timed out after {FETCH_TIMEOUT}s."
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not fetch attendance from {device.name} ({device.ip}): {e}"
+        )
+
+    fetch_time = _time.perf_counter() - t0
+    logger.info(f"Fetched {len(attendance_records)} records from {device.name} in {fetch_time:.1f}s")
+
+    if not attendance_records:
+        return {
+            "success": True, "device_id": device_id, "device_name": device.name,
+            "total_fetched": 0, "added": 0, "skipped": 0, "errors": []
+        }
+
+    # ── Step 2: Date range filter ────────────────────────────────────────
+    cutoff_date = None
+    end_cutoff = None
+    if start_date:
+        try:
+            cutoff_date = datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            end_cutoff = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)  # inclusive
+        except ValueError:
+            pass
+    if cutoff_date is None and days > 0:
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+    # ── Step 3: Batch-load employees for this device (1 query) ───────────
+    t1 = _time.perf_counter()
+    emp_rows = db.query(DBEmployee).filter(DBEmployee.source_device_id == device_id).all()
+    emp_map = {str(e.device_user_id): e for e in emp_rows}  # device_user_id → Employee
+    logger.info(f"Loaded {len(emp_map)} employees for device {device_id} in {_time.perf_counter()-t1:.2f}s")
+
+    # ── Step 4: Batch-load existing attendance keys (1 query) ────────────
+    t2 = _time.perf_counter()
+    existing_rows = (
+        db.query(DBAttendance.employee_id, DBAttendance.timestamp)
+        .filter(DBAttendance.device_id == device_id)
+        .all()
+    )
+    # Strip tzinfo AND truncate to whole seconds so small precision
+    # differences between device reads never cause false "new" records.
+    def _normalise_ts(ts):
+        if ts is None:
+            return ts
+        if ts.tzinfo is not None:
+            ts = ts.replace(tzinfo=None)
+        return ts.replace(microsecond=0)
+
+    existing_set = {
+        (row.employee_id, _normalise_ts(row.timestamp))
+        for row in existing_rows
+    }
+    logger.info(f"Loaded {len(existing_set)} existing attendance keys in {_time.perf_counter()-t2:.2f}s")
+
+    # ── Step 5: Validate timestamps setting ──────────────────────────────
+    from app.database.schema import AppSettings
+    settings = db.query(AppSettings).first()
+    validate_timestamps = settings.validate_timestamps if (settings and hasattr(settings, 'validate_timestamps')) else True
+    device_date_fmt = device.date_format if hasattr(device, 'date_format') else "YYYY-MM-DD"
+
+    # ── Step 6: Single-pass processing ───────────────────────────────────
+    t3 = _time.perf_counter()
+    preview_data = []
+    new_records = []      # DBAttendance objects to bulk-insert
+    filtered_count = 0
+    skipped = 0
+    errors = []
+
+    for record in attendance_records:
+        try:
+            timestamp = record.timestamp
+            # Normalise to naive UTC truncated to whole seconds — the DB
+            # stores naive datetimes and device reads may carry varying
+            # sub-second precision, so we canonicalise early to guarantee
+            # stable duplicate detection across fetches.
+            if timestamp.tzinfo is not None:
+                timestamp = timestamp.replace(tzinfo=None)
+            timestamp = timestamp.replace(microsecond=0)
+
+            # Validate timestamp
+            ts_error = None
+            if validate_timestamps:
+                timestamp, ts_error = validate_and_correct_timestamp(timestamp, device_date_format=device_date_fmt)
+                # Ensure result is still naive and second-precision after validation
+                if timestamp.tzinfo is not None:
+                    timestamp = timestamp.replace(tzinfo=None)
+                timestamp = timestamp.replace(microsecond=0)
+
+            # Date filter
+            if cutoff_date is not None and timestamp < cutoff_date:
+                filtered_count += 1
+                continue
+            if end_cutoff is not None and timestamp >= end_cutoff:
+                filtered_count += 1
+                continue
+
+            # Employee lookup (O(1) dict)
+            employee = emp_map.get(str(record.user_id))
+            if not employee:
+                err = "Employee not found"
+                if ts_error:
+                    err = f"{err}; {ts_error}"
+                if preview_only:
                     preview_data.append({
-                        "user_id": record.user_id,
-                        "employee_name": "Unknown Employee",
-                        "timestamp": timestamp.isoformat(),
-                        "punch": record.punch,
-                        "status": record.status,
-                        "exists": False,
-                        "error": error_msg
+                        "user_id": record.user_id, "employee_name": "Unknown",
+                        "timestamp": timestamp.isoformat(), "punch": record.punch,
+                        "status": record.status, "exists": False, "error": err
                     })
-                    continue
-                
-                # Check if record already exists
-                existing = db.query(DBAttendance).filter(
-                    DBAttendance.employee_id == employee.id,
-                    DBAttendance.timestamp == timestamp,
-                    DBAttendance.device_id == device_id
-                ).first()
-                
-                # Report timestamp validation errors even for valid records
-                error_msg = timestamp_error if timestamp_error else None
-                
+                else:
+                    errors.append({"user_id": record.user_id, "timestamp": timestamp.isoformat(), "error": err})
+                continue
+
+            # Duplicate check (O(1) set)
+            is_dup = (employee.id, timestamp) in existing_set
+
+            if preview_only:
                 preview_data.append({
                     "user_id": record.user_id,
                     "employee_name": employee.name,
                     "timestamp": timestamp.isoformat(),
                     "punch": record.punch,
                     "status": record.status,
-                    "exists": existing is not None,
-                    "error": error_msg
+                    "exists": is_dup,
+                    "error": ts_error
                 })
-                
-            except Exception as e:
-                preview_data.append({
-                    "user_id": record.user_id,
-                    "employee_name": "Error",
-                    "timestamp": str(record.timestamp),
-                    "punch": record.punch if hasattr(record, 'punch') else None,
-                    "status": record.status if hasattr(record, 'status') else None,
-                    "exists": False,
-                    "error": str(e)
-                })
-        
-        # Count new vs existing
-        new_count = sum(1 for r in preview_data if not r["exists"] and not r["error"])
-        duplicate_count = sum(1 for r in preview_data if r["exists"])
-        error_count = sum(1 for r in preview_data if r["error"])
-        
-        # If preview_only or confirmation required, return preview data
-        if preview_only or require_confirmation:
-            return {
-                "success": True,
-                "device_id": device_id,
-                "device_name": device.name,
-                "days_range": days if days > 0 else "all",
-                "total_fetched": len(attendance_records),
-                "filtered_count": filtered_count,
-                "new_count": new_count,
-                "duplicate_count": duplicate_count,
-                "error_count": error_count,
-                "preview_mode": True,
-                "requires_confirmation": require_confirmation,
-                "preview_data": preview_data[:100]  # Limit to first 100 for UI
-            }
-        
-        # Proceed with actual sync
-        added = 0
-        skipped = 0
-        errors = []
-        
-        # Process each attendance record
-        for record in attendance_records:
-            try:
-                # Ensure timestamp is timezone-aware first
-                timestamp = record.timestamp
-                if timestamp.tzinfo is None:
-                    # If naive, assume UTC
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
-                
-                # Validate and correct timestamp if enabled
-                timestamp_error = None
-                if validate_timestamps:
-                    timestamp, timestamp_error = validate_and_correct_timestamp(
-                        timestamp,
-                        device_date_format=device.date_format if hasattr(device, 'date_format') else "YYYY-MM-DD"
-                    )
-                    
-                    # If timestamp validation failed critically, skip this record
-                    if timestamp_error and "rejected" in timestamp_error.lower():
-                        errors.append({
-                            "user_id": record.user_id,
-                            "timestamp": str(record.timestamp),
-                            "error": timestamp_error
-                        })
-                        continue
-                
-                # Apply date filter after normalization
-                if cutoff_date is not None:
-                    if timestamp < cutoff_date:
-                        continue  # Skip old records
-                
-                # Find employee by device_user_id and source_device_id
-                employee = db.query(DBEmployee).filter(
-                    DBEmployee.source_device_id == device_id,
-                    DBEmployee.device_user_id == record.user_id
-                ).first()
-                
-                if not employee:
-                    errors.append({
-                        "user_id": record.user_id,
-                        "timestamp": timestamp.isoformat(),
-                        "error": "Employee not found in database"
-                    })
-                    continue
-                
-                # Check if this exact attendance record already exists
-                existing = db.query(DBAttendance).filter(
-                    DBAttendance.employee_id == employee.id,
-                    DBAttendance.timestamp == timestamp,
-                    DBAttendance.device_id == device_id
-                ).first()
-                
-                if existing:
+            else:
+                if is_dup:
                     skipped += 1
-                    continue
-                
-                # Add new attendance record
-                new_attendance = DBAttendance(
-                    employee_id=employee.id,
-                    device_id=device_id,
-                    uid=record.user_id,  # Required field
-                    user_id_str=str(record.user_id),  # Required field
-                    timestamp=timestamp,
-                    punch=record.punch,
-                    status=record.status
-                )
-                db.add(new_attendance)
-                added += 1
-                
-            except Exception as e:
-                errors.append({
-                    "user_id": record.user_id,
-                    "timestamp": record.timestamp.isoformat() if hasattr(record.timestamp, 'isoformat') else str(record.timestamp),
-                    "error": str(e)
+                elif ts_error and "rejected" in ts_error.lower():
+                    errors.append({"user_id": record.user_id, "timestamp": str(record.timestamp), "error": ts_error})
+                else:
+                    new_records.append(DBAttendance(
+                        employee_id=employee.id,
+                        device_id=device_id,
+                        uid=record.user_id,
+                        user_id_str=str(record.user_id),
+                        timestamp=timestamp,
+                        punch=record.punch,
+                        status=record.status
+                    ))
+                    # Add to set so later duplicates in the same batch are caught
+                    existing_set.add((employee.id, timestamp))
+
+        except Exception as e:
+            if preview_only:
+                preview_data.append({
+                    "user_id": record.user_id, "employee_name": "Error",
+                    "timestamp": str(record.timestamp), "punch": getattr(record, 'punch', None),
+                    "status": getattr(record, 'status', None), "exists": False, "error": str(e)
                 })
-        
-        db.commit()
-        
+            else:
+                errors.append({"user_id": record.user_id, "timestamp": str(record.timestamp), "error": str(e)})
+
+    process_time = _time.perf_counter() - t3
+    logger.info(f"Processed {len(attendance_records)} records in {process_time:.2f}s")
+
+    # ── Step 7: Return preview or commit inserts ─────────────────────────
+    if preview_only:
+        new_count = sum(1 for r in preview_data if not r["exists"] and not r.get("error"))
+        dup_count = sum(1 for r in preview_data if r["exists"])
+        err_count = sum(1 for r in preview_data if r.get("error"))
+        logger.info(
+            f"Preview for {device.name}: new={new_count}, dup={dup_count}, "
+            f"err={err_count}, filtered={filtered_count}, "
+            f"existing_set_size={len(existing_set)}"
+        )
+        # Log a few "new" records for debugging duplicate-detection issues
+        if new_count > 0 and dup_count == 0:
+            sample_new = [r for r in preview_data if not r["exists"] and not r.get("error")][:3]
+            for r in sample_new:
+                logger.warning(
+                    f"DEBUG new record: user_id={r['user_id']}, ts={r['timestamp']}, "
+                    f"emp={r['employee_name']}"
+                )
         return {
             "success": True,
             "device_id": device_id,
             "device_name": device.name,
             "days_range": days if days > 0 else "all",
             "total_fetched": len(attendance_records),
-            "added": added,
-            "skipped": skipped,
-            "errors": errors[:10]  # Limit errors to first 10
+            "filtered_count": filtered_count,
+            "new_count": new_count,
+            "duplicate_count": dup_count,
+            "error_count": err_count,
+            "preview_mode": True,
+            "requires_confirmation": True,
+            "preview_data": preview_data[:200]
         }
-        
-    except HTTPException:
-        raise
+
+    # Bulk insert
+    t4 = _time.perf_counter()
+    count_before = db.query(DBAttendance).filter(DBAttendance.device_id == device_id).count()
+    try:
+        if new_records:
+            db.bulk_save_objects(new_records)
+        db.commit()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to sync attendance: {str(e)}")
+        db.rollback()
+        logger.error(f"Bulk insert failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database insert failed: {e}")
+
+    # Verify records were actually persisted
+    count_after = db.query(DBAttendance).filter(DBAttendance.device_id == device_id).count()
+    if new_records and count_after == count_before:
+        logger.error(
+            f"COMMIT VERIFICATION FAILED: expected {count_before + len(new_records)} "
+            f"rows but found {count_after}"
+        )
+    else:
+        logger.info(f"DB attendance for device: {count_before} → {count_after} (+{count_after - count_before})")
+
+    insert_time = _time.perf_counter() - t4
+    total_time = _time.perf_counter() - t0
+    logger.info(
+        f"Attendance sync complete: {len(new_records)} added, {skipped} skipped, "
+        f"{len(errors)} errors in {total_time:.1f}s "
+        f"(fetch={fetch_time:.1f}s, process={process_time:.1f}s, insert={insert_time:.1f}s)"
+    )
+
+    return {
+        "success": True,
+        "device_id": device_id,
+        "device_name": device.name,
+        "days_range": days if days > 0 else "all",
+        "total_fetched": len(attendance_records),
+        "added": len(new_records),
+        "skipped": skipped,
+        "filtered_count": filtered_count,
+        "errors": errors[:20]
+    }

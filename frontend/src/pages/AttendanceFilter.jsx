@@ -58,7 +58,7 @@ function AttendanceFilter() {
       setTotalRecords(data.count || 0);
     } catch (error) {
       console.error('Search failed:', error);
-      alert('Failed to search attendance: ' + error.message);
+      alert(t('failedToSearch') + ': ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -82,7 +82,7 @@ function AttendanceFilter() {
     try {
       // TODO: Implement export functionality
       console.log(`Exporting to ${format}...`);
-      alert(`Export to ${format.toUpperCase()} will be implemented`);
+      alert(t('exportNotImplemented'));
     } catch (error) {
       console.error('Export failed:', error);
     }
@@ -164,8 +164,8 @@ function AttendanceFilter() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Filter Attendance</h1>
-          <p className="text-sm text-gray-500 mt-1">Search and analyze attendance records</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('filterAttendance')}</h1>
+          <p className="text-sm text-gray-500 mt-1">{t('searchAnalyze')}</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -173,14 +173,14 @@ function AttendanceFilter() {
             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
           >
             <Download className="w-4 h-4" />
-            Export Excel
+            {t('export')} Excel
           </button>
           <button
             onClick={() => handleExport('pdf')}
             className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
           >
             <FileText className="w-4 h-4" />
-            Export PDF
+            {t('export')} PDF
           </button>
         </div>
       </div>
@@ -190,13 +190,13 @@ function AttendanceFilter() {
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Filter className="w-5 h-5 text-gray-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Search Filters</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{t('filter')} {t('filters')}</h2>
           </div>
           <button
             onClick={() => setShowFilters(!showFilters)}
             className="text-sm text-primary-600 hover:text-primary-700"
           >
-            {showFilters ? 'Hide' : 'Show'} Filters
+            {showFilters ? t('hide') : t('show')} {t('filters')}
           </button>
         </div>
 
@@ -207,7 +207,7 @@ function AttendanceFilter() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   <Calendar className="w-4 h-4 inline mr-1" />
-                  Start Date
+                  {t('from')}
                 </label>
                 <input
                   type="date"
@@ -219,7 +219,7 @@ function AttendanceFilter() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   <Calendar className="w-4 h-4 inline mr-1" />
-                  End Date
+                  {t('to')}
                 </label>
                 <input
                   type="date"
@@ -235,14 +235,14 @@ function AttendanceFilter() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   <Building2 className="w-4 h-4 inline mr-1" />
-                  Company
+                  {t('company')}
                 </label>
                 <select
                   value={filters.companyId}
                   onChange={(e) => handleFilterChange('companyId', e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
-                  <option value="">All Companies</option>
+                  <option value="">{t('allCompanies')}</option>
                   {companies.map(company => (
                     <option key={company.id} value={company.id}>{company.name}</option>
                   ))}
@@ -251,14 +251,14 @@ function AttendanceFilter() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   <Users className="w-4 h-4 inline mr-1" />
-                  Department
+                  {t('department')}
                 </label>
                 <select
                   value={filters.departmentId}
                   onChange={(e) => handleFilterChange('departmentId', e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 >
-                  <option value="">All Departments</option>
+                  <option value="">{t('allDepartments')}</option>
                   {departments
                     .filter(d => !filters.companyId || d.company_id === parseInt(filters.companyId))
                     .map(dept => (
@@ -272,25 +272,25 @@ function AttendanceFilter() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Employee ID
+                  {t('deviceUserId')}
                 </label>
                 <input
                   type="text"
                   value={filters.employeeId}
                   onChange={(e) => handleFilterChange('employeeId', e.target.value)}
-                  placeholder="Enter employee ID"
+                  placeholder={t('deviceUserId')}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Employee Name
+                  {t('employeeName')}
                 </label>
                 <input
                   type="text"
                   value={filters.employeeName}
                   onChange={(e) => handleFilterChange('employeeName', e.target.value)}
-                  placeholder="Enter employee name"
+                  placeholder={t('enterEmployeeName')}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
               </div>
@@ -299,19 +299,19 @@ function AttendanceFilter() {
             {/* Status Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Attendance Status
+                {t('attendanceStatus')}
               </label>
               <div className="flex gap-3">
-                {['all', 'present', 'late', 'absent'].map(status => (
-                  <label key={status} className="flex items-center">
+                {[{value: 'all', label: t('statusAll')}, {value: 'present', label: t('statusPresent')}, {value: 'late', label: t('statusLate')}, {value: 'absent', label: t('statusAbsent')}].map(({value, label}) => (
+                  <label key={value} className="flex items-center">
                     <input
                       type="radio"
-                      value={status}
-                      checked={filters.status === status}
+                      value={value}
+                      checked={filters.status === value}
                       onChange={(e) => handleFilterChange('status', e.target.value)}
                       className="mr-2"
                     />
-                    <span className="text-sm text-gray-700 capitalize">{status}</span>
+                    <span className="text-sm text-gray-700">{label}</span>
                   </label>
                 ))}
               </div>
@@ -327,12 +327,12 @@ function AttendanceFilter() {
                 {loading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Searching...
+                    {t('searching')}
                   </>
                 ) : (
                   <>
                     <Search className="w-4 h-4" />
-                    Search
+                    {t('searchButton')}
                   </>
                 )}
               </button>
@@ -341,7 +341,7 @@ function AttendanceFilter() {
                 className="flex items-center gap-2 px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 <X className="w-4 h-4" />
-                Reset
+                {t('reset')}
               </button>
             </div>
           </div>
@@ -355,7 +355,7 @@ function AttendanceFilter() {
             <div className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
               <span className="text-sm font-medium text-blue-900">
-                Found {totalRecords} attendance record{totalRecords !== 1 ? 's' : ''}
+                {totalRecords} {t('records')}
               </span>
             </div>
             <span className="text-xs text-blue-700">
@@ -395,8 +395,8 @@ function AttendanceFilter() {
         ) : attendanceData.length === 0 ? (
           <div className="p-12 text-center">
             <Search className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <p className="text-gray-500 text-lg">No results found</p>
-            <p className="text-gray-400 text-sm mt-2">Try adjusting your filters and search again</p>
+            <p className="text-gray-500 text-lg">{t('noRecordsFound')}</p>
+            <p className="text-gray-400 text-sm mt-2">{t('tryAdjusting')}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

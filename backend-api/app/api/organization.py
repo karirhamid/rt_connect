@@ -376,22 +376,28 @@ async def delete_position(position_id: int, db: Session = Depends(get_db)):
 
 
 # Helper function to sync employee to devices
-def sync_employee_to_devices(employee: Employee, operation: str = "update"):
+def sync_employee_to_devices(employee: Employee, operation: str = "update",
+                             max_retries: int = 3, retry_delay: float = 5.0):
     """
     Sync employee changes to their source device.
     
     SAFETY GUARANTEE: This function ONLY affects the specific employee
     being synced. Other employees on the devices are NOT modified.
     
+    Includes retry logic: if the device is busy (e.g. background sync holds
+    the connection lock), we wait and retry up to ``max_retries`` times.
+    
     Args:
         employee: The employee object to sync
         operation: 'create', 'update', or 'delete'
+        max_retries: Number of attempts before giving up (default 3)
+        retry_delay: Seconds to wait between retries (default 5)
     
     Returns:
         List of error messages (empty if all successful)
     """
-    sync_errors = []
-    
+    import time as _time
+
     # Only sync to the employee's source device
     if not employee.source_device_id:
         logger.warning(f"Employee '{employee.name}' has no source_device_id - skipping device sync")
@@ -405,82 +411,100 @@ def sync_employee_to_devices(employee: Employee, operation: str = "update"):
     
     logger.info(f"Starting sync of employee '{employee.name}' (UID={employee.device_user_id}) to device '{device_config.name}' - Operation: {operation}")
     
-    try:
-        manager = ZKTecoDeviceManager(
-            ip=device_config.ip,
-            port=device_config.port,
-            timeout=5
-        )
-        
-        if operation == "delete":
-            # SAFETY: Only deletes THIS specific employee by UID
-            manager.delete_user(uid=employee.device_user_id)
-            logger.info(f"✓ Deleted employee '{employee.name}' (UID={employee.device_user_id}) from device '{device_config.name}'")
-        else:
-            # For create or update
-            # SAFETY: Only updates THIS specific employee by UID
-            # Map application privilege (14=Admin, 0=User) to device privilege.
-            # Some ZKTeco firmwares use 14 for admin, others 6. Detect and use what's present.
-            device_admin_code = 14
-            try:
-                users_on_device = ZKTecoDeviceManager(ip=device_config.ip, port=device_config.port, timeout=5).get_users()
-                if any(u.privilege == 14 for u in users_on_device):
-                    device_admin_code = 14
-                elif any(u.privilege == 6 for u in users_on_device):
-                    device_admin_code = 6
-                else:
-                    device_admin_code = 14  # default
-            except Exception as e:
-                # If detection fails, default to 14
-                logger.warning(f"Could not detect device admin code on {device_config.name}: {e}. Defaulting to 14")
-                device_admin_code = 14
-
-            device_privilege = 0 if employee.privilege == 0 else device_admin_code if employee.privilege == 14 else employee.privilege
-            
-            manager.update_user(
-                uid=employee.device_user_id,
-                name=employee.name,
-                privilege=device_privilege,
-                password=employee.password or "",
-                group_id=employee.group_id or "",
-                user_id=employee.user_id,
-                card=employee.card_number or 0
+    for attempt in range(1, max_retries + 1):
+        sync_errors = []
+        try:
+            manager = ZKTecoDeviceManager(
+                ip=device_config.ip,
+                port=device_config.port,
+                timeout=15  # longer timeout for manual sync (device may be finishing background sync)
             )
-            # Verify admin took effect; if not, try alternate admin code (14 vs 6)
-            if employee.privilege == 14:
-                try:
-                    verify_mgr = ZKTecoDeviceManager(ip=device_config.ip, port=device_config.port, timeout=5)
-                    users = verify_mgr.get_users()
-                    me = next((u for u in users if str(u.user_id) == str(employee.user_id) or int(u.uid) == int(employee.device_user_id)), None)
-                    if me and me.privilege not in (6, 14):
-                        for alt_admin in [14, 6, 3, 1]:
-                            if alt_admin == device_privilege:
-                                continue
-                            logger.info(f"Admin not applied with code {device_privilege}; retrying with {alt_admin}")
-                            manager.update_user(
-                                uid=employee.device_user_id,
-                                name=employee.name,
-                                privilege=alt_admin,
-                                password=employee.password or "",
-                                group_id=employee.group_id or "",
-                                user_id=employee.user_id,
-                                card=employee.card_number or 0
-                            )
-                            users2 = verify_mgr.get_users()
-                            me2 = next((u for u in users2 if str(u.user_id) == str(employee.user_id) or int(u.uid) == int(employee.device_user_id)), None)
-                            if me2 and me2.privilege in (6, 14, 3, 1):
-                                break
-                except Exception as e:
-                    logger.warning(f"Admin verification/retry failed: {e}")
-            logger.info(f"✓ Synced employee '{employee.name}' (UID={employee.device_user_id}, app_privilege={employee.privilege}, device_privilege={device_privilege}) to device '{device_config.name}'")
             
-    except Exception as e:
-        error_msg = f"Failed to sync to device {device_config.name}: {str(e)}"
-        logger.error(f"✗ {error_msg}")
-        sync_errors.append(error_msg)
-    
-    if not sync_errors:
-        logger.info(f"✓ Successfully synced employee '{employee.name}' to device '{device_config.name}'")
+            if operation == "delete":
+                # SAFETY: Only deletes THIS specific employee by UID
+                manager.delete_user(uid=employee.device_user_id)
+                logger.info(f"Deleted employee '{employee.name}' (UID={employee.device_user_id}) from device '{device_config.name}'")
+            else:
+                # For create or update - use a SINGLE connection for all operations
+                with manager.session() as mgr:
+                    # Fetch users once — used for admin detection AND UID resolution
+                    users_on_device = []
+                    device_admin_code = 14
+                    try:
+                        users_on_device = mgr.get_users() or []
+                        if any(u.privilege == 14 for u in users_on_device):
+                            device_admin_code = 14
+                        elif any(u.privilege == 6 for u in users_on_device):
+                            device_admin_code = 6
+                        else:
+                            device_admin_code = 14
+                    except Exception as e:
+                        logger.warning(f"Could not detect device admin code on {device_config.name}: {e}. Defaulting to 14")
+                        device_admin_code = 14
+
+                    # Cache the user list so update_user can resolve real UIDs without re-fetching
+                    mgr._cached_users = users_on_device
+
+                    device_privilege = 0 if employee.privilege == 0 else device_admin_code if employee.privilege == 14 else employee.privilege
+                    
+                    mgr.update_user(
+                        uid=employee.device_user_id,
+                        name=employee.name,
+                        privilege=device_privilege,
+                        password=employee.password or "",
+                        group_id=employee.group_id or "",
+                        user_id=employee.user_id,
+                        card=employee.card_number or 0
+                    )
+                    
+                    # Verify admin took effect; if not, try alternate admin code (reusing same connection)
+                    if employee.privilege == 14:
+                        try:
+                            users = mgr.get_users()
+                            me = next((u for u in users if str(u.user_id) == str(employee.user_id) or int(u.uid) == int(employee.device_user_id)), None)
+                            if me and me.privilege not in (6, 14):
+                                for alt_admin in [14, 6, 3, 1]:
+                                    if alt_admin == device_privilege:
+                                        continue
+                                    logger.info(f"Admin not applied with code {device_privilege}; retrying with {alt_admin}")
+                                    mgr.update_user(
+                                        uid=employee.device_user_id,
+                                        name=employee.name,
+                                        privilege=alt_admin,
+                                        password=employee.password or "",
+                                        group_id=employee.group_id or "",
+                                        user_id=employee.user_id,
+                                        card=employee.card_number or 0
+                                    )
+                                    users2 = mgr.get_users()
+                                    me2 = next((u for u in users2 if str(u.user_id) == str(employee.user_id) or int(u.uid) == int(employee.device_user_id)), None)
+                                    if me2 and me2.privilege in (6, 14, 3, 1):
+                                        break
+                        except Exception as e:
+                            logger.warning(f"Admin verification/retry failed: {e}")
+                            
+                logger.info(f"Synced employee '{employee.name}' (UID={employee.device_user_id}, app_privilege={employee.privilege}, device_privilege={device_privilege}) to device '{device_config.name}'")
+            
+            # Success — break out of retry loop
+            logger.info(f"✓ Successfully synced employee '{employee.name}' to device '{device_config.name}'")
+            return []
+                
+        except (TimeoutError, ConnectionError, OSError) as e:
+            is_busy = "Another operation is in progress" in str(e) or "timed out" in str(e).lower()
+            if is_busy and attempt < max_retries:
+                logger.warning(f"Device '{device_config.name}' is busy (attempt {attempt}/{max_retries}). "
+                             f"Retrying in {retry_delay}s...")
+                _time.sleep(retry_delay)
+                continue
+            error_msg = f"Failed to sync to device {device_config.name}: {str(e)}"
+            logger.error(f"✗ {error_msg}")
+            sync_errors.append(error_msg)
+        except Exception as e:
+            error_msg = f"Failed to sync to device {device_config.name}: {str(e)}"
+            logger.error(f"✗ {error_msg}")
+            sync_errors.append(error_msg)
+            # Non-retryable errors — break immediately
+            break
     
     return sync_errors
 
@@ -553,21 +577,24 @@ async def sync_employees_from_devices(db: Session = Depends(get_db)):
             }
             
             try:
-                # Connect to device
+                # Use a SINGLE connection per device for info + users
                 manager = ZKTecoDeviceManager(
                     ip=device_config.ip,
                     port=device_config.port,
-                    timeout=10
+                    timeout=15
                 )
                 
-                info = manager.get_device_info()
-                if not info:
-                    device_result['errors'].append('Failed to connect to device')
-                    results['devices'][device_config.id] = device_result
-                    continue
+                with manager.session() as mgr:
+                    info = mgr.get_device_info()
+                    if not info:
+                        device_result['errors'].append('Failed to connect to device')
+                        results['devices'][device_config.id] = device_result
+                        continue
+                    
+                    # Get all users from device (reusing same connection)
+                    users = mgr.get_users() or []
                 
-                # Get all users from device
-                users = manager.get_users() or []
+                # Connection is now closed; process the fetched data
                 device_result['fetched'] = len(users)
                 results['total_fetched'] += len(users)
                 

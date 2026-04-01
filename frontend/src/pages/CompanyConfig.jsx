@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Building2, Users, Briefcase, Plus, Edit, Trash2, X, Save, Loader2, CheckCircle, AlertCircle, ChevronRight, ChevronDown } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 
 function CompanyConfig() {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('company');
   const [companies, setCompanies] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -18,9 +20,9 @@ function CompanyConfig() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   const tabs = [
-    { id: 'company', name: 'Company Info', icon: Building2 },
-    { id: 'department', name: 'Departments', icon: Users },
-    { id: 'position', name: 'Positions', icon: Briefcase },
+    { id: 'company', name: t('companyInfo'), icon: Building2 },
+    { id: 'department', name: t('departments'), icon: Users },
+    { id: 'position', name: t('positions'), icon: Briefcase },
   ];
 
   const showNotification = (type, message) => {
@@ -50,7 +52,7 @@ function CompanyConfig() {
       }
     } catch (error) {
       console.error('Failed to fetch data:', error);
-      showNotification('error', 'Failed to load data: ' + error.message);
+      showNotification('error', t('failedToLoadData') + ': ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -144,23 +146,23 @@ function CompanyConfig() {
       
       if (activeTab === 'company') {
         const company = companies.find(c => c.id === id);
-        itemName = company?.name || 'this company';
+        itemName = company?.name || t('companyLabel');
         itemType = 'company';
         const deptCount = departments.filter(d => d.company_id === id).length;
         if (deptCount > 0) {
-          warningMessage = `This company has ${deptCount} department${deptCount !== 1 ? 's' : ''}. All departments and their data will also be deleted.`;
+          warningMessage = `${deptCount} ${t('departments').toLowerCase()}`;
         }
       } else if (activeTab === 'department') {
         const dept = departments.find(d => d.id === id);
-        itemName = dept?.name || 'this department';
+        itemName = dept?.name || t('departmentLabel');
         itemType = 'department';
         const childCount = departments.filter(d => d.parent_id === id).length;
         if (childCount > 0) {
-          warningMessage = `This department has ${childCount} sub-department${childCount !== 1 ? 's' : ''}. All sub-departments will also be deleted.`;
+          warningMessage = `${childCount} ${t('subDepartments').toLowerCase()}`;
         }
       } else if (activeTab === 'position') {
         const position = positions.find(p => p.id === id);
-        itemName = position?.name || 'this position';
+        itemName = position?.name || t('positionLabel');
         itemType = 'position';
       }
       
@@ -181,7 +183,7 @@ function CompanyConfig() {
       if (activeTab === 'company') {
         await fetchHierarchyData();
       }
-      showNotification('success', 'Item deleted successfully!');
+      showNotification('success', t('itemDeleted'));
     } catch (error) {
       console.error('Failed to delete:', error);
       showNotification('error', error.message);
@@ -199,18 +201,18 @@ function CompanyConfig() {
       if (activeTab === 'company') {
         if (editingItem) {
           await api.updateCompany(editingItem.id, formData);
-          showNotification('success', 'Company updated successfully!');
+          showNotification('success', t('companyUpdated'));
         } else {
           await api.createCompany(formData);
-          showNotification('success', 'Company created successfully!');
+          showNotification('success', t('companyCreated'));
         }
       } else if (activeTab === 'department') {
         if (editingItem) {
           await api.updateDepartment(editingItem.id, formData);
-          showNotification('success', 'Department updated successfully!');
+          showNotification('success', t('departmentUpdated'));
         } else {
           await api.createDepartment(formData);
-          showNotification('success', 'Department created successfully!');
+          showNotification('success', t('departmentCreated'));
         }
       } else if (activeTab === 'position') {
         // Convert department_id to array for API
@@ -220,10 +222,10 @@ function CompanyConfig() {
         };
         if (editingItem) {
           await api.updatePosition(editingItem.id, positionData);
-          showNotification('success', 'Position updated successfully!');
+          showNotification('success', t('positionUpdated'));
         } else {
           await api.createPosition(positionData);
-          showNotification('success', 'Position created successfully!');
+          showNotification('success', t('positionCreated'));
         }
       }
       setShowModal(false);
@@ -242,7 +244,7 @@ function CompanyConfig() {
   const renderCompanyForm = () => (
     <div className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('companyName')}</label>
         <input
           type="text"
           value={formData.name || ''}
@@ -252,7 +254,7 @@ function CompanyConfig() {
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('address')}</label>
         <input
           type="text"
           value={formData.address || ''}
@@ -261,7 +263,7 @@ function CompanyConfig() {
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('phone')}</label>
         <input
           type="text"
           value={formData.phone || ''}
@@ -270,7 +272,7 @@ function CompanyConfig() {
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('email')}</label>
         <input
           type="email"
           value={formData.email || ''}
@@ -284,21 +286,21 @@ function CompanyConfig() {
   const renderDepartmentForm = () => (
     <div className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('company')}</label>
         <select
           value={formData.company_id || ''}
           onChange={(e) => setFormData({ ...formData, company_id: parseInt(e.target.value) })}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           required
         >
-          <option value="">Select Company</option>
+          <option value="">{t('selectCompany')}</option>
           {companies.map(company => (
             <option key={company.id} value={company.id}>{company.name}</option>
           ))}
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Department Name</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('departmentName')}</label>
         <input
           type="text"
           value={formData.name || ''}
@@ -308,20 +310,20 @@ function CompanyConfig() {
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Parent Department (Optional)</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('parentDepartmentOptional')}</label>
         <select
           value={formData.parent_id || ''}
           onChange={(e) => setFormData({ ...formData, parent_id: e.target.value ? parseInt(e.target.value) : null })}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
         >
-          <option value="">None (Top Level)</option>
+          <option value="">{t('noneTopLevel')}</option>
           {departments.filter(d => d.company_id === parseInt(formData.company_id) && d.id !== editingItem?.id).map(dept => (
             <option key={dept.id} value={dept.id}>{dept.name}</option>
           ))}
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('description')}</label>
         <textarea
           value={formData.description || ''}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -335,7 +337,7 @@ function CompanyConfig() {
   const renderPositionForm = () => (
     <div className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Position Name</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('positionName')}</label>
         <input
           type="text"
           value={formData.name || ''}
@@ -345,20 +347,20 @@ function CompanyConfig() {
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('department')}</label>
         <select
           value={formData.department_id || ''}
           onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
         >
-          <option value="">Select Department</option>
+          <option value="">{t('selectDepartment')}</option>
           {departments.map(dept => (
             <option key={dept.id} value={dept.id}>{dept.name}</option>
           ))}
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t('description')}</label>
         <textarea
           value={formData.description || ''}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -415,7 +417,7 @@ function CompanyConfig() {
                 <span className="font-medium text-gray-900">{dept.name}</span>
                 {hasChildren && (
                   <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                    {children.length} sub-dept{children.length !== 1 ? 's' : ''}
+                    {children.length} {t('subDepartments').toLowerCase()}
                   </span>
                 )}
               </div>
@@ -423,7 +425,7 @@ function CompanyConfig() {
                 <span className="text-xs text-gray-500">{dept.company_name}</span>
                 {dept.parent_name && (
                   <span className="text-xs text-gray-400">
-                    Parent: {dept.parent_name}
+                    {t('parentLabel')}: {dept.parent_name}
                   </span>
                 )}
               </div>
@@ -447,7 +449,7 @@ function CompanyConfig() {
                   }
                 }}
                 className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                title="Add child department"
+                title={t('add')}
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -455,7 +457,7 @@ function CompanyConfig() {
                 onClick={() => handleEdit(dept)}
                 disabled={saving}
                 className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors disabled:opacity-50"
-                title="Edit department"
+                title={t('edit')}
               >
                 <Edit className="w-4 h-4" />
               </button>
@@ -463,7 +465,7 @@ function CompanyConfig() {
                 onClick={() => handleDelete(dept.id)}
                 disabled={saving}
                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                title="Delete department"
+                title={t('delete')}
               >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
               </button>
@@ -486,8 +488,8 @@ function CompanyConfig() {
       return (
         <div className="text-center py-16">
           <Users className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-500 text-lg mb-2">No departments yet</p>
-          <p className="text-gray-400 text-sm">Click "Add New" to create your first department</p>
+          <p className="text-gray-500 text-lg mb-2">{t('noData')}</p>
+          <p className="text-gray-400 text-sm">{t('clickAddEmployee')}</p>
         </div>
       );
     }
@@ -505,13 +507,13 @@ function CompanyConfig() {
 
     if (activeTab === 'company') {
       data = companies;
-      columns = ['Name', 'Address', 'Phone', 'Email'];
+      columns = [t('nameColumn'), t('address') || 'Address', t('phone') || 'Phone', t('email')];
     } else if (activeTab === 'department') {
       // For departments, use hierarchical view instead
       return renderDepartmentHierarchy();
     } else if (activeTab === 'position') {
       data = positions;
-      columns = ['Name', 'Department', 'Description'];
+      columns = [t('nameColumn'), t('departmentLabel'), t('descriptionColumn')];
     }
 
     return (
@@ -525,7 +527,7 @@ function CompanyConfig() {
                 </th>
               ))}
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Actions
+                {t('actions')}
               </th>
             </tr>
           </thead>
@@ -596,13 +598,13 @@ function CompanyConfig() {
 
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Company Configuration</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('companyConfiguration')}</h1>
         <button
           onClick={handleAdd}
           className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
         >
           <Plus className="w-5 h-5" />
-          Add New
+          {t('addNew')}
         </button>
       </div>
 
@@ -637,7 +639,7 @@ function CompanyConfig() {
             <div className="p-4 border-b border-gray-200">
               <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-primary-600" />
-                Organization Hierarchy
+                {t('organizationHierarchy')}
               </h3>
             </div>
             <div className="p-4 max-h-[600px] overflow-y-auto">
@@ -653,7 +655,7 @@ function CompanyConfig() {
               ) : hierarchyData.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <Building2 className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                  <p>No companies yet</p>
+                  <p>{t('noCompaniesYet')}</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -688,7 +690,7 @@ function CompanyConfig() {
                               )}
                               {hasChildren && (
                                 <div className="text-xs text-gray-400">
-                                  {dept.children.length} sub-dept{dept.children.length !== 1 ? 's' : ''}
+                                  {dept.children.length} {t('subDepartments').toLowerCase()}
                                 </div>
                               )}
                             </div>
@@ -770,45 +772,49 @@ function CompanyConfig() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">
-                {editingItem ? 'Edit' : 'Add'} {tabs.find(t => t.id === activeTab)?.name}
-              </h3>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {editingItem ? t('edit') : t('add')} {tabs.find(tb => tb.id === activeTab)?.name}
+                </h3>
+              </div>
               <button
                 onClick={() => setShowModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6">
-              {activeTab === 'company' && renderCompanyForm()}
-              {activeTab === 'department' && renderDepartmentForm()}
-              {activeTab === 'position' && renderPositionForm()}
-              <div className="flex gap-3 mt-6">
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                {activeTab === 'company' && renderCompanyForm()}
+                {activeTab === 'department' && renderDepartmentForm()}
+                {activeTab === 'position' && renderPositionForm()}
+              </div>
+              <div className="flex gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm"
                 >
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm shadow-sm"
                 >
                   {saving ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Saving...
+                      {t('saving')}
                     </>
                   ) : (
                     <>
                       <Save className="w-4 h-4" />
-                      Save
+                      {t('save')}
                     </>
                   )}
                 </button>
@@ -828,8 +834,8 @@ function CompanyConfig() {
                 <AlertCircle className="w-6 h-6 text-red-600" />
               </div>
               <div className="flex-1">
-                <h3 className="text-lg font-semibold text-gray-900">Confirm Deletion</h3>
-                <p className="text-sm text-gray-600 mt-0.5">This action cannot be undone</p>
+                <h3 className="text-lg font-semibold text-gray-900">{t('confirmDeletion')}</h3>
+                <p className="text-sm text-gray-600 mt-0.5">{t('actionCannotBeUndone')}</p>
               </div>
               <button
                 onClick={() => setDeleteConfirm(null)}
@@ -843,8 +849,7 @@ function CompanyConfig() {
             <div className="p-6 space-y-4">
               <div className="space-y-2">
                 <p className="text-gray-700">
-                  Are you sure you want to delete{' '}
-                  <span className="font-semibold text-gray-900">{deleteConfirm.type}</span>{' '}
+                  {t('confirmDeletion')}:{' '}
                   "<span className="font-semibold text-red-600">{deleteConfirm.name}</span>"?
                 </p>
                 
@@ -852,7 +857,7 @@ function CompanyConfig() {
                   <div className="flex gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
                     <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
                     <div className="text-sm text-amber-800">
-                      <p className="font-medium mb-1">Warning!</p>
+                      <p className="font-medium mb-1">{t('warningLabel')}!</p>
                       <p>{deleteConfirm.warning}</p>
                     </div>
                   </div>
@@ -867,7 +872,7 @@ function CompanyConfig() {
                   disabled={saving}
                   className="flex-1 px-4 py-2.5 border-2 border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button
                   type="button"
@@ -878,12 +883,12 @@ function CompanyConfig() {
                   {saving ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Deleting...
+                      {t('loading')}
                     </>
                   ) : (
                     <>
                       <Trash2 className="w-4 h-4" />
-                      Delete
+                      {t('delete')}
                     </>
                   )}
                 </button>

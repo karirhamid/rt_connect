@@ -1,4 +1,5 @@
 import { X, AlertTriangle, CheckCircle, Info, AlertCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 export default function Dialog({ 
   isOpen, 
@@ -7,10 +8,13 @@ export default function Dialog({
   title, 
   message, 
   type = 'confirm', // 'confirm', 'success', 'error', 'warning', 'info'
-  confirmText = 'Confirm',
-  cancelText = 'Cancel',
+  confirmText,
+  cancelText,
   loading = false 
 }) {
+  const { t } = useTranslation();
+  const resolvedConfirmText = confirmText || t('confirm');
+  const resolvedCancelText = cancelText || t('cancel');
   if (!isOpen) return null;
 
   const icons = {
@@ -59,7 +63,7 @@ export default function Dialog({
             disabled={loading}
             className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-100 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {cancelText}
+            {cancelText || resolvedCancelText}
           </button>
           {onConfirm && (
             <button
@@ -74,17 +78,17 @@ export default function Dialog({
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Processing...
+                  {t('processing')}
                 </span>
               ) : (
-                confirmText
+                confirmText || resolvedConfirmText
               )}
             </button>
           )}
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes fadeIn {
           from {
             opacity: 0;
@@ -143,7 +147,7 @@ export function Toast({ message, type = 'success', onClose }) {
         </button>
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes slideIn {
           from {
             transform: translateX(100%);

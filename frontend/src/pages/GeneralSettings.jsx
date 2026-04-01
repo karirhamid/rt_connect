@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Save, Check, Clock, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+import { Globe, Save, Check, Clock, AlertCircle, Loader2, RefreshCw, Sun } from 'lucide-react';
 import api from '../services/api';
 
 function GeneralSettings() {
@@ -18,14 +18,35 @@ function GeneralSettings() {
   const [notification, setNotification] = useState(null);
 
   const tabs = [
-    { id: 'language', name: 'Language', icon: Globe },
-    { id: 'regional', name: 'Time & Timezone', icon: Clock },
-    { id: 'sync', name: 'Sync', icon: RefreshCw },
+    { id: 'language', name: t('languageTab'), icon: Globe },
+    { id: 'regional', name: t('regionalTab'), icon: Clock },
+    { id: 'sync', name: t('syncTab'), icon: RefreshCw },
+    { id: 'appearance', name: t('appearanceTab'), icon: Sun },
   ];
 
+  // Appearance / Theme state
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('theme') || 'system'; } catch (e) { return 'system'; }
+  });
+  const [uiSidebarStyle, setUiSidebarStyle] = useState(() => {
+    try { return localStorage.getItem('sidebarStyle') || 'classic'; } catch (e) { return 'classic'; }
+  });
+
+  const applyAppearance = (newTheme, newSidebar) => {
+    try { if (newTheme) localStorage.setItem('theme', newTheme); } catch (e) {}
+    try { if (newSidebar) localStorage.setItem('sidebarStyle', newSidebar); } catch (e) {}
+
+    // Dispatch events so App can react
+    if (newTheme) window.dispatchEvent(new CustomEvent('themeChange', { detail: newTheme }));
+    if (newSidebar) window.dispatchEvent(new CustomEvent('sidebarStyleChange', { detail: newSidebar }));
+  };
+
+  const saveAppearance = () => {
+    applyAppearance(theme, uiSidebarStyle);
+    showNotification('success', t('appearanceSaved') || 'Appearance saved');
+  };
+
   // Sync settings state
-  const [syncEnabled, setSyncEnabled] = useState(true);
-  const [syncInterval, setSyncInterval] = useState(300);
   const [requireSyncConfirmation, setRequireSyncConfirmation] = useState(true);
   const [validateTimestamps, setValidateTimestamps] = useState(true);
   const [loadingSync, setLoadingSync] = useState(false);
@@ -56,13 +77,11 @@ function GeneralSettings() {
     setLoadingSync(true);
     try {
       const settings = await api.getGeneralSettings();
-      setSyncEnabled(!!settings.sync_enabled);
-      setSyncInterval(Number(settings.sync_interval_sec || 300));
       setRequireSyncConfirmation(!!settings.require_sync_confirmation);
       setValidateTimestamps(settings.validate_timestamps !== undefined ? !!settings.validate_timestamps : true);
     } catch (err) {
       console.error('Failed to load settings:', err);
-      showNotification('error', 'Failed to load general settings');
+      showNotification('error', t('failedToLoadData'));
     } finally {
       setLoadingSync(false);
     }
@@ -72,16 +91,14 @@ function GeneralSettings() {
     setLoadingSync(true);
     try {
       const payload = { 
-        sync_enabled: !!syncEnabled, 
-        sync_interval_sec: Math.max(60, Number(syncInterval||300)),
         require_sync_confirmation: !!requireSyncConfirmation,
         validate_timestamps: !!validateTimestamps
       };
       await api.updateGeneralSettings(payload);
-      showNotification('success', 'Sync settings saved');
+      showNotification('success', t('settingsSaved'));
     } catch (err) {
       console.error('Failed to save settings:', err);
-      showNotification('error', 'Failed to save sync settings');
+      showNotification('error', t('updateFailed'));
     } finally {
       setLoadingSync(false);
     }
@@ -100,7 +117,7 @@ function GeneralSettings() {
       });
     } catch (error) {
       console.error('Failed to load devices:', error);
-      showNotification('error', 'Failed to load devices');
+      showNotification('error', t('failedToLoadData'));
     } finally {
       setLoadingDevices(false);
     }
@@ -128,7 +145,7 @@ function GeneralSettings() {
       }
     } catch (error) {
       console.error(`Failed to load time for device ${deviceId}:`, error);
-      showNotification('error', `Failed to load time for device`);
+      showNotification('error', t('failedToLoadData'));
     } finally {
       setLoadingDeviceTimes(prev => ({ ...prev, [deviceId]: false }));
     }
@@ -183,7 +200,7 @@ function GeneralSettings() {
 
   const handleSaveLanguage = () => {
     setSaved(true);
-    showNotification('success', 'Language settings saved successfully!');
+    showNotification('success', t('languageSaved'));
     setTimeout(() => setSaved(false), 3000);
   };
 
@@ -192,13 +209,13 @@ function GeneralSettings() {
     setSaving(true);
     try {
       await api.setDeviceTime(deviceId, offset);
-      showNotification('success', 'Device timezone updated successfully!');
+      showNotification('success', t('deviceTimezoneSaved'));
       
       // Reload device time
       await loadDeviceTime(deviceId);
     } catch (error) {
       console.error('Failed to save timezone:', error);
-      showNotification('error', 'Failed to update device timezone');
+      showNotification('error', t('operationFailed'));
     } finally {
       setSaving(false);
     }
@@ -213,14 +230,14 @@ function GeneralSettings() {
       if (response.failed && response.failed.length > 0) {
         showNotification('warning', `Time updated for ${response.successful.length} devices. ${response.failed.length} failed.`);
       } else {
-        showNotification('success', `Time zone updated successfully for all ${response.successful.length} devices!`);
+        showNotification('success', t('deviceTimezoneSaved'));
       }
       
       // Reload device times
       devices.forEach(device => loadDeviceTime(device.id));
     } catch (error) {
       console.error('Failed to save timezone:', error);
-      showNotification('error', 'Failed to update device time zones');
+      showNotification('error', t('operationFailed'));
     } finally {
       setSaving(false);
     }
@@ -228,7 +245,7 @@ function GeneralSettings() {
 
   const handleRefreshDeviceTime = async (deviceId) => {
     await loadDeviceTime(deviceId);
-    showNotification('success', 'Device time refreshed');
+    showNotification('success', t('deviceTimezoneSaved'));
   };
 
   return (
@@ -255,7 +272,7 @@ function GeneralSettings() {
 
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">General Settings</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('generalSettings')}</h1>
       </div>
 
       {/* Tabs */}
@@ -367,20 +384,45 @@ function GeneralSettings() {
           </div>
         )}
 
+        {activeTab === 'appearance' && (
+          <div className="p-6 space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">{t('themeSettings') || 'Theme & Appearance'}</h2>
+              <p className="text-sm text-gray-600">{t('themeDesc') || 'Customize theme and sidebar appearance.'}</p>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <h3 className="text-md font-semibold text-gray-900 mb-3">{t('selectTheme') || 'Theme'}</h3>
+              <div className="flex gap-3">
+                <button onClick={() => setTheme('system')} className={`px-4 py-2 rounded-lg border ${theme === 'system' ? 'border-primary-600 bg-primary-50' : 'border-gray-200'}`}>{t('themeSystem') || 'System'}</button>
+                <button onClick={() => setTheme('light')} className={`px-4 py-2 rounded-lg border ${theme === 'light' ? 'border-primary-600 bg-primary-50' : 'border-gray-200'}`}>{t('themeLight') || 'Light'}</button>
+                <button onClick={() => setTheme('dark')} className={`px-4 py-2 rounded-lg border ${theme === 'dark' ? 'border-primary-600 bg-primary-50' : 'border-gray-200'}`}>{t('themeDark') || 'Dark'}</button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button onClick={saveAppearance} className="flex items-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium">
+                <Save className="w-5 h-5" />
+                {t('saveChanges')}
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'regional' && (
           <div className="p-6">
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-2">Time & Timezone Settings</h2>
-              <p className="text-sm text-gray-600">Configure timezone for all devices. Changes will be applied to all connected devices.</p>
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">{t('timeTimezoneSettings')}</h2>
+              <p className="text-sm text-gray-600">{t('timeTimezoneDesc')}</p>
             </div>
 
               {/* Bulk Timezone Selection */}
               <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <h3 className="text-md font-semibold text-gray-900 mb-3 flex items-center gap-2">
                   <Clock className="w-5 h-5 text-blue-600" />
-                  Apply Timezone to All Devices
+                  {t('applyTimezoneAll')}
                 </h3>
-                <p className="text-sm text-gray-600 mb-3">Set the same timezone for all devices at once</p>
+                <p className="text-sm text-gray-600 mb-3">{t('setSameTimezoneAll')}</p>
                 <div className="flex gap-3">
                   <select
                     value={selectedTimezone}
@@ -396,12 +438,12 @@ function GeneralSettings() {
                     disabled={saving || devices.length === 0}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                   >
-                    {saving ? 'Applying...' : 'Apply to All'}
+                    {saving ? t('applying') : t('applyToAll')}
                   </button>
                 </div>
               </div>              {/* Individual Device Timezone Configuration */}
               <div className="mb-6">
-                <h3 className="text-md font-semibold text-gray-900 mb-3">Individual Device Timezones</h3>
+                <h3 className="text-md font-semibold text-gray-900 mb-3">{t('individualDeviceTimezones')}</h3>
                 
                 {loadingDevices ? (
                   <div className="flex items-center justify-center py-8">
@@ -410,7 +452,7 @@ function GeneralSettings() {
                 ) : devices.length === 0 ? (
                   <div className="bg-gray-50 rounded-lg p-6 text-center">
                     <Clock className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-                    <p className="text-gray-600">No devices registered</p>
+                    <p className="text-gray-600">{t('noDevicesRegistered')}</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -428,11 +470,11 @@ function GeneralSettings() {
                             {deviceTimes[device.id] && (
                               <div className="mt-2 space-y-1">
                                 <p className="text-sm text-gray-700">
-                                  <span className="font-medium">Current device time:</span>{' '}
+                                  <span className="font-medium">{t('currentDeviceTime')}:</span>{' '}
                                   {new Date(deviceTimes[device.id].device_time).toLocaleString()}
                                 </p>
                                 <p className="text-xs text-gray-500">
-                                  Timezone offset: UTC{deviceTimezones[device.id] >= 0 ? '+' : ''}{deviceTimezones[device.id] || '0'}
+                                  {t('timezoneOffset')}: UTC{deviceTimezones[device.id] >= 0 ? '+' : ''}{deviceTimezones[device.id] || '0'}
                                 </p>
                               </div>
                             )}
@@ -441,7 +483,7 @@ function GeneralSettings() {
                             onClick={() => handleRefreshDeviceTime(device.id)}
                             disabled={loadingDeviceTimes[device.id]}
                             className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors disabled:opacity-50"
-                            title="Refresh device time"
+                            title={t('refreshDeviceTime')}
                           >
                             <RefreshCw className={`w-5 h-5 ${loadingDeviceTimes[device.id] ? 'animate-spin' : ''}`} />
                           </button>
@@ -451,7 +493,7 @@ function GeneralSettings() {
                         <div className="flex gap-3 items-end">
                           <div className="flex-1">
                             <label className="block text-xs font-medium text-gray-700 mb-1">
-                              Set Timezone
+                              {t('setTimezone')}
                             </label>
                             <select
                               value={deviceTimezones[device.id] || '0'}
@@ -474,12 +516,12 @@ function GeneralSettings() {
                             {saving ? (
                               <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
-                                Saving
+                                {t('saving')}
                               </>
                             ) : (
                               <>
                                 <Save className="w-4 h-4" />
-                                Apply
+                                {t('apply')}
                               </>
                             )}
                           </button>
@@ -495,8 +537,8 @@ function GeneralSettings() {
                 <div className="flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 text-gray-600 mt-0.5" />
                   <div className="text-sm text-gray-700">
-                    <p className="font-medium mb-1">About Device Timezones</p>
-                    <p>Each device's timezone is detected from its current time setting. You can configure each device individually or apply the same timezone to all devices at once using the bulk option above.</p>
+                    <p className="font-medium mb-1">{t('aboutDeviceTimezones')}</p>
+                    <p>{t('aboutDeviceTimezonesDesc')}</p>
                   </div>
                 </div>
               </div>
@@ -506,18 +548,16 @@ function GeneralSettings() {
         {activeTab === 'sync' && (
           <div className="p-6 space-y-6">
             <div className="mb-2">
-               <h2 className="text-lg font-semibold text-gray-900 mb-1">Sync Settings</h2>
-               <p className="text-sm text-gray-600">Configure how employee data is synced from devices to the database.</p>
+               <h2 className="text-lg font-semibold text-gray-900 mb-1">{t('syncSettingsTitle')}</h2>
+               <p className="text-sm text-gray-600">{t('syncSettingsDesc')}</p>
             </div>
 
              {/* Sync Confirmation Setting */}
              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                <div className="flex items-start justify-between">
                  <div className="flex-1">
-                   <h3 className="text-md font-semibold text-gray-900 mb-2">Sync Confirmation</h3>
-                   <p className="text-sm text-gray-600 mb-2">
-                     Control how employee data is added to the database when syncing from devices.
-                   </p>
+                   <h3 className="text-md font-semibold text-gray-900 mb-2">{t('syncConfirmation')}</h3>
+                   <p className="text-sm text-gray-600 mb-2">{t('syncSettingsDesc')}</p>
                    <div className="mt-3 space-y-2">
                      <label className="flex items-start gap-3 cursor-pointer">
                        <input
@@ -528,10 +568,10 @@ function GeneralSettings() {
                          className="mt-1 w-4 h-4 text-primary-600 focus:ring-primary-500"
                        />
                        <div className="flex-1">
-                         <div className="font-medium text-gray-900">Confirm before adding data</div>
+                         <div className="font-medium text-gray-900">{t('confirmBeforeAddingData')}</div>
                          <div className="text-sm text-gray-600">
-                           Show a preview of fetched employees and require confirmation before adding to database. 
-                           <span className="text-primary-600 font-medium"> Recommended for data control.</span>
+                           {t('confirmBeforeAddingData')} 
+                           <span className="text-primary-600 font-medium"> {t('recommendedDataControl')}</span>
                          </div>
                        </div>
                      </label>
@@ -544,9 +584,9 @@ function GeneralSettings() {
                          className="mt-1 w-4 h-4 text-primary-600 focus:ring-primary-500"
                        />
                        <div className="flex-1">
-                         <div className="font-medium text-gray-900">Add automatically</div>
+                         <div className="font-medium text-gray-900">{t('addAutomatically')}</div>
                          <div className="text-sm text-gray-600">
-                           Sync and add employee data immediately without confirmation. Faster but less control.
+                           {t('addAutomatically')} {t('fasterLessControl')}
                          </div>
                        </div>
                      </label>
@@ -559,14 +599,11 @@ function GeneralSettings() {
              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                <div className="flex items-center justify-between">
                  <div className="flex-1">
-                   <h3 className="text-md font-semibold text-gray-900 mb-2">Timestamp Validation</h3>
-                   <p className="text-sm text-gray-600">
-                     Automatically detect and correct malformed timestamps from devices (e.g., wrong date format, invalid years, day/month swaps).
-                     <span className="text-yellow-600 font-medium"> Helps fix common device date/time issues.</span>
-                   </p>
+                   <h3 className="text-md font-semibold text-gray-900 mb-2">{t('timestampValidationTitle')}</h3>
+                   <p className="text-sm text-gray-600">{t('timestampValidationDesc')}</p>
                  </div>
                  <div className="flex items-center gap-2 ml-4">
-                   <label className="text-sm font-medium text-gray-700">Enabled</label>
+                   <label className="text-sm font-medium text-gray-700">{t('enabled')}</label>
                    <button
                      onClick={() => setValidateTimestamps(prev => !prev)}
                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${validateTimestamps ? 'bg-primary-600' : 'bg-gray-300'}`}
@@ -580,42 +617,6 @@ function GeneralSettings() {
                </div>
              </div>
 
-             {/* Background Auto Sync Setting */}
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-               <h3 className="text-md font-semibold text-gray-900 mb-3">Background Auto Sync</h3>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-700">Auto Sync Every</p>
-                  <div className="mt-2 flex items-center gap-3">
-                    <input
-                      type="number"
-                      min={60}
-                      step={60}
-                      value={syncInterval}
-                      onChange={(e) => setSyncInterval(Number(e.target.value))}
-                      className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    />
-                    <span className="text-sm text-gray-600">seconds (min 60)</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700">Enabled</label>
-                  <button
-                    onClick={() => setSyncEnabled(prev => !prev)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${syncEnabled ? 'bg-primary-600' : 'bg-gray-300'}`}
-                    aria-pressed={syncEnabled}
-                  >
-                    <span
-                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${syncEnabled ? 'translate-x-5' : 'translate-x-1'}`}
-                    />
-                  </button>
-                </div>
-              </div>
-              <div className="mt-3 text-xs text-gray-500">
-                When enabled, the server syncs all devices automatically at the specified interval. Disable to rely only on manual sync from the Devices page.
-              </div>
-            </div>
-
             <div className="flex items-center gap-3">
               <button
                 onClick={saveGeneralSettings}
@@ -623,7 +624,7 @@ function GeneralSettings() {
                 className="flex items-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium disabled:opacity-50"
               >
                 {loadingSync ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                {loadingSync ? 'Saving...' : 'Save Changes'}
+                {loadingSync ? t('saving') : t('saveChanges')}
               </button>
             </div>
           </div>
