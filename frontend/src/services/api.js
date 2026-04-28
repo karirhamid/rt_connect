@@ -25,6 +25,46 @@ class ApiService {
 
   getAccessToken(){ return this._accessToken; }
 
+  // Convenience HTTP helpers (return { data, status, response } like axios)
+  async get(path, options = {}) {
+    const resp = await this.authFetch(`/api${path}`, options);
+    const isBlob = options.responseType === 'blob';
+    const data = isBlob ? await resp.blob() : await resp.json().catch(() => null);
+    if (!resp.ok) {
+      const err = new Error(data?.detail || resp.statusText);
+      err.response = { data, status: resp.status };
+      throw err;
+    }
+    return { data, status: resp.status, response: resp };
+  }
+
+  async post(path, payload, options = {}) {
+    const fetchOpts = { method: 'POST', ...options };
+    if (payload !== undefined) {
+      fetchOpts.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      fetchOpts.body = JSON.stringify(payload);
+    }
+    const resp = await this.authFetch(`/api${path}`, fetchOpts);
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      const err = new Error(data?.detail || resp.statusText);
+      err.response = { data, status: resp.status };
+      throw err;
+    }
+    return { data, status: resp.status };
+  }
+
+  async delete(path, options = {}) {
+    const resp = await this.authFetch(`/api${path}`, { method: 'DELETE', ...options });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      const err = new Error(data?.detail || resp.statusText);
+      err.response = { data, status: resp.status };
+      throw err;
+    }
+    return { data, status: resp.status };
+  }
+
   async authFetch(path, options = {}){
     const url = path.startsWith('http') ? path : `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
     options.headers = options.headers || {};
@@ -182,31 +222,6 @@ class ApiService {
     return response.json();
   }
 
-  // Device Operations
-  async getDeviceInfo(deviceId) {
-    const response = await fetch(`${API_BASE_URL}/api/device/${deviceId}/info`);
-    if (!response.ok) throw new Error('Failed to fetch device info');
-    return response.json();
-  }
-
-  async getUsers(deviceId) {
-    const response = await fetch(`${API_BASE_URL}/api/device/${deviceId}/users`);
-    if (!response.ok) throw new Error('Failed to fetch users');
-    return response.json();
-  }
-
-  async getAttendance(deviceId, params = {}) {
-    const queryParams = new URLSearchParams();
-    if (params.user_id) queryParams.append('user_id', params.user_id);
-    if (params.start_date) queryParams.append('start_date', params.start_date);
-    if (params.end_date) queryParams.append('end_date', params.end_date);
-
-    const url = `${API_BASE_URL}/api/device/${deviceId}/attendance?${queryParams}`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Failed to fetch attendance');
-    return response.json();
-  }
-
   // Dashboard Statistics
   async getStatistics() {
     const response = await fetch(`${API_BASE_URL}/api/statistics`);
@@ -295,27 +310,6 @@ class ApiService {
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.detail || 'Failed to confirm sync');
-    }
-    return response.json();
-  }
-
-  async getDeviceSettings(deviceId) {
-    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/settings`);
-    if (!response.ok) throw new Error('Failed to fetch device settings');
-    return response.json();
-  }
-
-  async updateDeviceSettings(deviceId, settings) {
-    const response = await fetch(`${API_BASE_URL}/api/devices/${deviceId}/settings`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(settings),
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to update device settings');
     }
     return response.json();
   }
@@ -650,6 +644,82 @@ class ApiService {
     return response.json();
   }
 
+  async getMyPermissions() {
+    const response = await this.authFetch('/api/auth/me/permissions');
+    if (!response.ok) throw new Error('Failed to fetch permissions');
+    const data = await response.json();
+    return data.permissions || [];
+  }
+
+  // ==================== EMAIL SETTINGS ====================
+
+  async getEmailSettings() {
+    const r = await this.authFetch('/api/email-settings');
+    if (!r.ok) throw new Error('Failed to load email settings');
+    return r.json();
+  }
+
+  async saveEmailSettings(data) {
+    const r = await this.authFetch('/api/email-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Failed to save'); }
+    return r.json();
+  }
+
+  async testEmail(to) {
+    const r = await this.authFetch('/api/email-settings/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Test failed'); }
+    return r.json();
+  }
+
+  // ==================== REPORT SCHEDULES ====================
+
+  async getReportSchedules() {
+    const r = await this.authFetch('/api/report-schedules');
+    if (!r.ok) throw new Error('Failed to load schedules');
+    return r.json();
+  }
+
+  async createReportSchedule(data) {
+    const r = await this.authFetch('/api/report-schedules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Failed to create'); }
+    return r.json();
+  }
+
+  async updateReportSchedule(id, data) {
+    const r = await this.authFetch(`/api/report-schedules/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Failed to update'); }
+    return r.json();
+  }
+
+  async deleteReportSchedule(id) {
+    const r = await this.authFetch(`/api/report-schedules/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error('Failed to delete');
+  }
+
+  async toggleReportSchedule(id) {
+    const r = await this.authFetch(`/api/report-schedules/${id}/toggle`, { method: 'PATCH' });
+    if (!r.ok) throw new Error('Failed to toggle');
+    return r.json();
+  }
+
+  async getScheduleLogs(id) {
+    const r = await this.authFetch(`/api/report-schedules/${id}/logs`);
+    if (!r.ok) throw new Error('Failed to load logs');
+    return r.json();
+  }
+
+  async runScheduleNow(id) {
+    const r = await this.authFetch(`/api/report-schedules/${id}/run-now`, { method: 'POST' });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || 'Failed to run'); }
+    return r.json();
+  }
+
+  async getScheduleDefaultTemplates() {
+    const r = await this.authFetch('/api/report-schedules/defaults/templates');
+    if (!r.ok) throw new Error('Failed to load templates');
+    return r.json();
+  }
+
   // ==================== SHIFT MANAGEMENT ====================
 
   // Shifts CRUD
@@ -664,12 +734,6 @@ class ApiService {
     
     const response = await fetch(url);
     if (!response.ok) throw new Error('Failed to fetch shifts');
-    return response.json();
-  }
-
-  async getShift(shiftId) {
-    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}`);
-    if (!response.ok) throw new Error('Failed to fetch shift');
     return response.json();
   }
 
@@ -711,12 +775,6 @@ class ApiService {
   }
 
   // Shift Timings
-  async getShiftTimings(shiftId) {
-    const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}/timings`);
-    if (!response.ok) throw new Error('Failed to fetch shift timings');
-    return response.json();
-  }
-
   async addShiftTiming(shiftId, timingData) {
     const response = await fetch(`${API_BASE_URL}/api/shifts/${shiftId}/timings`, {
       method: 'POST',
@@ -751,61 +809,12 @@ class ApiService {
     return response.json();
   }
 
-  async getShiftEmployees(shiftId, activeOnly = true) {
-    const url = `${API_BASE_URL}/api/shifts/${shiftId}/employees?active_only=${activeOnly}`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Failed to fetch shift employees');
-    return response.json();
-  }
-
-  // Employee Shift Assignments
-  async getEmployeeShifts(employeeId, activeOnly = false) {
-    const url = `${API_BASE_URL}/api/employees/${employeeId}/shifts?active_only=${activeOnly}`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Failed to fetch employee shifts');
-    return response.json();
-  }
-
   async getEmployeeCurrentShift(employeeId) {
     const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/current-shift`);
     if (!response.ok) {
       if (response.status === 404) return null;
       throw new Error('Failed to fetch current shift');
     }
-    return response.json();
-  }
-
-  async assignShiftToEmployee(employeeId, assignmentData) {
-    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/shifts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(assignmentData),
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to assign shift');
-    }
-    return response.json();
-  }
-
-  async updateEmployeeShiftAssignment(employeeId, assignmentId, assignmentData) {
-    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/shifts/${assignmentId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(assignmentData),
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to update assignment');
-    }
-    return response.json();
-  }
-
-  async deleteEmployeeShiftAssignment(employeeId, assignmentId) {
-    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/shifts/${assignmentId}`, {
-      method: 'DELETE',
-    });
-    if (!response.ok) throw new Error('Failed to delete assignment');
     return response.json();
   }
 
@@ -819,16 +828,6 @@ class ApiService {
       const error = await response.json();
       throw new Error(error.detail || 'Failed to bulk assign shifts');
     }
-    return response.json();
-  }
-
-  async getEmployeeSchedule(employeeId, startDate, endDate) {
-    const params = new URLSearchParams({
-      start_date: startDate,
-      end_date: endDate
-    });
-    const response = await fetch(`${API_BASE_URL}/api/employees/${employeeId}/schedule?${params}`);
-    if (!response.ok) throw new Error('Failed to fetch employee schedule');
     return response.json();
   }
 
@@ -889,33 +888,81 @@ class ApiService {
     return response.json();
   }
 
-  async loadMoroccoHolidays(year) {
-    const response = await fetch(`${API_BASE_URL}/api/holidays/load-morocco-holidays/${year}`, {
-      method: 'POST',
+  // ── Employee Schedule (personal timing — weekly) ──────────────
+  async getEmployeePersonalSchedule(employeeId) {
+    const response = await this.authFetch(`/api/employees/${employeeId}/personal-schedule`);
+    if (!response.ok) throw new Error('Failed to fetch employee schedule');
+    return response.json();
+  }
+
+  async saveEmployeePersonalSchedule(employeeId, scheduleData) {
+    const response = await this.authFetch(`/api/employees/${employeeId}/personal-schedule`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scheduleData),
     });
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to load Morocco holidays');
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || 'Failed to save schedule');
     }
     return response.json();
   }
 
-  async loadAllMoroccoHolidays() {
-    const response = await fetch(`${API_BASE_URL}/api/holidays/load-all-morocco-holidays`, {
-      method: 'POST',
+  async deleteEmployeePersonalSchedule(employeeId) {
+    const response = await this.authFetch(`/api/employees/${employeeId}/personal-schedule`, {
+      method: 'DELETE',
     });
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || 'Failed to load Morocco holidays');
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || 'Failed to delete schedule');
     }
     return response.json();
   }
 
-  async checkHoliday(date, country = 'MA') {
-    const response = await fetch(`${API_BASE_URL}/api/holidays/check/${date}?country=${country}`);
-    if (!response.ok) throw new Error('Failed to check holiday');
+  // ── Department Schedule (category timing template — weekly) ──
+  async getDepartmentSchedule(departmentId) {
+    const response = await this.authFetch(`/api/departments/${departmentId}/schedule`);
+    if (!response.ok) throw new Error('Failed to fetch department schedule');
     return response.json();
   }
+
+  async saveDepartmentSchedule(departmentId, scheduleData) {
+    const response = await this.authFetch(`/api/departments/${departmentId}/schedule`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scheduleData),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || 'Failed to save department schedule');
+    }
+    return response.json();
+  }
+
+  async deleteDepartmentSchedule(departmentId) {
+    const response = await this.authFetch(`/api/departments/${departmentId}/schedule`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || 'Failed to delete department schedule');
+    }
+    return response.json();
+  }
+
+  // ── Classified attendance ────────────────────────────────────
+  async getClassifiedAttendance(date, filters = {}) {
+    const params = new URLSearchParams();
+    if (date) params.append('date', date);
+    if (filters.start_date) params.append('start_date', filters.start_date);
+    if (filters.end_date) params.append('end_date', filters.end_date);
+    if (filters.employee_name) params.append('employee_name', filters.employee_name);
+    if (filters.device_id) params.append('device_id', filters.device_id);
+    const response = await this.authFetch(`/api/attendance/classified?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch classified attendance');
+    return response.json();
+  }
+
 }
 
 export default new ApiService();

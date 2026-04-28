@@ -83,3 +83,13 @@ def me(current_user: User = Depends(get_current_user)):
         'is_active': current_user.is_active,
         'roles': [r.name for r in current_user.roles]
     }
+
+
+@router.get('/auth/me/permissions')
+def me_permissions(current_user: User = Depends(get_current_user)):
+    """Return the resolved permission codes for the current user (no special permission required)."""
+    perms = set()
+    for role in current_user.roles:
+        for perm in role.permissions:
+            perms.add(perm.code)
+    return {'permissions': sorted(perms)}

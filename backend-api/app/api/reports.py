@@ -13,6 +13,7 @@ from app.database.schema import (
     Company as DBCompany,
     Device as DBDevice,
 )
+from app.services.punch_classifier import classify_attendance_records, get_employee_day_summary
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ _PDF_LABELS = {
         "period": "Période",
         "records": "Enregistrements",
         "page": "Page",
-        "employee": "Employé",
+        "employee": "Employé(e)",
         "emp_id": "ID",
         "department": "Département",
         "col_date": "Date",
@@ -36,11 +37,38 @@ _PDF_LABELS = {
         "device": "Appareil",
         "check_in": "Entrée",
         "check_out": "Sortie",
+        "category": "Catégorie",
+        "cat_entry": "Entrée",
+        "cat_break_out": "Sortie Pause",
+        "cat_break_in": "Retour Pause",
+        "cat_exit": "Sortie",
+        "cat_overtime_exit": "Sortie Heures Sup.",
+        "cat_unknown": "Inconnu",
         "no_records": "Aucun enregistrement trouvé pour les critères sélectionnés.",
         "summary": "Résumé",
         "total_records": "Total enregistrements",
         "total_employees": "Total employés",
         "confidential": "Document confidentiel — usage interne uniquement",
+        "entry_time": "Entrée",
+        "exit_time": "Sortie",
+        "total_worked": "Total Travaillé",
+        "overtime": "Heures Sup.",
+        "late": "Retard",
+        "early_dep": "Départ Anticipé",
+        "status": "Statut",
+        "on_time": "À l'heure",
+        "late_status": "En retard",
+        "early_status": "Départ anticipé",
+        "absent_status": "Absent",
+        "mode_simple": "Mode Simple",
+        "mode_strict": "Mode Strict",
+        "swipes": "Pointages",
+        "total_overtime": "Total heures supplémentaires",
+        "total_late": "Total retards",
+        "daily_summary": "Résumé Journalier",
+        "legend_incomplete": "■ Ligne surlignée = un seul pointage enregistré (entrée ou sortie manquante)",
+        "device_legend_prefix": "Appareils",
+        "emp_count": "employé(e)s",
     },
     "en": {
         "title": "Attendance Report",
@@ -58,11 +86,38 @@ _PDF_LABELS = {
         "device": "Device",
         "check_in": "In",
         "check_out": "Out",
+        "category": "Category",
+        "cat_entry": "Entry",
+        "cat_break_out": "Break Out",
+        "cat_break_in": "Break In",
+        "cat_exit": "Exit",
+        "cat_overtime_exit": "Overtime Exit",
+        "cat_unknown": "Unknown",
         "no_records": "No records found for the selected criteria.",
         "summary": "Summary",
         "total_records": "Total records",
         "total_employees": "Total employees",
         "confidential": "Confidential document — internal use only",
+        "entry_time": "Entry",
+        "exit_time": "Exit",
+        "total_worked": "Total Worked",
+        "overtime": "Overtime",
+        "late": "Late",
+        "early_dep": "Early Dep.",
+        "status": "Status",
+        "on_time": "On Time",
+        "late_status": "Late",
+        "early_status": "Early Dep.",
+        "absent_status": "Absent",
+        "mode_simple": "Simple Mode",
+        "mode_strict": "Strict Mode",
+        "swipes": "Swipes",
+        "total_overtime": "Total overtime",
+        "total_late": "Total late",
+        "daily_summary": "Daily Summary",
+        "legend_incomplete": "■ Highlighted row = single punch recorded (entry or exit missing)",
+        "device_legend_prefix": "Devices",
+        "emp_count": "employees",
     },
     "ar": {
         "title": "تقرير الحضور",
@@ -80,17 +135,84 @@ _PDF_LABELS = {
         "device": "الجهاز",
         "check_in": "دخول",
         "check_out": "خروج",
+        "category": "الفئة",
+        "cat_entry": "دخول",
+        "cat_break_out": "خروج استراحة",
+        "cat_break_in": "عودة استراحة",
+        "cat_exit": "خروج",
+        "cat_overtime_exit": "خروج إضافي",
+        "cat_unknown": "غير معروف",
         "no_records": "لم يتم العثور على سجلات للمعايير المحددة.",
         "summary": "ملخص",
         "total_records": "إجمالي السجلات",
         "total_employees": "إجمالي الموظفين",
         "confidential": "وثيقة سرية — للاستخدام الداخلي فقط",
+        "entry_time": "الدخول",
+        "exit_time": "الخروج",
+        "total_worked": "إجمالي العمل",
+        "overtime": "ساعات إضافية",
+        "late": "تأخير",
+        "early_dep": "مغادرة مبكرة",
+        "status": "الحالة",
+        "on_time": "في الوقت",
+        "late_status": "متأخر",
+        "early_status": "مغادرة مبكرة",
+        "absent_status": "غائب",
+        "mode_simple": "الوضع البسيط",
+        "mode_strict": "الوضع الصارم",
+        "swipes": "تسجيلات",
+        "total_overtime": "إجمالي الساعات الإضافية",
+        "total_late": "إجمالي التأخيرات",
+        "daily_summary": "ملخص يومي",
+        "legend_incomplete": "■ الصف المميز = تسجيل واحد فقط (دخول أو خروج مفقود)",
+        "device_legend_prefix": "الأجهزة",
+        "emp_count": "موظف(ة)",
     },
 }
 
 
 def _get_labels(lang: str) -> dict:
     return _PDF_LABELS.get(lang, _PDF_LABELS["en"])
+
+
+_CATEGORY_LABEL_KEY = {
+    "entry": "cat_entry",
+    "break_out": "cat_break_out",
+    "break_in": "cat_break_in",
+    "exit": "cat_exit",
+    "overtime_exit": "cat_overtime_exit",
+    "unknown": "cat_unknown",
+}
+
+
+def _category_label(category: str, L: dict) -> str:
+    """Get the translated label for a punch category."""
+    key = _CATEGORY_LABEL_KEY.get(category, "cat_unknown")
+    return L.get(key, category)
+
+
+def _resolve_entry_exit(first_ts, last_ts, swipes: int, summary_data: dict):
+    """Return (entry_str|None, exit_str|None), never the same value in both columns.
+
+    Priority:
+      1. Punch classification from summary_data (when timing mode is active)
+      2. Time-of-day heuristic for single-punch days: before noon = entry, else = exit
+      3. First/last timestamps for multi-punch days
+    """
+    if summary_data:
+        s_entry = summary_data.get("entry")
+        s_exit = summary_data.get("exit")
+        if s_entry or s_exit:
+            return s_entry, s_exit
+
+    if swipes == 1 and first_ts:
+        t_str = first_ts.strftime("%H:%M")
+        return (t_str, None) if first_ts.hour < 12 else (None, t_str)
+
+    return (
+        first_ts.strftime("%H:%M") if first_ts else None,
+        last_ts.strftime("%H:%M") if last_ts else None,
+    )
 
 
 def parse_dates(single_date: Optional[str], start_date: Optional[str], end_date: Optional[str]):
@@ -151,8 +273,13 @@ def attendance_records(
             q = q.filter(and_(*filters))
 
         rows = q.order_by(DBAttendance.timestamp.desc()).limit(limit).all()
+
+        # Classify punches
+        classified = classify_attendance_records(db, rows)
+
         results = []
-        for r in rows:
+        for item in classified:
+            r = item["record"]
             results.append({
                 "id": r.id,
                 "timestamp": r.timestamp.isoformat(),
@@ -165,6 +292,7 @@ def attendance_records(
                 "device_name": r.device.name if r.device else "Unknown",
                 "status": r.status,
                 "punch": r.punch,
+                "punch_category": item["punch_category"],
             })
         return {"count": len(results), "records": results}
 
@@ -179,17 +307,28 @@ def attendance_summary(
     device_id: Optional[str] = Query(None),
     current=Depends(get_current_user),
 ):
-    """Daily per-employee summary: first in, last out, total swipes."""
+    """Daily per-employee summary: first in, last out, total swipes.
+    In 'shared' employee mode, groups by user_id to merge records across devices.
+    In 'separate' mode, groups by Employee.id (each device row is independent)."""
     start_dt, end_dt = parse_dates(date, start_date, end_date)
 
     with get_db_session() as db:
+        # Read settings
+        from app.database.schema import AppSettings as _AppSettings
+        _settings = db.query(_AppSettings).first()
+        attendance_mode = getattr(_settings, 'attendance_mode', None) or 'simple'
+        employee_mode = getattr(_settings, 'employee_mode', None) or 'shared'
+
+        shared = employee_mode == 'shared'
+
+        # Choose grouping column
+        id_col = DBEmployee.user_id if shared else DBEmployee.id
         q = (
             db.query(
-                DBEmployee.id.label("emp_pk"),
-                DBEmployee.user_id.label("employee_id"),
-                DBEmployee.name.label("employee_name"),
-                func.coalesce(DBDepartment.name, "-").label("department"),
-                func.coalesce(DBCompany.name, "-").label("company"),
+                id_col.label("employee_id"),
+                func.min(DBEmployee.name).label("employee_name") if shared else DBEmployee.name.label("employee_name"),
+                func.coalesce(func.min(DBDepartment.name), "-").label("department") if shared else func.coalesce(DBDepartment.name, "-").label("department"),
+                func.coalesce(func.min(DBCompany.name), "-").label("company") if shared else func.coalesce(DBCompany.name, "-").label("company"),
                 cast(DBAttendance.timestamp, Date).label("day"),
                 func.min(DBAttendance.timestamp).label("first_ts"),
                 func.max(DBAttendance.timestamp).label("last_ts"),
@@ -205,20 +344,26 @@ def attendance_summary(
         if filters:
             q = q.filter(and_(*filters))
 
-        q = q.group_by(
-            DBEmployee.id,
-            DBEmployee.user_id,
-            DBEmployee.name,
-            DBDepartment.name,
-            DBCompany.name,
-            cast(DBAttendance.timestamp, Date),
-        )
-        q = q.order_by(cast(DBAttendance.timestamp, Date).desc(), DBEmployee.name.asc())
+        if shared:
+            q = q.group_by(DBEmployee.user_id, cast(DBAttendance.timestamp, Date))
+        else:
+            q = q.group_by(DBEmployee.id, DBEmployee.name, DBDepartment.name, DBCompany.name, cast(DBAttendance.timestamp, Date))
+        q = q.order_by(cast(DBAttendance.timestamp, Date).desc(), func.min(DBEmployee.name).asc())
         rows = q.all()
+
+        # Build id -> [list of Employee PKs] for cross-device summary (shared mode)
+        uid_to_pks = {}
+        if shared:
+            for r in rows:
+                uid = r.employee_id
+                if uid not in uid_to_pks:
+                    pks = db.query(DBEmployee.id).filter(DBEmployee.user_id == uid).all()
+                    uid_to_pks[uid] = [pk[0] for pk in pks]
 
         out = []
         for r in rows:
-            out.append({
+            day_date = r.day if hasattr(r.day, 'isoformat') else None
+            item = {
                 "employee_id": r.employee_id,
                 "employee_name": r.employee_name,
                 "department": r.department,
@@ -227,8 +372,30 @@ def attendance_summary(
                 "first_check_in": r.first_ts.isoformat() if r.first_ts else None,
                 "last_check_out": r.last_ts.isoformat() if r.last_ts else None,
                 "swipes": int(r.swipes or 0),
-            })
-        return {"count": len(out), "summary": out}
+            }
+            # Single punch: prevent showing the same timestamp in both entry and exit
+            if int(r.swipes or 0) == 1 and r.first_ts:
+                if r.first_ts.hour < 12:
+                    item["last_check_out"] = None
+                else:
+                    item["first_check_in"] = None
+            # Enrich with day summary (overtime, late, etc.)
+            if shared:
+                all_pks = uid_to_pks.get(r.employee_id, [])
+            else:
+                all_pks = [r.employee_id]
+            if day_date and all_pks:
+                summary_data = get_employee_day_summary(
+                    db, all_pks[0], day_date,
+                    employee_ids=all_pks if shared else None,
+                )
+                item["total_minutes"] = summary_data.get("total_minutes")
+                item["overtime_minutes"] = summary_data.get("overtime_minutes", 0)
+                if attendance_mode == 'strict':
+                    item["late_minutes"] = summary_data.get("late_minutes", 0)
+                    item["early_departure_minutes"] = summary_data.get("early_departure_minutes", 0)
+            out.append(item)
+        return {"count": len(out), "summary": out, "attendance_mode": attendance_mode, "employee_mode": employee_mode}
 
 
 @router.get("/attendance/export.csv")
@@ -259,14 +426,19 @@ def export_attendance_csv(
             q = q.filter(and_(*filters))
         rows = q.order_by(DBAttendance.timestamp.desc()).limit(5000).all()
 
+        # Classify punches
+        classified = classify_attendance_records(db, rows)
+
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([
             "Date", "Time", "Employee ID", "Employee Name",
-            "Department", "Company", "Device", "Punch", "Status",
+            "Department", "Company", "Device", "Punch", "Category", "Status",
         ])
-        for r in rows:
+        for item in classified:
+            r = item["record"]
             punch_label = "In" if r.punch == 0 else ("Out" if r.punch == 1 else str(r.punch))
+            cat_label = item["punch_category"].replace("_", " ").title()
             writer.writerow([
                 r.timestamp.strftime("%Y-%m-%d"),
                 r.timestamp.strftime("%H:%M:%S"),
@@ -276,6 +448,7 @@ def export_attendance_csv(
                 (r.employee.company.name if r.employee and r.employee.company else "-"),
                 (r.device.name if r.device else "Unknown"),
                 punch_label,
+                cat_label,
                 r.status,
             ])
         csv_data = buf.getvalue()
@@ -314,51 +487,167 @@ def export_attendance_pdf(
     L = _get_labels(lang)
     start_dt, end_dt = parse_dates(date, start_date, end_date)
 
-    # ── Fetch data inside session ──────────────────────────────────────
+    # ── Helper: format minutes as Xh Ym ─────────────────────────────────
+    def _fmt_min(mins):
+        if mins is None or mins == 0:
+            return "-"
+        h, m = divmod(int(mins), 60)
+        if h > 0:
+            return f"{h}h {m:02d}m"
+        return f"{m}m"
+
+    # ── Fetch summary data inside session ──────────────────────────────
     with get_db_session() as db:
+        from app.database.schema import AppSettings as _AppSettings
+        _settings = db.query(_AppSettings).first()
+        attendance_mode = getattr(_settings, 'attendance_mode', None) or 'simple'
+        employee_mode = getattr(_settings, 'employee_mode', None) or 'shared'
+        pdf_style = getattr(_settings, 'pdf_style', None) or 'style1'
+        pdf_show_overtime = getattr(_settings, 'pdf_show_overtime', True) if hasattr(_settings, 'pdf_show_overtime') else True
+        pdf_show_total_worked = getattr(_settings, 'pdf_show_total_worked', True) if hasattr(_settings, 'pdf_show_total_worked') else True
+
+        shared = employee_mode == 'shared'
+
+        id_col = DBEmployee.user_id if shared else DBEmployee.id
         q = (
-            db.query(DBAttendance)
+            db.query(
+                id_col.label("employee_id"),
+                func.min(DBEmployee.name).label("employee_name") if shared else DBEmployee.name.label("employee_name"),
+                func.coalesce(func.min(DBDepartment.name), "-").label("department") if shared else func.coalesce(DBDepartment.name, "-").label("department"),
+                func.coalesce(func.min(DBCompany.name), "-").label("company") if shared else func.coalesce(DBCompany.name, "-").label("company"),
+                cast(DBAttendance.timestamp, Date).label("day"),
+                func.min(DBAttendance.timestamp).label("first_ts"),
+                func.max(DBAttendance.timestamp).label("last_ts"),
+                func.count(DBAttendance.id).label("swipes"),
+            )
+            .select_from(DBAttendance)
             .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
             .outerjoin(DBDepartment, DBEmployee.department_id == DBDepartment.id)
             .outerjoin(DBCompany, DBEmployee.company_id == DBCompany.id)
-            .outerjoin(DBDevice, DBAttendance.device_id == DBDevice.id)
         )
         filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id)
         if filters:
             q = q.filter(and_(*filters))
-        rows = q.order_by(
-            DBEmployee.name.asc(),
-            DBAttendance.timestamp.asc(),
-        ).limit(5000).all()
+        if shared:
+            q = q.group_by(DBEmployee.user_id, cast(DBAttendance.timestamp, Date))
+        else:
+            q = q.group_by(DBEmployee.id, DBEmployee.name, DBDepartment.name, DBCompany.name, cast(DBAttendance.timestamp, Date))
+        q = q.order_by(id_col.asc(), cast(DBAttendance.timestamp, Date).asc())
+        rows = q.all()
 
         company_row = db.query(DBCompany.name).order_by(DBCompany.id).first()
         company_name = company_row[0] if company_row else ""
 
+        # Build id -> [list of Employee PKs] for cross-device summary (shared mode)
+        uid_to_pks = {}
+        if shared:
+            for r in rows:
+                uid = r.employee_id
+                if uid not in uid_to_pks:
+                    pks = db.query(DBEmployee.id).filter(DBEmployee.user_id == uid).all()
+                    uid_to_pks[uid] = [pk[0] for pk in pks]
+
         record_count = len(rows)
         employee_set = set()
         flat_rows = []
+
+        # Build a lookup of device names per (employee_id, day)
+        # Query: for each attendance record, which device was used
+        device_names_map = {}  # (employee_id_or_uid, day_iso) -> set of device names
+        dev_q = (
+            db.query(
+                (DBEmployee.user_id if shared else DBEmployee.id).label("eid"),
+                cast(DBAttendance.timestamp, Date).label("day"),
+                DBDevice.name.label("device_name"),
+            )
+            .select_from(DBAttendance)
+            .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
+            .outerjoin(DBDevice, DBAttendance.device_id == DBDevice.id)
+        )
+        dev_filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id)
+        if dev_filters:
+            dev_q = dev_q.filter(and_(*dev_filters))
+        for dr in dev_q.all():
+            key = (dr.eid, dr.day.isoformat() if hasattr(dr.day, 'isoformat') else str(dr.day))
+            if key not in device_names_map:
+                device_names_map[key] = set()
+            if dr.device_name:
+                device_names_map[key].add(dr.device_name)
+
         for r in rows:
-            emp_name = (r.employee.name if r.employee else "?") or "?"
-            employee_set.add(emp_name)
-            punch_label = L["check_in"] if r.punch == 0 else (L["check_out"] if r.punch == 1 else str(r.punch))
+            emp_name = (r.employee_name or "?")[:32]
+            employee_set.add(r.employee_id)
+            day_date = r.day if hasattr(r.day, 'isoformat') else None
+            summary_data = {}
+            if shared:
+                all_pks = uid_to_pks.get(r.employee_id, [])
+            else:
+                all_pks = [r.employee_id]
+            if day_date and all_pks:
+                summary_data = get_employee_day_summary(
+                    db, all_pks[0], day_date,
+                    employee_ids=all_pks if shared else None,
+                )
+            _swipes = int(r.swipes or 0)
+            _entry, _exit = _resolve_entry_exit(r.first_ts, r.last_ts, _swipes, summary_data)
             flat_rows.append({
-                "employee": emp_name[:32],
-                "emp_id": (r.employee.user_id if r.employee else "-") or "-",
-                "department": ((r.employee.department.name if r.employee and r.employee.department else "-") or "-")[:24],
-                "date": r.timestamp.strftime("%Y-%m-%d"),
-                "time": r.timestamp.strftime("%H:%M:%S"),
-                "punch": punch_label,
-                "device": ((r.device.name if r.device else "-") or "-")[:20],
+                "employee": emp_name,
+                "emp_id": r.employee_id or "-",
+                "department": (r.department or "-")[:24],
+                "date": r.day.isoformat() if hasattr(r.day, "isoformat") else str(r.day),
+                "entry": _entry or "-",
+                "exit": _exit or "-",
+                "incomplete": _entry is None or _exit is None,
+                "swipes": _swipes,
+                "device_names": ", ".join(sorted(device_names_map.get(
+                    (r.employee_id, r.day.isoformat() if hasattr(r.day, "isoformat") else str(r.day)),
+                    set()
+                ))) or "-",
+                "total_minutes": summary_data.get("total_minutes"),
+                "overtime_minutes": summary_data.get("overtime_minutes", 0),
+                "late_minutes": summary_data.get("late_minutes", 0),
+                "early_departure_minutes": summary_data.get("early_departure_minutes", 0),
             })
 
+    # ── Device abbreviation map ────────────────────────────────────────
+    # Collect every unique device name that appears in the report, assign
+    # sequential numbers (sorted alphabetically), and replace the long names
+    # in each row with their short number so the table column stays narrow.
+    _all_dev_names: set = set()
+    for _r in flat_rows:
+        for _dn in (_r.get("device_names") or "").split(", "):
+            _dn = _dn.strip()
+            if _dn and _dn != "-":
+                _all_dev_names.add(_dn)
+    device_legend: list = []
+    if _all_dev_names:
+        _dev_num_map = {name: str(i + 1) for i, name in enumerate(sorted(_all_dev_names))}
+        device_legend = sorted(
+            [(_num, _name) for _name, _num in _dev_num_map.items()],
+            key=lambda x: int(x[0]),
+        )
+        for _r in flat_rows:
+            _parts = [p.strip() for p in (_r.get("device_names") or "").split(", ")
+                      if p.strip() and p.strip() != "-"]
+            _r["device_names"] = ", ".join(
+                _dev_num_map[p] for p in _parts if p in _dev_num_map
+            ) or "-"
+
     # ── Colour palette & styles ────────────────────────────────────────
-    BRAND_COLOR = colors.HexColor("#1e40af")
-    HEADER_BG = colors.HexColor("#1e3a5f")
+    if pdf_style == 'style2':
+        BRAND_COLOR = colors.HexColor("#059669")   # emerald
+        HEADER_BG = colors.HexColor("#065f46")
+        ALT_ROW = colors.HexColor("#ecfdf5")
+    else:
+        BRAND_COLOR = colors.HexColor("#1e40af")
+        HEADER_BG = colors.HexColor("#1e3a5f")
+        ALT_ROW = colors.HexColor("#f1f5f9")
     HEADER_FG = colors.white
-    ALT_ROW = colors.HexColor("#f1f5f9")
-    GROUP_BG = colors.HexColor("#e0e7ff")          # light indigo for group headers
-    IN_COLOR = colors.HexColor("#16a34a")
-    OUT_COLOR = colors.HexColor("#dc2626")
+    OT_COLOR = colors.HexColor("#7c3aed")       # purple for overtime
+    LATE_COLOR = colors.HexColor("#d97706")     # amber for late
+    EARLY_COLOR = colors.HexColor("#ea580c")    # orange for early dep
+    OK_COLOR = colors.HexColor("#16a34a")       # green for on-time
+    INCOMPLETE_BG = colors.HexColor("#fff7ed")  # warm amber tint for single-punch rows
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -375,6 +664,10 @@ def export_attendance_pdf(
     cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontSize=8, leading=10)
     cell_bold = ParagraphStyle("CellBold", parent=cell_style, fontName="Helvetica-Bold")
     cell_center = ParagraphStyle("CellC", parent=cell_style, alignment=TA_CENTER)
+    cell_missing = ParagraphStyle(
+        "CellMiss", parent=cell_center,
+        textColor=colors.HexColor("#9ca3af"), fontName="Helvetica-Oblique",
+    )
     group_title_style = ParagraphStyle(
         "GroupTitle", parent=styles["Heading3"], fontSize=11,
         textColor=BRAND_COLOR, spaceAfter=2, spaceBefore=6,
@@ -386,10 +679,15 @@ def export_attendance_pdf(
     )
 
     # ── Helper: build a styled table from header + data rows ───────────
-    def _make_table(col_headers, data_rows, col_widths, title_row_text=None):
+    def _make_table(col_headers, data_rows, col_widths, title_row_text=None, incomplete_rows=None):
         """Build a professional table. If title_row_text is given, a full-width
-        banner row is prepended above the column headers."""
-        th_style = ParagraphStyle("TH", parent=cell_style, fontSize=8, textColor=HEADER_FG, fontName="Helvetica-Bold")
+        banner row is prepended above the column headers.
+        incomplete_rows: list of 0-based data row indices to tint amber (single-punch)."""
+        if pdf_style == 'style2':
+            th_text_color = BRAND_COLOR
+        else:
+            th_text_color = HEADER_FG
+        th_style = ParagraphStyle("TH", parent=cell_style, fontSize=8, textColor=th_text_color, fontName="Helvetica-Bold")
         header_row = [Paragraph(f"<b>{h}</b>", th_style) for h in col_headers]
 
         table_data = []
@@ -398,11 +696,18 @@ def export_attendance_pdf(
 
         if title_row_text:
             # Banner row: single Paragraph that spans all columns
-            banner_para = Paragraph(
-                f"<b>{title_row_text}</b>",
-                ParagraphStyle("BannerCell", parent=cell_style, fontSize=10,
-                               fontName="Helvetica-Bold", textColor=colors.white),
-            )
+            if pdf_style == 'style2':
+                banner_para = Paragraph(
+                    f"<b>{title_row_text}</b>",
+                    ParagraphStyle("BannerCell", parent=cell_style, fontSize=10,
+                                   fontName="Helvetica-Bold", textColor=BRAND_COLOR),
+                )
+            else:
+                banner_para = Paragraph(
+                    f"<b>{title_row_text}</b>",
+                    ParagraphStyle("BannerCell", parent=cell_style, fontSize=10,
+                                   fontName="Helvetica-Bold", textColor=colors.white),
+                )
             # Fill remaining columns with empty strings so Table has uniform col count
             banner_cells = [banner_para] + [""] * (len(col_headers) - 1)
             table_data.append(banner_cells)
@@ -412,69 +717,208 @@ def export_attendance_pdf(
         table_data.append(header_row)
         table_data.extend(data_rows)
 
+        # Scale columns to always fill the full printable width
+        _printable_w = width - 2 * 18 * mm
+        _natural_w = sum(col_widths)
+        if _natural_w > 0:
+            _scale = _printable_w / _natural_w
+            col_widths = [w * _scale for w in col_widths]
+
         tbl = Table(table_data, colWidths=col_widths, repeatRows=col_header_idx + 1)
 
-        cmds = [
-            # Column-header row styling
-            ("BACKGROUND", (0, col_header_idx), (-1, col_header_idx), HEADER_BG),
-            ("TEXTCOLOR", (0, col_header_idx), (-1, col_header_idx), HEADER_FG),
-            ("FONTNAME", (0, col_header_idx), (-1, col_header_idx), "Helvetica-Bold"),
-            ("FONTSIZE", (0, col_header_idx), (-1, col_header_idx), 8),
-            ("BOTTOMPADDING", (0, col_header_idx), (-1, col_header_idx), 6),
-            ("TOPPADDING", (0, col_header_idx), (-1, col_header_idx), 6),
-            ("LINEBELOW", (0, col_header_idx), (-1, col_header_idx), 1, BRAND_COLOR),
-            # Data rows
-            ("FONTSIZE", (0, col_header_idx + 1), (-1, -1), 8),
-            ("TOPPADDING", (0, col_header_idx + 1), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, col_header_idx + 1), (-1, -1), 3),
-            ("LINEBELOW", (0, -1), (-1, -1), 0.5, BRAND_COLOR),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ]
+        if pdf_style == 'style2':
+            # Style 2: clean minimal — no solid header bg, borders instead
+            cmds = [
+                ("TEXTCOLOR", (0, col_header_idx), (-1, col_header_idx), BRAND_COLOR),
+                ("FONTNAME", (0, col_header_idx), (-1, col_header_idx), "Helvetica-Bold"),
+                ("FONTSIZE", (0, col_header_idx), (-1, col_header_idx), 8),
+                ("BOTTOMPADDING", (0, col_header_idx), (-1, col_header_idx), 6),
+                ("TOPPADDING", (0, col_header_idx), (-1, col_header_idx), 6),
+                ("LINEABOVE", (0, col_header_idx), (-1, col_header_idx), 1.5, BRAND_COLOR),
+                ("LINEBELOW", (0, col_header_idx), (-1, col_header_idx), 1.5, BRAND_COLOR),
+                # Data rows
+                ("FONTSIZE", (0, col_header_idx + 1), (-1, -1), 8),
+                ("TOPPADDING", (0, col_header_idx + 1), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, col_header_idx + 1), (-1, -1), 4),
+                ("LINEBELOW", (0, -1), (-1, -1), 0.75, BRAND_COLOR),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+            if len(table_data) > col_header_idx + 2:
+                cmds.append(("LINEBELOW", (0, col_header_idx + 1), (-1, -2), 0.25, colors.HexColor("#d1d5db")))
+            # Banner row for style2: light tinted background
+            if title_row_idx is not None:
+                cmds.extend([
+                    ("SPAN", (0, title_row_idx), (-1, title_row_idx)),
+                    ("BACKGROUND", (0, title_row_idx), (-1, title_row_idx), ALT_ROW),
+                    ("TEXTCOLOR", (0, title_row_idx), (-1, title_row_idx), BRAND_COLOR),
+                    ("FONTNAME", (0, title_row_idx), (-1, title_row_idx), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, title_row_idx), (-1, title_row_idx), 10),
+                    ("BOTTOMPADDING", (0, title_row_idx), (-1, title_row_idx), 7),
+                    ("TOPPADDING", (0, title_row_idx), (-1, title_row_idx), 7),
+                    ("LINEABOVE", (0, title_row_idx), (-1, title_row_idx), 1, BRAND_COLOR),
+                    ("LINEBELOW", (0, title_row_idx), (-1, title_row_idx), 0, colors.white),
+                ])
+            # No alternating rows in style2 — keep it clean
+        else:
+            # Style 1: classic solid-header professional look
+            cmds = [
+                ("BACKGROUND", (0, col_header_idx), (-1, col_header_idx), HEADER_BG),
+                ("TEXTCOLOR", (0, col_header_idx), (-1, col_header_idx), HEADER_FG),
+                ("FONTNAME", (0, col_header_idx), (-1, col_header_idx), "Helvetica-Bold"),
+                ("FONTSIZE", (0, col_header_idx), (-1, col_header_idx), 8),
+                ("BOTTOMPADDING", (0, col_header_idx), (-1, col_header_idx), 6),
+                ("TOPPADDING", (0, col_header_idx), (-1, col_header_idx), 6),
+                ("LINEBELOW", (0, col_header_idx), (-1, col_header_idx), 1, BRAND_COLOR),
+                # Data rows
+                ("FONTSIZE", (0, col_header_idx + 1), (-1, -1), 8),
+                ("TOPPADDING", (0, col_header_idx + 1), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, col_header_idx + 1), (-1, -1), 3),
+                ("LINEBELOW", (0, -1), (-1, -1), 0.5, BRAND_COLOR),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+            if len(table_data) > col_header_idx + 2:
+                cmds.append(("LINEBELOW", (0, col_header_idx + 1), (-1, -2), 0.25, colors.HexColor("#e2e8f0")))
+            # Banner row styling (spans all cols, brand-coloured background)
+            if title_row_idx is not None:
+                cmds.extend([
+                    ("SPAN", (0, title_row_idx), (-1, title_row_idx)),
+                    ("BACKGROUND", (0, title_row_idx), (-1, title_row_idx), BRAND_COLOR),
+                    ("TEXTCOLOR", (0, title_row_idx), (-1, title_row_idx), colors.white),
+                    ("FONTNAME", (0, title_row_idx), (-1, title_row_idx), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, title_row_idx), (-1, title_row_idx), 10),
+                    ("BOTTOMPADDING", (0, title_row_idx), (-1, title_row_idx), 7),
+                    ("TOPPADDING", (0, title_row_idx), (-1, title_row_idx), 7),
+                    ("LINEBELOW", (0, title_row_idx), (-1, title_row_idx), 0, colors.white),
+                ])
+            # Alternating row colours on data rows
+            first_data = col_header_idx + 1
+            for i in range(first_data, len(table_data)):
+                if (i - first_data) % 2 == 1:
+                    cmds.append(("BACKGROUND", (0, i), (-1, i), ALT_ROW))
 
-        # Fine row separators (skip if only header + 1 data row)
-        if len(table_data) > col_header_idx + 2:
-            cmds.append(("LINEBELOW", (0, col_header_idx + 1), (-1, -2), 0.25, colors.HexColor("#e2e8f0")))
+        # Incomplete rows (single punch): amber tint — applied last so it overrides alt-rows
+        if incomplete_rows:
+            for idx in incomplete_rows:
+                row_idx = idx + col_header_idx + 1
+                cmds.append(("BACKGROUND", (0, row_idx), (-1, row_idx), INCOMPLETE_BG))
 
-        # Banner row styling (spans all cols, brand-coloured background)
-        if title_row_idx is not None:
-            cmds.extend([
-                ("SPAN", (0, title_row_idx), (-1, title_row_idx)),
-                ("BACKGROUND", (0, title_row_idx), (-1, title_row_idx), BRAND_COLOR),
-                ("TEXTCOLOR", (0, title_row_idx), (-1, title_row_idx), colors.white),
-                ("FONTNAME", (0, title_row_idx), (-1, title_row_idx), "Helvetica-Bold"),
-                ("FONTSIZE", (0, title_row_idx), (-1, title_row_idx), 10),
-                ("BOTTOMPADDING", (0, title_row_idx), (-1, title_row_idx), 7),
-                ("TOPPADDING", (0, title_row_idx), (-1, title_row_idx), 7),
-                ("LINEBELOW", (0, title_row_idx), (-1, title_row_idx), 0, colors.white),
-            ])
-
-        # Alternating row colours on data rows
-        first_data = col_header_idx + 1
-        for i in range(first_data, len(table_data)):
-            if (i - first_data) % 2 == 1:
-                cmds.append(("BACKGROUND", (0, i), (-1, i), ALT_ROW))
+        # Full grid: outer border in brand colour, inner vertical/horizontal lines in light gray
+        cmds.extend([
+            ("BOX",       (0, col_header_idx), (-1, -1), 0.75, BRAND_COLOR),
+            ("INNERGRID", (0, col_header_idx), (-1, -1), 0.25, colors.HexColor("#d1d5db")),
+        ])
 
         tbl.setStyle(TableStyle(cmds))
         return tbl
 
-    def _punch_para(text):
-        if text == L["check_in"]:
-            return Paragraph(f'<font color="#{IN_COLOR.hexval()[2:]}">{text}</font>', cell_center)
-        elif text == L["check_out"]:
-            return Paragraph(f'<font color="#{OUT_COLOR.hexval()[2:]}">{text}</font>', cell_center)
-        return Paragraph(text, cell_center)
+    def _ot_para(val):
+        """Overtime value with purple color."""
+        txt = _fmt_min(val)
+        if txt == "-":
+            return Paragraph("-", cell_center)
+        return Paragraph(f'<font color="#{OT_COLOR.hexval()[2:]}">{txt}</font>', cell_center)
+
+    def _late_para(val):
+        """Late value with amber color."""
+        txt = _fmt_min(val)
+        if txt == "-":
+            return Paragraph("-", cell_center)
+        return Paragraph(f'<font color="#{LATE_COLOR.hexval()[2:]}">{txt}</font>', cell_center)
+
+    def _early_para(val):
+        """Early departure value with orange color."""
+        txt = _fmt_min(val)
+        if txt == "-":
+            return Paragraph("-", cell_center)
+        return Paragraph(f'<font color="#{EARLY_COLOR.hexval()[2:]}">{txt}</font>', cell_center)
+
+    def _status_para(r):
+        """Build a status label based on late/early values."""
+        late = r.get("late_minutes", 0) or 0
+        early = r.get("early_departure_minutes", 0) or 0
+        parts = []
+        if late > 0:
+            parts.append(f'<font color="#{LATE_COLOR.hexval()[2:]}">{L["late_status"]}</font>')
+        if early > 0:
+            parts.append(f'<font color="#{EARLY_COLOR.hexval()[2:]}">{L["early_status"]}</font>')
+        if not parts:
+            return Paragraph(f'<font color="#{OK_COLOR.hexval()[2:]}">{L["on_time"]}</font>', cell_center)
+        return Paragraph(" / ".join(parts), cell_center)
+
+    def _time_cell(val: str):
+        """Gray italic em-dash for a missing punch; normal centered text otherwise."""
+        if val == "-":
+            return Paragraph('<font color="#9ca3af"><i>—</i></font>', cell_missing)
+        return Paragraph(val, cell_center)
+
+    # ── Build row cells helper per mode ────────────────────────────────
+    def _build_row(r, include_employee=True, include_date=True, include_department=True):
+        """Return a list of Paragraph cells for one summary row."""
+        cells = []
+        if include_employee:
+            cells.append(Paragraph(str(r["emp_id"]), cell_center))
+            cells.append(Paragraph(r["employee"], cell_bold))
+            if include_department:
+                cells.append(Paragraph(r["department"], cell_style))
+        if include_date:
+            cells.append(Paragraph(r["date"], cell_center))
+        cells.append(_time_cell(r["entry"]))
+        cells.append(_time_cell(r["exit"]))
+        if pdf_show_total_worked:
+            cells.append(Paragraph(_fmt_min(r["total_minutes"]), cell_center))
+        if pdf_show_overtime:
+            cells.append(_ot_para(r["overtime_minutes"]))
+        if attendance_mode == "strict":
+            cells.append(_late_para(r["late_minutes"]))
+            cells.append(_early_para(r["early_departure_minutes"]))
+            cells.append(_status_para(r))
+        cells.append(Paragraph(r.get("device_names", "-"), cell_center))
+        return cells
+
+    def _build_headers(include_employee=True, include_date=True, include_department=True):
+        """Return (col_headers, col_widths) for the current mode."""
+        headers = []
+        widths = []
+        if include_employee:
+            headers += [L["emp_id"], L["employee"]]
+            widths += [14 * mm, 34 * mm]
+            if include_department:
+                headers.append(L["department"])
+                widths.append(24 * mm)
+        if include_date:
+            headers.append(L["col_date"])
+            widths.append(22 * mm)
+        headers += [L["entry_time"], L["exit_time"]]
+        widths += [18 * mm, 18 * mm]
+        if pdf_show_total_worked:
+            headers.append(L["total_worked"])
+            widths.append(20 * mm)
+        if pdf_show_overtime:
+            headers.append(L["overtime"])
+            widths.append(18 * mm)
+        if attendance_mode == "strict":
+            headers += [L["late"], L["early_dep"], L["status"]]
+            widths += [16 * mm, 18 * mm, 22 * mm]
+        headers.append(L["device"])
+        widths.append(26 * mm)
+        return headers, widths
 
     story = []
 
     # ── Report header ──────────────────────────────────────────────────
+    mode_label = L["mode_simple"] if attendance_mode == "simple" else L["mode_strict"]
     if company_name:
         story.append(Paragraph(company_name, title_style))
-    story.append(Paragraph(f"<b>{L['title']}</b>", ParagraphStyle("RT", parent=styles["Heading2"], fontSize=14, textColor=BRAND_COLOR)))
+    story.append(Paragraph(
+        f"<b>{L['title']}</b>  —  {L['daily_summary']}",
+        ParagraphStyle("RT", parent=styles["Heading2"], fontSize=14, textColor=BRAND_COLOR),
+    ))
 
     date_label = date if date else f"{start_date or '—'}  →  {end_date or '—'}"
     meta = [
         f"<b>{L['period'] if not date else L['date']}:</b> {date_label}",
         f"<b>{L['generated']}:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"<b>Mode:</b> {mode_label}",
     ]
     story.append(Paragraph("  &nbsp; |  &nbsp; ".join(meta), subtitle_style))
     summary_text = (
@@ -496,25 +940,22 @@ def export_attendance_pdf(
         for r in flat_rows:
             groups.setdefault(r["employee"], []).append(r)
 
-        col_headers = [L["col_date"], L["time"], L["punch"], L["department"], L["device"]]
-        col_widths = [28 * mm, 22 * mm, 18 * mm, 40 * mm, 30 * mm]
-
         for emp_name, emp_rows in groups.items():
             emp_id = emp_rows[0]["emp_id"]
             dept = emp_rows[0]["department"]
-            banner = f"{emp_name}  ({emp_id})  —  {L['department']}: {dept}  |  {L['records']}: {len(emp_rows)}"
+            subtitle = f"{dept}  ·  {len(emp_rows)} {L['records']}"
 
-            data_rows = []
-            for r in emp_rows:
-                data_rows.append([
-                    Paragraph(r["date"], cell_center),
-                    Paragraph(r["time"], cell_center),
-                    _punch_para(r["punch"]),
-                    Paragraph(r["department"], cell_style),
-                    Paragraph(r["device"], cell_style),
-                ])
-            story.append(_make_table(col_headers, data_rows, col_widths, title_row_text=banner))
-            story.append(Spacer(1, 5 * mm))
+            col_headers, col_widths = _build_headers(include_employee=False, include_date=True)
+            data_rows = [_build_row(r, include_employee=False, include_date=True) for r in emp_rows]
+            inc = [i for i, r in enumerate(emp_rows) if r.get("incomplete")]
+
+            story.append(Spacer(1, 3 * mm))
+            story.append(HRFlowable(width="100%", thickness=1.5, color=BRAND_COLOR, spaceAfter=2 * mm))
+            story.append(Paragraph(f"<b>{emp_name}  ({emp_id})</b>", group_title_style))
+            story.append(Paragraph(subtitle, group_sub_style))
+            story.append(Spacer(1, 2 * mm))
+            story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
+            story.append(Spacer(1, 4 * mm))
 
     # ── GROUP BY DATE ──────────────────────────────────────────────────
     elif group_by == "date":
@@ -522,49 +963,63 @@ def export_attendance_pdf(
         for r in flat_rows:
             groups.setdefault(r["date"], []).append(r)
 
-        col_headers = [L["employee"], L["emp_id"], L["department"], L["time"], L["punch"], L["device"]]
-        col_widths = [38 * mm, 16 * mm, 30 * mm, 20 * mm, 18 * mm, 26 * mm]
-
         for day, day_rows in groups.items():
-            unique_emp = len(set(r["employee"] for r in day_rows))
-            banner = f"{day}  —  {L['records']}: {len(day_rows)}  |  {L['total_employees']}: {unique_emp}"
+            unique_emp = len(set(r["emp_id"] for r in day_rows))
+            subtitle = f"{unique_emp} {L['emp_count']}  ·  {len(day_rows)} {L['records']}"
 
-            data_rows = []
-            for r in day_rows:
-                data_rows.append([
-                    Paragraph(r["employee"], cell_bold),
-                    Paragraph(r["emp_id"], cell_center),
-                    Paragraph(r["department"], cell_style),
-                    Paragraph(r["time"], cell_center),
-                    _punch_para(r["punch"]),
-                    Paragraph(r["device"], cell_style),
-                ])
-            story.append(_make_table(col_headers, data_rows, col_widths, title_row_text=banner))
-            story.append(Spacer(1, 5 * mm))
+            col_headers, col_widths = _build_headers(include_employee=True, include_date=False)
+            data_rows = [_build_row(r, include_employee=True, include_date=False) for r in day_rows]
+            inc = [i for i, r in enumerate(day_rows) if r.get("incomplete")]
+
+            story.append(Spacer(1, 3 * mm))
+            story.append(HRFlowable(width="100%", thickness=1.5, color=BRAND_COLOR, spaceAfter=2 * mm))
+            story.append(Paragraph(f"<b>{day}</b>", group_title_style))
+            story.append(Paragraph(subtitle, group_sub_style))
+            story.append(Spacer(1, 2 * mm))
+            story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
+            story.append(Spacer(1, 4 * mm))
+
+    # ── GROUP BY DEPARTMENT ────────────────────────────────────────────
+    elif group_by == "department":
+        groups = OrderedDict()
+        for r in flat_rows:
+            groups.setdefault(r["department"] or "-", []).append(r)
+
+        for dept_name, dept_rows in groups.items():
+            unique_emp = len(set(r["emp_id"] for r in dept_rows))
+            subtitle = f"{unique_emp} {L['emp_count']}  ·  {len(dept_rows)} {L['records']}"
+
+            col_headers, col_widths = _build_headers(include_employee=True, include_date=True, include_department=False)
+            data_rows = [_build_row(r, include_employee=True, include_date=True, include_department=False) for r in dept_rows]
+            inc = [i for i, r in enumerate(dept_rows) if r.get("incomplete")]
+
+            story.append(Spacer(1, 3 * mm))
+            story.append(HRFlowable(width="100%", thickness=1.5, color=BRAND_COLOR, spaceAfter=2 * mm))
+            story.append(Paragraph(f"<b>{dept_name}</b>", group_title_style))
+            story.append(Paragraph(subtitle, group_sub_style))
+            story.append(Spacer(1, 2 * mm))
+            story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
+            story.append(Spacer(1, 4 * mm))
 
     # ── NO GROUPING (flat table) ───────────────────────────────────────
     else:
-        col_headers = [
-            L["employee"], L["emp_id"], L["department"],
-            L["col_date"], L["time"], L["punch"], L["device"],
-        ]
-        col_widths = [42 * mm, 16 * mm, 30 * mm, 24 * mm, 20 * mm, 16 * mm, 26 * mm]
-
-        data_rows = []
-        for r in flat_rows:
-            data_rows.append([
-                Paragraph(r["employee"], cell_bold),
-                Paragraph(r["emp_id"], cell_center),
-                Paragraph(r["department"], cell_style),
-                Paragraph(r["date"], cell_center),
-                Paragraph(r["time"], cell_center),
-                _punch_para(r["punch"]),
-                Paragraph(r["device"], cell_style),
-            ])
-        story.append(_make_table(col_headers, data_rows, col_widths))
+        col_headers, col_widths = _build_headers(include_employee=True, include_date=True)
+        data_rows = [_build_row(r, include_employee=True, include_date=True) for r in flat_rows]
+        inc = [i for i, r in enumerate(flat_rows) if r.get("incomplete")]
+        story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
 
     # ── Footer ─────────────────────────────────────────────────────────
     story.append(Spacer(1, 6 * mm))
+    if device_legend:
+        dev_leg_style = ParagraphStyle(
+            "DevLeg", parent=footer_style, fontSize=7.5,
+            textColor=colors.HexColor("#475569"), alignment=TA_LEFT, leading=11,
+        )
+        lines = [f'<i>{L.get("device_legend_prefix", "Devices")} :</i>']
+        for num, name in device_legend:
+            lines.append(f'<b>{num}</b>  =  {name}')
+        story.append(Paragraph("<br/>".join(lines), dev_leg_style))
+        story.append(Spacer(1, 2 * mm))
     story.append(HRFlowable(width="100%", thickness=0.3, color=colors.HexColor("#cbd5e1"), spaceBefore=2 * mm))
     story.append(Paragraph(L["confidential"], footer_style))
 
@@ -576,6 +1031,11 @@ def export_attendance_pdf(
             width - 18 * mm, 12 * mm,
             f"{L['page']} {doc_obj.page}",
         )
+        if pdf_style == 'style2':
+            # Style 2: thin emerald line at top of page for branding
+            canvas_obj.setStrokeColor(BRAND_COLOR)
+            canvas_obj.setLineWidth(2)
+            canvas_obj.line(18 * mm, height - 10 * mm, width - 18 * mm, height - 10 * mm)
         canvas_obj.restoreState()
 
     doc.build(story, onFirstPage=_page_footer, onLaterPages=_page_footer)
@@ -587,3 +1047,372 @@ def export_attendance_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="attendance_report.pdf"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Employee list PDF export
+# ---------------------------------------------------------------------------
+@router.get("/employees/export.pdf")
+def export_employees_pdf(
+    company_id: Optional[int] = Query(None),
+    department_id: Optional[int] = Query(None),
+    device_id: Optional[str] = Query(None),
+    device_name: Optional[str] = Query(None),
+    lang: str = Query("en"),
+    current=Depends(get_current_user),
+):
+    """Generate a professional PDF list of employees grouped by device."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
+        KeepTogether,
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
+    LABELS = {
+        "fr": {
+            "title": "Liste des Employés",
+            "generated": "Généré le",
+            "department": "Département",
+            "position": "Poste",
+            "device": "Appareil",
+            "employee": "Employé(e)",
+            "dev_id": "N° App.",
+            "user_id": "ID",
+            "card": "N° Carte",
+            "role": "Rôle",
+            "admin": "Admin",
+            "user": "Utilisateur",
+            "total": "Total",
+            "no_records": "Aucun employé trouvé.",
+            "confidential": "Document confidentiel — usage interne uniquement",
+            "page": "Page",
+            "employees_count": "employé(e)s",
+        },
+        "en": {
+            "title": "Employee List",
+            "generated": "Generated on",
+            "department": "Department",
+            "position": "Position",
+            "device": "Device",
+            "employee": "Employee",
+            "dev_id": "Dev.ID",
+            "user_id": "ID",
+            "card": "Card No.",
+            "role": "Role",
+            "admin": "Admin",
+            "user": "User",
+            "total": "Total",
+            "no_records": "No employees found.",
+            "confidential": "Confidential document — internal use only",
+            "page": "Page",
+            "employees_count": "employees",
+        },
+        "ar": {
+            "title": "قائمة الموظفين",
+            "generated": "تاريخ الإنشاء",
+            "department": "القسم",
+            "position": "المنصب",
+            "device": "الجهاز",
+            "employee": "الموظف",
+            "dev_id": "رقم الجهاز",
+            "user_id": "الرقم",
+            "card": "رقم البطاقة",
+            "role": "الدور",
+            "admin": "مسؤول",
+            "user": "مستخدم",
+            "total": "المجموع",
+            "no_records": "لم يتم العثور على موظفين.",
+            "confidential": "وثيقة سرية — للاستخدام الداخلي فقط",
+            "page": "صفحة",
+            "employees_count": "موظفين",
+        },
+    }
+    L = LABELS.get(lang, LABELS["en"])
+
+    # ── Fetch data + read pdf_style from settings ────────────────────────
+    with get_db_session() as db:
+        from app.database.schema import AppSettings as _AppSettings
+        _settings = db.query(_AppSettings).first()
+        pdf_style = getattr(_settings, 'pdf_style', None) or 'style1'
+
+        q = (
+            db.query(DBEmployee)
+            .outerjoin(DBDepartment, DBEmployee.department_id == DBDepartment.id)
+            .outerjoin(DBCompany, DBEmployee.company_id == DBCompany.id)
+            .outerjoin(DBDevice, DBEmployee.source_device_id == DBDevice.id)
+        )
+        if company_id:
+            q = q.filter(DBEmployee.company_id == company_id)
+        if department_id:
+            q = q.filter(DBEmployee.department_id == department_id)
+        if device_id:
+            q = q.filter(DBEmployee.source_device_id == device_id)
+
+        employees = q.order_by(DBDevice.name.asc(), DBEmployee.user_id.asc()).all()
+
+        company_row = db.query(DBCompany.name).order_by(DBCompany.id).first()
+        company_name = company_row[0] if company_row else ""
+
+        from collections import OrderedDict
+        device_groups = OrderedDict()
+        for emp in employees:
+            dev_name = ((emp.source_device.name if emp.source_device else None) or "—").strip()
+            if dev_name not in device_groups:
+                device_groups[dev_name] = []
+            device_groups[dev_name].append({
+                "name": (emp.name or "")[:36],
+                "dev_id": str(emp.device_user_id or "-"),
+                "user_id": str(emp.user_id or "-"),
+                "department": ((emp.department.name if emp.department else "-") or "-")[:28],
+                "position": ((emp.position.name if hasattr(emp, "position") and emp.position else "-") or "-")[:24],
+                "card": str(emp.card_number or "-"),
+                "role": L["admin"] if emp.privilege == 14 else L["user"],
+            })
+
+    # ── Colour palette — mirrors attendance report (respects pdf_style) ──
+    if pdf_style == 'style2':
+        BRAND_COLOR = colors.HexColor("#059669")
+        HEADER_BG   = colors.HexColor("#065f46")
+        ALT_ROW     = colors.HexColor("#ecfdf5")
+    else:
+        BRAND_COLOR = colors.HexColor("#1e40af")
+        HEADER_BG   = colors.HexColor("#1e3a5f")
+        ALT_ROW     = colors.HexColor("#f1f5f9")
+    HEADER_FG = colors.white
+
+    buf = io.BytesIO()
+    width, height = A4
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=18 * mm, bottomMargin=22 * mm,
+    )
+    styles = getSampleStyleSheet()
+
+    title_style       = ParagraphStyle("PT",  parent=styles["Title"],   fontSize=18, textColor=BRAND_COLOR, spaceAfter=2)
+    sub_style         = ParagraphStyle("PS",  parent=styles["Normal"],  fontSize=10, textColor=colors.HexColor("#475569"), spaceAfter=2)
+    footer_style      = ParagraphStyle("PF",  parent=styles["Normal"],  fontSize=7,  textColor=colors.HexColor("#94a3b8"), alignment=TA_CENTER)
+    cell_style        = ParagraphStyle("PC",  parent=styles["Normal"],  fontSize=8,  leading=10)
+    cell_bold         = ParagraphStyle("PCB", parent=cell_style, fontName="Helvetica-Bold")
+    cell_center       = ParagraphStyle("PCC", parent=cell_style, alignment=TA_CENTER)
+    cell_small        = ParagraphStyle("PCS", parent=cell_style, fontSize=7, textColor=colors.HexColor("#64748b"))
+    group_title_style = ParagraphStyle(
+        "GroupTitle", parent=styles["Heading3"], fontSize=11,
+        textColor=BRAND_COLOR, spaceAfter=2, spaceBefore=6,
+        fontName="Helvetica-Bold",
+    )
+    group_sub_style = ParagraphStyle(
+        "GroupSub", parent=styles["Normal"], fontSize=8,
+        textColor=colors.HexColor("#64748b"), spaceAfter=3,
+    )
+
+    def _make_table(col_headers, data_rows, col_widths):
+        if pdf_style == 'style2':
+            th_text_color = BRAND_COLOR
+        else:
+            th_text_color = HEADER_FG
+        th_style = ParagraphStyle("TH", parent=cell_style, fontSize=8, textColor=th_text_color, fontName="Helvetica-Bold")
+        header_row = [Paragraph(f"<b>{h}</b>", th_style) for h in col_headers]
+
+        table_data = [header_row] + data_rows
+
+        # Scale columns to fill the full printable width
+        _printable_w = width - 2 * 18 * mm
+        _natural_w = sum(col_widths)
+        if _natural_w > 0:
+            col_widths = [w * (_printable_w / _natural_w) for w in col_widths]
+
+        tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+
+        if pdf_style == 'style2':
+            cmds = [
+                ("TEXTCOLOR",     (0, 0), (-1, 0), BRAND_COLOR),
+                ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE",      (0, 0), (-1, 0), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                ("TOPPADDING",    (0, 0), (-1, 0), 6),
+                ("LINEABOVE",     (0, 0), (-1, 0), 1.5, BRAND_COLOR),
+                ("LINEBELOW",     (0, 0), (-1, 0), 1.5, BRAND_COLOR),
+                ("FONTSIZE",      (0, 1), (-1, -1), 8),
+                ("TOPPADDING",    (0, 1), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+                ("LINEBELOW",     (0, -1), (-1, -1), 0.75, BRAND_COLOR),
+                ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ]
+            if len(table_data) > 2:
+                cmds.append(("LINEBELOW", (0, 1), (-1, -2), 0.25, colors.HexColor("#d1d5db")))
+        else:
+            cmds = [
+                ("BACKGROUND",    (0, 0), (-1, 0), HEADER_BG),
+                ("TEXTCOLOR",     (0, 0), (-1, 0), HEADER_FG),
+                ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE",      (0, 0), (-1, 0), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                ("TOPPADDING",    (0, 0), (-1, 0), 6),
+                ("LINEBELOW",     (0, 0), (-1, 0), 1, BRAND_COLOR),
+                ("FONTSIZE",      (0, 1), (-1, -1), 8),
+                ("TOPPADDING",    (0, 1), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
+                ("LINEBELOW",     (0, -1), (-1, -1), 0.5, BRAND_COLOR),
+                ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+            ]
+            if len(table_data) > 2:
+                cmds.append(("LINEBELOW", (0, 1), (-1, -2), 0.25, colors.HexColor("#e2e8f0")))
+            for i in range(1, len(table_data)):
+                if (i - 1) % 2 == 1:
+                    cmds.append(("BACKGROUND", (0, i), (-1, i), ALT_ROW))
+
+        cmds.extend([
+            ("BOX",       (0, 0), (-1, -1), 0.75, BRAND_COLOR),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#d1d5db")),
+        ])
+
+        tbl.setStyle(TableStyle(cmds))
+        return tbl
+
+    story = []
+
+    # ── Report header ────────────────────────────────────────────────────
+    if company_name:
+        story.append(Paragraph(company_name, title_style))
+    story.append(Paragraph(f"<b>{L['title']}</b>",
+        ParagraphStyle("RT", parent=styles["Heading2"], fontSize=14, textColor=BRAND_COLOR)))
+    if device_name:
+        story.append(Paragraph(
+            f"{L['device']}: <b>{device_name}</b>",
+            ParagraphStyle("DevSub", parent=styles["Normal"], fontSize=11,
+                           textColor=colors.HexColor("#1e40af"), spaceAfter=2)))
+    story.append(Paragraph(
+        f"<b>{L['generated']}:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"  &nbsp;|&nbsp;  <b>{L['total']}:</b> {len(employees)} {L['employees_count']}",
+        sub_style))
+    story.append(Spacer(1, 4 * mm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_COLOR, spaceAfter=4 * mm))
+
+    if not employees:
+        story.append(Spacer(1, 20 * mm))
+        story.append(Paragraph(L["no_records"],
+            ParagraphStyle("Empty", parent=styles["Normal"], fontSize=12,
+                           alignment=TA_CENTER, textColor=colors.HexColor("#94a3b8"))))
+    else:
+        # ID first — matches the HTML table column order
+        col_headers = [L["user_id"], L["employee"], L["department"], L["position"], L["role"]]
+        col_widths  = [16 * mm, 56 * mm, 44 * mm, 34 * mm, 24 * mm]
+
+        for dev_name, emp_list in device_groups.items():
+            data_rows = []
+            for r in emp_list:
+                data_rows.append([
+                    Paragraph(r["user_id"], cell_center),
+                    Paragraph(r["name"], cell_bold),
+                    Paragraph(r["department"], cell_style),
+                    Paragraph(r["position"], cell_small),
+                    Paragraph(r["role"], cell_center),
+                ])
+            # Standalone section header — same pattern as grouped attendance report
+            if not device_name:
+                story.append(Spacer(1, 3 * mm))
+                story.append(HRFlowable(width="100%", thickness=1.5, color=BRAND_COLOR, spaceAfter=2 * mm))
+                story.append(Paragraph(f"<b>{dev_name}</b>", group_title_style))
+                story.append(Paragraph(f"{len(emp_list)} {L['employees_count']}", group_sub_style))
+                story.append(Spacer(1, 2 * mm))
+            story.append(_make_table(col_headers, data_rows, col_widths))
+            story.append(Spacer(1, 5 * mm))
+
+    # ── Footer ───────────────────────────────────────────────────────────
+    story.append(Spacer(1, 6 * mm))
+    story.append(HRFlowable(width="100%", thickness=0.3, color=colors.HexColor("#cbd5e1"), spaceBefore=2 * mm))
+    story.append(Paragraph(L["confidential"], footer_style))
+
+    def _page_footer(canvas_obj, doc_obj):
+        canvas_obj.saveState()
+        canvas_obj.setFont("Helvetica", 7)
+        canvas_obj.setFillColor(colors.HexColor("#94a3b8"))
+        canvas_obj.drawRightString(width - 18 * mm, 12 * mm, f"{L['page']} {doc_obj.page}")
+        canvas_obj.restoreState()
+
+    doc.build(story, onFirstPage=_page_footer, onLaterPages=_page_footer)
+    pdf_bytes = buf.getvalue()
+    buf.close()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="employees_list.pdf"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Internal helper for the scheduler (no HTTP context required)
+# ---------------------------------------------------------------------------
+
+def _attendance_pdf_bytes(
+    start_date: str,
+    end_date: str,
+    lang: str = 'fr',
+    device_id: str | None = None,
+    group_by: str = 'employee',
+) -> bytes:
+    """Generate an attendance PDF and return raw bytes. Used by the scheduler."""
+    response = export_attendance_pdf(
+        date=None,
+        start_date=start_date,
+        end_date=end_date,
+        employee_name=None,
+        employee_id=None,
+        device_id=device_id,
+        lang=lang,
+        group_by=group_by,
+        current=None,
+    )
+    return response.body
+
+
+def _attendance_counts(start_date: str, end_date: str,
+                       company_id: int | None, department_id: int | None,
+                       device_ids: list | None) -> tuple[int, int]:
+    """Return (total_employees, total_records) for the given period/filters.
+
+    Attendance joins Employee via Attendance.employee_id == Employee.id
+    (not user_id — that field does not exist on the Attendance model).
+    """
+    from app.database.schema import Attendance as _Att, Employee as _Emp
+    from datetime import datetime as _dt
+    start_dt = _dt.fromisoformat(start_date)
+    end_dt   = _dt.fromisoformat(end_date).replace(hour=23, minute=59, second=59)
+    with get_db_session() as db:
+        # ── total records ────────────────────────────────────────────────────
+        q = db.query(_Att)
+        q = q.filter(_Att.timestamp >= start_dt, _Att.timestamp <= end_dt)
+        if company_id or department_id:
+            q = q.join(_Emp, _Att.employee_id == _Emp.id, isouter=True)
+            if company_id:
+                q = q.filter(_Emp.company_id == company_id)
+            if department_id:
+                q = q.filter(_Emp.department_id == department_id)
+        if device_ids:
+            q = q.filter(_Att.device_id.in_(device_ids))
+        total_records = q.count()
+
+        # ── distinct employees ───────────────────────────────────────────────
+        emp_q = db.query(func.count(func.distinct(_Att.employee_id)))
+        emp_q = emp_q.filter(
+            _Att.timestamp >= start_dt,
+            _Att.timestamp <= end_dt,
+            _Att.employee_id.isnot(None),
+        )
+        if company_id or department_id:
+            emp_q = emp_q.join(_Emp, _Att.employee_id == _Emp.id, isouter=True)
+            if company_id:
+                emp_q = emp_q.filter(_Emp.company_id == company_id)
+            if department_id:
+                emp_q = emp_q.filter(_Emp.department_id == department_id)
+        if device_ids:
+            emp_q = emp_q.filter(_Att.device_id.in_(device_ids))
+        total_employees = emp_q.scalar() or 0
+
+    return total_employees, total_records

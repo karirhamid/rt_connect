@@ -2,7 +2,7 @@
 Shift Management Database Schema
 Handles shifts, schedules, holidays, and employee assignments
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Time, Date, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Time, Date, Enum as SQLEnum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import enum
@@ -159,6 +159,111 @@ class ShiftException(Base):
     original_shift = relationship("Shift", foreign_keys=[original_shift_id], back_populates="exceptions_as_original")
     exception_shift = relationship("Shift", foreign_keys=[exception_shift_id], back_populates="exceptions_as_exception")
     holiday = relationship("Holiday", back_populates="shift_exceptions")
+
+
+class DetectionMethod(str, enum.Enum):
+    """How the shift was determined for a given day"""
+    SCHEDULE = "schedule"       # From employee_schedules personal schedule
+    ASSIGNED = "assigned"       # From employee_shifts assignment
+    AUTO = "auto"               # Auto-detected from first punch
+    NONE = "none"               # No shift could be determined
+
+
+class EmployeeSchedule(Base):
+    """
+    Per-employee custom work timing, one row per day of week.
+    Overrides department schedule when present.
+    day_of_week: 0=Monday, 1=Tuesday, ..., 6=Sunday
+    """
+    __tablename__ = "employee_schedules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    day_of_week = Column(Integer, nullable=False)       # 0=Mon .. 6=Sun
+
+    is_day_off = Column(Boolean, default=False)          # True = not working this day
+    work_start = Column(Time, nullable=True)             # e.g. 07:00
+    work_end = Column(Time, nullable=True)               # e.g. 16:00
+    has_break = Column(Boolean, default=False)
+    break_start = Column(Time, nullable=True)            # e.g. 13:00
+    break_end = Column(Time, nullable=True)              # e.g. 14:00
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "day_of_week", name="uq_employee_schedule_day"),
+    )
+
+    # Relationships
+    from .schema import Employee
+    employee = relationship("Employee", back_populates="schedule")
+
+
+class DepartmentSchedule(Base):
+    """
+    Per-department default work timing, one row per day of week.
+    Used as template when employee has no personal schedule.
+    day_of_week: 0=Monday, 1=Tuesday, ..., 6=Sunday
+    """
+    __tablename__ = "department_schedules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    day_of_week = Column(Integer, nullable=False)       # 0=Mon .. 6=Sun
+
+    is_day_off = Column(Boolean, default=False)
+    work_start = Column(Time, nullable=True)
+    work_end = Column(Time, nullable=True)
+    has_break = Column(Boolean, default=False)
+    break_start = Column(Time, nullable=True)
+    break_end = Column(Time, nullable=True)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("department_id", "day_of_week", name="uq_department_schedule_day"),
+    )
+
+    # Relationships
+    from .schema import Department
+    department = relationship("Department", backref="schedules")
+
+
+class DailyShiftRecord(Base):
+    """
+    Cached/locked shift assignment per employee per day.
+    Once the first punch of the day determines the shift, it is locked here
+    so subsequent punches are classified against the same schedule.
+    """
+    __tablename__ = "daily_shift_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    date = Column(Date, nullable=False, index=True)
+
+    shift_id = Column(Integer, ForeignKey("shifts.id"), nullable=True)
+    detection_method = Column(SQLEnum(DetectionMethod), nullable=False, default=DetectionMethod.NONE)
+
+    # Effective times for this day (copied from schedule/shift at detection time)
+    work_start = Column(Time, nullable=True)
+    work_end = Column(Time, nullable=True)
+    break_start = Column(Time, nullable=True)
+    break_end = Column(Time, nullable=True)
+
+    locked = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("employee_id", "date", name="uq_employee_day"),
+    )
+
+    # Relationships
+    from .schema import Employee
+    employee = relationship("Employee", back_populates="daily_shift_records")
+    shift = relationship("Shift")
 
 
 # Update Employee model to include shift relationships

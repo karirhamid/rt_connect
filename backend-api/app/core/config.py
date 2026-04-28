@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     # credentials are required). Example: "http://localhost:5173,http://localhost:5174"
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177,http://localhost:5178,http://localhost:5179"
     
-    # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./zkteco.db"
+    # Database (default is informational only; actual connection uses connection.py)
+    DATABASE_URL: str = "postgresql://postgres:***@localhost:5432/rtzkconnect_db"
     
     class Config:
         env_file = "../../.env"

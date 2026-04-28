@@ -1,12 +1,12 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Settings, Menu, X, HardDrive, Building2, ChevronDown, Clock, Filter, Users, Globe, Calendar, UserCog, ChevronLeft, ChevronRight, Info, Wrench, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Settings, Menu, HardDrive, Building2, Clock, Users, Calendar, UserCog, ChevronLeft, ChevronRight, Wrench, BarChart3, ArrowLeftRight, CalendarDays, ShieldCheck } from 'lucide-react';
 import { useState, useEffect, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
 import DeviceSettings from './pages/DeviceSettings';
 import CompanyConfig from './pages/CompanyConfig';
 import AttendanceToday from './pages/AttendanceToday';
-import AttendanceFilter from './pages/AttendanceFilter';
+
 import EmployeeManagement from './pages/EmployeeManagement';
 import GeneralSettings from './pages/GeneralSettings';
 import ShiftManagement from './pages/ShiftManagement';
@@ -17,9 +17,19 @@ import RolesManagement from './pages/RolesManagement';
 import Maintenance from './pages/Maintenance';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
+import DeviceSync from './pages/DeviceSync';
 import api from './services/api';
 import ProfileMenu from './components/ProfileMenu';
 import Sidebar from './components/Sidebar';
+
+// Redirects to '/' if the user doesn't have the required permission
+function ProtectedRoute({ perm, children }) {
+  const perms = (() => {
+    try { return new Set(JSON.parse(localStorage.getItem('_userPerms') || '[]')); } catch { return new Set(); }
+  })();
+  if (!perms.has(perm)) return <Navigate to="/" replace />;
+  return children;
+}
 
 function App() {
   return (
@@ -34,6 +44,7 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [attendanceOpen, setAttendanceOpen] = useState(false);
+  const [userPerms, setUserPerms] = useState(null); // null = still loading; populated after login
   const [sidebarStyle, setSidebarStyle] = useState(() => {
     try {
       return localStorage.getItem('sidebarStyle') || 'classic';
@@ -56,7 +67,7 @@ function AppContent() {
     }
   }, [i18n.language]);
 
-  // Build a functional sidebar structure: sections group related items.
+  // Build sidebar — 5 sections in professional order
   let sidebarSections = [
     {
       key: 'main',
@@ -65,23 +76,23 @@ function AppContent() {
       items: [{ name: t('dashboard'), href: '/', icon: LayoutDashboard }],
     },
     {
-      key: 'people',
-      title: t('sidebarPeople'),
+      key: 'hr',
+      title: t('sidebarHR'),
       icon: Users,
       items: [
         { name: t('employees'), href: '/employees', icon: Users },
-        { name: t('users') || 'Users', href: '/settings/users', icon: Users },
-        { name: t('roles') || 'Roles', href: '/settings/roles', icon: UserCog },
+        { name: t('todaysAttendance'), href: '/attendance/today', icon: Clock },
+        { name: t('reports') || 'Reports', href: '/reports', icon: BarChart3 },
       ],
     },
     {
-      key: 'attendance',
-      title: t('sidebarAttendance'),
-      icon: Clock,
+      key: 'scheduling',
+      title: t('sidebarScheduling'),
+      icon: CalendarDays,
       items: [
-        { name: t('todaysAttendance'), href: '/attendance/today', icon: Clock },
-        { name: t('filterAttendance'), href: '/attendance/filter', icon: Filter },
-        { name: t('reports') || 'Reports', href: '/reports', icon: BarChart3 },
+        { name: t('shifts'), href: '/settings/shifts', icon: Clock },
+        { name: t('holidays'), href: '/settings/holidays', icon: Calendar },
+        { name: t('bulkAssignShifts'), href: '/settings/bulk-assign', icon: UserCog },
       ],
     },
     {
@@ -90,45 +101,49 @@ function AppContent() {
       icon: HardDrive,
       items: [
         { name: t('devices'), href: '/settings/devices', icon: HardDrive },
-        { name: t('companyConfig'), href: '/settings/company', icon: Building2 },
+        { name: t('deviceSync') || 'Device Sync', href: '/employees/device-sync', icon: ArrowLeftRight },
       ],
     },
     {
-      key: 'settings',
-      title: t('sidebarSettings'),
-      icon: Settings,
+      key: 'admin',
+      title: t('sidebarAdmin'),
+      icon: ShieldCheck,
       items: [
-        { name: t('general'), href: '/settings/general', icon: Globe },
-        { name: t('shifts'), href: '/settings/shifts', icon: Clock },
-        { name: t('holidays'), href: '/settings/holidays', icon: Calendar },
-        { name: t('bulkAssignShifts'), href: '/settings/bulk-assign', icon: UserCog },
+        { name: t('users') || 'Users', href: '/settings/users', icon: Users },
+        { name: t('roles') || 'Roles', href: '/settings/roles', icon: UserCog },
+        { name: t('companyConfig'), href: '/settings/company', icon: Building2 },
+        { name: t('general'), href: '/settings/general', icon: Settings },
         { name: t('maintenance') || 'Maintenance', href: '/settings/maintenance', icon: Wrench },
       ],
     },
   ];
 
-  // Fallback: ensure 'People' section always contains Users and Roles links.
-  // This protects against prior menu reorganizations that accidentally removed them.
-  const ensurePeopleSection = () => {
-    try {
-      let people = sidebarSections.find(s => s.key === 'people');
-      if (!people) {
-        people = { key: 'people', title: t('sidebarPeople'), items: [] };
-        // Insert after main section when possible
-        sidebarSections.splice(1, 0, people);
+  // Filter sidebar sections based on loaded permissions (null = still loading → show all)
+  if (userPerms !== null) {
+    const has = (p) => userPerms.has(p);
+    sidebarSections = sidebarSections.filter(s => {
+      if (s.key === 'main')        return true;
+      if (s.key === 'hr')          return has('attendance.read') || has('users.read');
+      if (s.key === 'scheduling')  return has('shifts.manage');
+      if (s.key === 'devices')     return has('devices.sync') || has('devices.manage');
+      if (s.key === 'admin')       return has('users.read') || has('settings.manage');
+      return true;
+    });
+    // Item-level: Super Admin only items
+    sidebarSections = sidebarSections.map(s => {
+      if (s.key === 'devices' && !has('devices.manage')) {
+        return { ...s, items: s.items.filter(i => i.href !== '/employees/device-sync') };
       }
-      if (!people.items.some(i => i.href === '/settings/users')) {
-        people.items.push({ name: t('users') || 'Users', href: '/settings/users', icon: Users });
+      if (s.key === 'admin' && !has('roles.manage')) {
+        return { ...s, items: s.items.filter(i =>
+          i.href !== '/settings/roles' &&
+          i.href !== '/settings/general' &&
+          i.href !== '/settings/maintenance'
+        )};
       }
-      if (!people.items.some(i => i.href === '/settings/roles')) {
-        people.items.push({ name: t('roles') || 'Roles', href: '/settings/roles', icon: UserCog });
-      }
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error('ensurePeopleSection error', e);
-    }
-  };
-  ensurePeopleSection();
+      return s;
+    }).filter(s => s.items.length > 0);
+  }
 
   // Determine which section owns the current route.
   // Use longest-prefix match so '/' doesn't incorrectly win over '/employees'.
@@ -189,6 +204,21 @@ function AppContent() {
     window.addEventListener('authChanged', onAuthChanged);
     return () => window.removeEventListener('authChanged', onAuthChanged);
   }, []);
+
+  // Load current user permissions when authenticated; store in localStorage for cross-page use
+  useEffect(() => {
+    if (!token) { setUserPerms(null); localStorage.removeItem('_userPerms'); return; }
+    (async () => {
+      try {
+        const permList = await api.getMyPermissions();
+        const perms = new Set(permList);
+        setUserPerms(perms);
+        localStorage.setItem('_userPerms', JSON.stringify([...perms]));
+      } catch (e) {
+        setUserPerms(new Set());
+      }
+    })();
+  }, [token]);
 
 
 
@@ -331,20 +361,21 @@ function AppContent() {
         <main className="p-6">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/employees" element={<EmployeeManagement />} />
+            <Route path="/employees" element={<ProtectedRoute perm="attendance.read"><EmployeeManagement /></ProtectedRoute>} />
+            <Route path="/employees/device-sync" element={<ProtectedRoute perm="devices.manage"><DeviceSync /></ProtectedRoute>} />
             <Route path="/attendance/today" element={<AttendanceToday />} />
-            <Route path="/attendance/filter" element={<AttendanceFilter />} />
+
             <Route path="/reports" element={<Reports />} />
-            <Route path="/settings/general" element={<GeneralSettings />} />
-            <Route path="/settings/devices" element={<DeviceSettings />} />
-            <Route path="/settings/company" element={<CompanyConfig />} />
-            <Route path="/settings/users" element={<UsersManagement />} />
-            <Route path="/settings/roles" element={<RolesManagement />} />
+            <Route path="/settings/general" element={<ProtectedRoute perm="roles.manage"><GeneralSettings /></ProtectedRoute>} />
+            <Route path="/settings/devices" element={<ProtectedRoute perm="devices.sync"><DeviceSettings /></ProtectedRoute>} />
+            <Route path="/settings/company" element={<ProtectedRoute perm="settings.manage"><CompanyConfig /></ProtectedRoute>} />
+            <Route path="/settings/users" element={<ProtectedRoute perm="users.read"><UsersManagement /></ProtectedRoute>} />
+            <Route path="/settings/roles" element={<ProtectedRoute perm="roles.manage"><RolesManagement /></ProtectedRoute>} />
             <Route path="/login" element={<Login />} />
-            <Route path="/settings/shifts" element={<ShiftManagement />} />
-            <Route path="/settings/holidays" element={<HolidayCalendar />} />
-            <Route path="/settings/bulk-assign" element={<BulkShiftAssignment />} />
-            <Route path="/settings/maintenance" element={<Maintenance />} />
+            <Route path="/settings/shifts" element={<ProtectedRoute perm="shifts.manage"><ShiftManagement /></ProtectedRoute>} />
+            <Route path="/settings/holidays" element={<ProtectedRoute perm="shifts.manage"><HolidayCalendar /></ProtectedRoute>} />
+            <Route path="/settings/bulk-assign" element={<ProtectedRoute perm="shifts.manage"><BulkShiftAssignment /></ProtectedRoute>} />
+            <Route path="/settings/maintenance" element={<ProtectedRoute perm="roles.manage"><Maintenance /></ProtectedRoute>} />
           </Routes>
         </main>
       </div>

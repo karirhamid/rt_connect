@@ -117,9 +117,10 @@ class DeviceSyncService:
                         device_privilege = user_data['privilege']
                         app_privilege = 14 if device_privilege == 6 else 0
                         
+                        # Match by user_id AND source_device_id — allow same user_id on different devices
                         db_employee = db.query(DBEmployee).filter(
-                            DBEmployee.device_user_id == user_data['uid'],
-                            DBEmployee.user_id == user_data['user_id']
+                            DBEmployee.user_id == user_data['user_id'],
+                            DBEmployee.source_device_id == device_id
                         ).first()
                         
                         if db_employee:

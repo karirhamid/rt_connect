@@ -534,11 +534,15 @@ class ZKTecoDeviceManager:
     
     def update_user(self, uid: int, name: str, privilege: int = 0, password: str = "",
                     group_id: str = "", user_id: str = "", card: int = 0) -> bool:
-        """Update a specific user on the device (delete + re-add).
+        """Update a specific user on the device (delete + re-add), preserving fingerprints.
         
         Handles UID/user_id mismatches: on some ZKTeco devices the internal UID
         differs from user_id.  We first look up the real UID on the device by
         matching ``user_id``, then fall back to the supplied ``uid``.
+        
+        Fingerprint safety: before deleting the user (which also wipes their
+        fingerprint templates on the device), we download and cache all templates
+        for that UID, then restore them after the user record is re-created.
         """
         need_disconnect = not self._in_session
         try:
@@ -564,6 +568,22 @@ class ZKTecoDeviceManager:
             
             logger.info(f"Updating user UID={real_uid} (user_id={user_id}) on {self.ip}")
             
+            # ── Fingerprint backup ────────────────────────────────────────
+            # delete_user() on ZKTeco devices silently removes all fingerprint
+            # templates for that UID.  Back them up now so we can restore them
+            # after the user record has been re-created.
+            saved_templates = []
+            try:
+                all_templates = self.conn.get_templates() or []
+                saved_templates = [f for f in all_templates if int(f.uid) == int(real_uid)]
+                if saved_templates:
+                    logger.info(f"Backed up {len(saved_templates)} fingerprint template(s) "
+                                f"for UID={real_uid} on {self.ip}")
+            except Exception as e:
+                logger.warning(f"Could not backup fingerprint templates for UID={real_uid} "
+                               f"on {self.ip}: {e}. Proceeding without backup.")
+            # ─────────────────────────────────────────────────────────────
+            
             user_existed = False
             try:
                 self.conn.delete_user(uid=real_uid)
@@ -574,6 +594,29 @@ class ZKTecoDeviceManager:
             self.conn.set_user(uid=real_uid, name=name, privilege=privilege,
                                password=password, group_id=group_id,
                                user_id=user_id, card=card)
+            
+            # ── Fingerprint restore ───────────────────────────────────────
+            if saved_templates:
+                try:
+                    # save_user_template needs the pyzk User object (not our model)
+                    fresh_users = self.conn.get_users() or []
+                    pyzk_user = next(
+                        (u for u in fresh_users if int(u.uid) == int(real_uid)),
+                        None
+                    )
+                    if pyzk_user:
+                        self.conn.save_user_template(pyzk_user, saved_templates)
+                        logger.info(f"Restored {len(saved_templates)} fingerprint template(s) "
+                                    f"for UID={real_uid} on {self.ip}")
+                    else:
+                        logger.warning(f"Could not find user UID={real_uid} after set_user "
+                                       f"on {self.ip}; fingerprints were NOT restored.")
+                except Exception as e:
+                    logger.error(f"Failed to restore fingerprint templates for UID={real_uid} "
+                                 f"on {self.ip}: {e}. User profile was updated but fingerprints "
+                                 f"may have been lost.")
+            # ─────────────────────────────────────────────────────────────
+            
             try:
                 self.conn.enable_device()
             except Exception:
@@ -604,7 +647,93 @@ class ZKTecoDeviceManager:
         finally:
             if need_disconnect:
                 self.disconnect()
-    
+
+    def get_user_templates(self, real_uid: int) -> list:
+        """Return a list of pyzk Finger objects for the given device UID.
+        
+        Returns raw pyzk Finger objects (not our app model) so they can be
+        passed directly to ``conn.save_user_template()``.
+        """
+        need_disconnect = not self._in_session
+        try:
+            self._ensure_connected()
+            all_templates = self.conn.get_templates() or []
+            user_templates = [f for f in all_templates if int(f.uid) == int(real_uid)]
+            logger.info(f"Found {len(user_templates)} fingerprint template(s) "
+                        f"for UID={real_uid} on {self.ip}")
+            return user_templates
+        except Exception as e:
+            logger.error(f"Error getting templates for UID={real_uid} on {self.ip}: {e}")
+            raise
+        finally:
+            if need_disconnect:
+                self.disconnect()
+
+    def copy_user_to_device(self, source_uid: int, source_user_id: str,
+                             target_manager: 'ZKTecoDeviceManager',
+                             target_uid: int, target_name: str,
+                             target_privilege: int = 0, target_password: str = "",
+                             target_group_id: str = "", target_user_id: str = "",
+                             target_card: int = 0) -> dict:
+        """Copy a user (with fingerprint templates) from this device to ``target_manager``'s device.
+        
+        Both devices must already be connected (i.e. called inside a ``session()`` block
+        for each manager, or this method will auto-connect/disconnect each call).
+        
+        Returns a dict with keys:
+            - ``success`` (bool)
+            - ``fingerprints_copied`` (int) number of templates copied
+            - ``error`` (str or None)
+        """
+        fingerprints_copied = 0
+        try:
+            # 1. Read fingerprint templates from source device
+            self._ensure_connected()
+            all_templates = self.conn.get_templates() or []
+            user_templates = [f for f in all_templates if int(f.uid) == int(source_uid)]
+            logger.info(f"Read {len(user_templates)} fingerprint template(s) "
+                        f"for UID={source_uid} from {self.ip}")
+
+            # 2. Create/update the user on the target device
+            target_manager._ensure_connected()
+            target_manager.conn.set_user(
+                uid=target_uid,
+                name=target_name,
+                privilege=target_privilege,
+                password=target_password,
+                group_id=target_group_id,
+                user_id=target_user_id,
+                card=target_card,
+            )
+
+            # 3. Copy fingerprints if any exist
+            if user_templates:
+                # Fetch the pyzk User object on the target device so
+                # save_user_template has the correct user reference
+                target_users = target_manager.conn.get_users() or []
+                pyzk_target_user = next(
+                    (u for u in target_users if int(u.uid) == int(target_uid)),
+                    None
+                )
+                if pyzk_target_user:
+                    # Re-stamp each Finger with the new target UID before saving
+                    for f in user_templates:
+                        f.uid = target_uid
+                    target_manager.conn.save_user_template(pyzk_target_user, user_templates)
+                    fingerprints_copied = len(user_templates)
+                    logger.info(f"Copied {fingerprints_copied} fingerprint template(s) "
+                                f"to UID={target_uid} on {target_manager.ip}")
+                else:
+                    logger.warning(f"Could not find user UID={target_uid} on target device "
+                                   f"{target_manager.ip} after set_user; fingerprints skipped.")
+
+            target_manager._cached_users = None
+            return {"success": True, "fingerprints_copied": fingerprints_copied, "error": None}
+
+        except Exception as e:
+            logger.error(f"copy_user_to_device UID={source_uid} → {target_manager.ip}: {e}")
+            return {"success": False, "fingerprints_copied": 0, "error": str(e)}
+
     # ── Attendance management ────────────────────────────────────────────
     
     def clear_attendance(self) -> bool:

@@ -1,8 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Trash2, Search, Loader, Edit, Users, FileText, Download, RefreshCw, MonitorSmartphone, Database, X, Calendar, CalendarDays, Clock, ArrowRight } from 'lucide-react';
+import { Plus, Trash2, Search, Loader, Edit, Users, FileText, Download, RefreshCw, MonitorSmartphone, Database, X, Calendar, CalendarDays, Clock, ArrowRight, Save, Upload, RotateCcw, ShieldCheck, AlertTriangle, MoreVertical } from 'lucide-react';
 import api from '../services/api';
 import Dialog, { Toast } from '../components/Dialog';
+import SyncOverlay from '../components/SyncOverlay';
+
+// Read permissions from localStorage (set by App.jsx on login)
+const canManageDevices = () => {
+  try { return JSON.parse(localStorage.getItem('_userPerms') || '[]').includes('devices.manage'); }
+  catch { return false; }
+};
+
+const canManageSettings = () => {
+  try { return JSON.parse(localStorage.getItem('_userPerms') || '[]').includes('settings.manage'); }
+  catch { return false; }
+};
 
 export default function DeviceSettings() {
   const { t } = useTranslation();
@@ -37,6 +49,28 @@ export default function DeviceSettings() {
   // New state: show confirmation panel after discovering device info on add
   const [pendingAddDevice, setPendingAddDevice] = useState(null); // { formData, discoveryInfo }
   const [addingDevice, setAddingDevice] = useState(null);  // null | 'sync' | 'add'
+  // Backup / Restore
+  const [backingUp, setBackingUp] = useState({});   // { [deviceId]: bool }
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [restoreDevice, setRestoreDeviceState] = useState(null);
+  const [restoreFile, setRestoreFile] = useState(null);
+  const [restoreOverwrite, setRestoreOverwrite] = useState(true);
+  // ... action dropdown (fixed-position to escape overflow clipping)
+  const [openMenu, setOpenMenu] = useState(null); // { id, top, left }
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setOpenMenu(null);
+      }
+    };
+    if (openMenu) document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [openMenu]);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState(null);
+  const [syncOverlay, setSyncOverlay] = useState({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
 
   useEffect(() => {
     fetchDevices();
@@ -57,6 +91,79 @@ export default function DeviceSettings() {
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleBackup = async (device) => {
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device.name, direction: 'fromDevice' });
+    try {
+      const resp = await api.authFetch(`/api/devices/${device.id}/backup`, { method: 'GET' });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || (t('backupFailed') || 'Backup failed'));
+      }
+      const blob = await resp.blob();
+      const cd = resp.headers.get('Content-Disposition') || '';
+      const fnMatch = cd.match(/filename="([^"]+)"/);
+      const filename = fnMatch ? fnMatch[1] : `backup_${device.name}.json`;
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setSyncOverlay({ visible: true, phase: 'done', deviceName: device.name, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1000));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
+      showToast(t('backupSuccess') || 'Backup downloaded successfully', 'success');
+    } catch (e) {
+      setSyncOverlay({ visible: true, phase: 'error', deviceName: device.name, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
+      showToast(e.message, 'error');
+    }
+  };
+
+  const handleOpenRestore = (device) => {
+    setRestoreDeviceState(device);
+    setRestoreFile(null);
+    setRestoreOverwrite(true);
+    setRestoreResult(null);
+    setShowRestoreModal(true);
+  };
+
+  const handleRestore = async () => {
+    if (!restoreFile || !restoreDevice) return;
+    setShowRestoreModal(false);
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: restoreDevice.name, direction: 'toDevice' });
+    try {
+      const text = await restoreFile.text();
+      const resp = await api.authFetch(
+        `/api/devices/${restoreDevice.id}/restore-backup?overwrite_existing=${restoreOverwrite}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: text,
+        }
+      );
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || (t('restoreFailed') || 'Restore failed'));
+      setRestoreResult(data);
+      setSyncOverlay({ visible: true, phase: 'done', deviceName: restoreDevice.name, direction: 'toDevice' });
+      await new Promise(r => setTimeout(r, 1000));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
+      showToast(
+        (t('restoreSuccess') || 'Restore complete') +
+        ` — ${data.restored} ${t('restored') || 'restored'}, ${data.fingerprints_restored} ${t('fingerprintsRestored') || 'fingerprints'}`,
+        'success'
+      );
+    } catch (e) {
+      setSyncOverlay({ visible: true, phase: 'error', deviceName: restoreDevice.name, direction: 'toDevice' });
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
+      showToast(e.message, 'error');
+    }
   };
 
   const handleDiscovery = async () => {
@@ -146,9 +253,13 @@ export default function DeviceSettings() {
 
   const handleConfirmAdd = async (syncData) => {
     if (!pendingAddDevice) return;
-    setAddingDevice(syncData ? 'sync' : 'add');
+    const devName = pendingAddDevice.formData.name || pendingAddDevice.formData.ip;
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: devName, direction: syncData ? 'fromDevice' : 'toDevice' });
     try {
       await api.addDevice({ ...pendingAddDevice.formData, sync_data: syncData });
+      setSyncOverlay({ visible: true, phase: 'done', deviceName: devName, direction: syncData ? 'fromDevice' : 'toDevice' });
+      await new Promise(r => setTimeout(r, 1000));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
       showToast(
         syncData
           ? (t('deviceAddedSyncStarted') || 'Device added — sync started in background')
@@ -161,6 +272,9 @@ export default function DeviceSettings() {
       setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '', date_format: 'YYYY-MM-DD' });
       fetchDevices();
     } catch (error) {
+      setSyncOverlay({ visible: true, phase: 'error', deviceName: devName, direction: syncData ? 'fromDevice' : 'toDevice' });
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
       setDialog({
         isOpen: true,
         type: 'error',
@@ -168,8 +282,6 @@ export default function DeviceSettings() {
         message: error.message,
         onConfirm: null
       });
-    } finally {
-      setAddingDevice(null);
     }
   };
 
@@ -208,16 +320,22 @@ export default function DeviceSettings() {
         confirmText: t('updateDevice'),
         cancelText: t('cancel'),
       onConfirm: async () => {
-        setDialog({ ...dialog, loading: true });
+        setDialog({ isOpen: false });
+        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: editingDevice.name, direction: 'toDevice' });
         try {
           await api.updateDevice(editingDevice.id, formData);
-          setDialog({ isOpen: false });
+          setSyncOverlay({ visible: true, phase: 'done', deviceName: editingDevice.name, direction: 'toDevice' });
+          await new Promise(r => setTimeout(r, 1000));
+          setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
           showToast(t('deviceUpdated'), 'success');
           setShowAddForm(false);
           setEditingDevice(null);
           setFormData({ ip: '', port: '4370', tag: '', serial_number: '', name: '', date_format: 'YYYY-MM-DD' });
           fetchDevices();
         } catch (error) {
+          setSyncOverlay({ visible: true, phase: 'error', deviceName: editingDevice.name, direction: 'toDevice' });
+          await new Promise(r => setTimeout(r, 1200));
+          setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
           setDialog({
             isOpen: true,
             type: 'error',
@@ -239,13 +357,19 @@ export default function DeviceSettings() {
       confirmText: t('deleteDevice'),
       cancelText: t('cancel'),
       onConfirm: async () => {
-        setDialog({ ...dialog, loading: true });
+        setDialog({ isOpen: false });
+        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device.name, direction: 'toDevice' });
         try {
           await api.deleteDevice(device.id);
-          setDialog({ isOpen: false });
+          setSyncOverlay({ visible: true, phase: 'done', deviceName: device.name, direction: 'toDevice' });
+          await new Promise(r => setTimeout(r, 1000));
+          setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
           showToast(t('deviceDeleted'), 'success');
           fetchDevices();
         } catch (error) {
+          setSyncOverlay({ visible: true, phase: 'error', deviceName: device.name, direction: 'toDevice' });
+          await new Promise(r => setTimeout(r, 1200));
+          setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
           setDialog({
             isOpen: true,
             type: 'error',
@@ -259,14 +383,18 @@ export default function DeviceSettings() {
   };
 
   const handleFetchEmployeesPreview = async (device) => {
-    const key = `${device.id}-employees`;
-    setLoadingStates(prev => ({ ...prev, [key]: true }));
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device.name, direction: 'fromDevice' });
     try {
-      // Always fetch preview data — the user reviews before confirming
       const result = await api.syncEmployeesFromDevice(device.id, true);
+      setSyncOverlay({ visible: true, phase: 'done', deviceName: device.name, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 800));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
       setEmployeePreviewData({ device, result });
       setShowEmployeePreview(true);
     } catch (error) {
+      setSyncOverlay({ visible: true, phase: 'error', deviceName: device.name, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
       setDialog({
         isOpen: true,
         type: 'error',
@@ -274,21 +402,21 @@ export default function DeviceSettings() {
         message: `${t('failedToLoadData')}: ${error.message}`,
         onConfirm: null
       });
-    } finally {
-      setLoadingStates(prev => ({ ...prev, [key]: false }));
     }
   };
 
   const handleConfirmEmployeeSync = async () => {
     if (!employeePreviewData) return;
-    
-    const key = `${employeePreviewData.device.id}-employees-confirm`;
-    setLoadingStates(prev => ({ ...prev, [key]: true }));
+    const devName = employeePreviewData.device.name;
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: devName, direction: 'fromDevice' });
     
     try {
       const result = await api.confirmEmployeeSync(employeePreviewData.device.id);
       
-      // Update preview data to show completion result
+      setSyncOverlay({ visible: true, phase: 'done', deviceName: devName, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1000));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
+
       setEmployeePreviewData({ 
         device: employeePreviewData.device, 
         result,
@@ -301,6 +429,9 @@ export default function DeviceSettings() {
         showToast(t('allEmployeesAlreadySynced'), 'info');
       }
     } catch (error) {
+      setSyncOverlay({ visible: true, phase: 'error', deviceName: devName, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
       setDialog({
         isOpen: true,
         type: 'error',
@@ -308,8 +439,6 @@ export default function DeviceSettings() {
         message: `${t('updateFailed')}: ${error.message}`,
         onConfirm: null
       });
-    } finally {
-      setLoadingStates(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -348,18 +477,24 @@ export default function DeviceSettings() {
   const handleFetchLogsPreview = async () => {
     if (!selectedDeviceForLogs) return;
 
-    const key = `${selectedDeviceForLogs.id}-logs`;
-    setLoadingStates(prev => ({ ...prev, [key]: true }));
+    const devName = selectedDeviceForLogs.name;
     setShowLogsModal(false);
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: devName, direction: 'fromDevice' });
 
     const { days, startDate, endDate } = getDateRangeParams(logsSyncRange, logsCustomFrom, logsCustomTo);
 
     try {
       const result = await api.syncAttendanceFromDevice(selectedDeviceForLogs.id, days, true, { startDate, endDate });
+      setSyncOverlay({ visible: true, phase: 'done', deviceName: devName, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 800));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
       setLogsPreviewData({ device: selectedDeviceForLogs, result, days, startDate, endDate, requiresConfirmation: true });
       setShowLogsPreview(true);
       setSelectedDeviceForLogs(null);
     } catch (error) {
+      setSyncOverlay({ visible: true, phase: 'error', deviceName: devName, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
       setDialog({
         isOpen: true,
         type: 'error',
@@ -368,16 +503,13 @@ export default function DeviceSettings() {
         onConfirm: null
       });
       setSelectedDeviceForLogs(null);
-    } finally {
-      setLoadingStates(prev => ({ ...prev, [key]: false }));
     }
   };
 
   const handleConfirmAttendanceSync = async () => {
     if (!logsPreviewData) return;
-    
-    const key = `${logsPreviewData.device.id}-logs-confirm`;
-    setLoadingStates(prev => ({ ...prev, [key]: true }));
+    const devName = logsPreviewData.device.name;
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: devName, direction: 'fromDevice' });
     
     try {
       const result = await api.confirmAttendanceSync(
@@ -385,7 +517,10 @@ export default function DeviceSettings() {
         { startDate: logsPreviewData.startDate, endDate: logsPreviewData.endDate }
       );
       
-      // Update preview data to show completion
+      setSyncOverlay({ visible: true, phase: 'done', deviceName: devName, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1000));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
+
       setLogsPreviewData({ 
         device: logsPreviewData.device, 
         result, 
@@ -401,6 +536,9 @@ export default function DeviceSettings() {
         showToast(t('allLogsAlreadySynced'), 'info');
       }
     } catch (error) {
+      setSyncOverlay({ visible: true, phase: 'error', deviceName: devName, direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'toDevice' });
       setDialog({
         isOpen: true,
         type: 'error',
@@ -408,8 +546,6 @@ export default function DeviceSettings() {
         message: `${t('failedToConfirmSync')}: ${error.message}`,
         onConfirm: null
       });
-    } finally {
-      setLoadingStates(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -417,22 +553,24 @@ export default function DeviceSettings() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">{t('deviceSettings')}</h1>
-        <div className="flex gap-3">
-          <button
-            onClick={() => setShowDiscovery(true)}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
-          >
-            <Search className="w-5 h-5" />
-            {t('discoverDevice')}
-          </button>
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
-          >
-            <Plus className="w-5 h-5" />
-            {t('addDevice')}
-          </button>
-        </div>
+        {canManageDevices() && (
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowDiscovery(true)}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+            >
+              <Search className="w-5 h-5" />
+              {t('discoverDevice')}
+            </button>
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2"
+            >
+              <Plus className="w-5 h-5" />
+              {t('addDevice')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Discovery Modal */}
@@ -721,11 +859,11 @@ export default function DeviceSettings() {
       )}
 
       {/* Devices List */}
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
-        <div className="p-6 border-b border-gray-200">
+      <div className="bg-white rounded-lg shadow-md">
+        <div className="p-6 border-b border-gray-200 rounded-t-lg">
           <h2 className="text-xl font-semibold text-gray-800">{t('registeredDevices')}</h2>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-visible">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
@@ -781,7 +919,8 @@ export default function DeviceSettings() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        {/* Sync Users — always visible */}
                         <button
                           onClick={() => handleFetchEmployeesPreview(device)}
                           disabled={loadingStates[`${device.id}-employees`]}
@@ -798,6 +937,7 @@ export default function DeviceSettings() {
                           )}
                           <span className="hidden lg:inline">{t('syncUsers')}</span>
                         </button>
+                        {/* Sync Logs — always visible */}
                         <button
                           onClick={() => handleOpenLogsModal(device)}
                           disabled={loadingStates[`${device.id}-logs`]}
@@ -814,22 +954,78 @@ export default function DeviceSettings() {
                           )}
                           <span className="hidden lg:inline">{t('syncLogs')}</span>
                         </button>
-                        <button
-                          onClick={() => handleEditDevice(device)}
-                          className="text-primary-600 hover:text-primary-900 flex items-center gap-1"
-                          title={t('editDevice')}
-                        >
-                          <Edit className="w-4 h-4" />
-                          <span className="hidden lg:inline">{t('edit')}</span>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteDevice(device)}
-                          className="text-red-600 hover:text-red-900 flex items-center gap-1"
-                          title={t('deleteDevice')}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          <span className="hidden lg:inline">{t('delete')}</span>
-                        </button>
+
+                        {/* ··· more actions dropdown */}
+                        <div>
+                          <button
+                            onClick={(e) => {
+                              if (openMenu?.id === device.id) { setOpenMenu(null); return; }
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setOpenMenu({ id: device.id, top: rect.bottom + 4, left: rect.right - 176 });
+                            }}
+                            className="p-1.5 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+                            title="More actions"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {openMenu?.id === device.id && (
+                          <div
+                            ref={menuRef}
+                            style={{ position: 'fixed', top: openMenu.top, left: openMenu.left, zIndex: 9999 }}
+                            className="w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1"
+                          >
+                            {/* Edit — Super Admin only */}
+                            {canManageDevices() && (
+                            <button
+                              onClick={() => { setOpenMenu(null); handleEditDevice(device); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                              <Edit className="w-4 h-4 text-gray-500" />
+                              {t('edit')}
+                            </button>
+                            )}
+                            {/* Backup */}
+                            {canManageDevices() && (
+                            <button
+                              onClick={() => { setOpenMenu(null); handleBackup(device); }}
+                              disabled={backingUp[device.id]}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                            >
+                              {backingUp[device.id] ? (
+                                <Loader className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Save className="w-4 h-4" />
+                              )}
+                              {t('backup') || 'Backup'}
+                            </button>
+                            )}
+                            {/* Restore */}
+                            {canManageDevices() && (
+                            <button
+                              onClick={() => { setOpenMenu(null); handleOpenRestore(device); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-amber-700 hover:bg-amber-50"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                              {t('restore') || 'Restore'}
+                            </button>
+                            )}
+                            {canManageDevices() && (
+                            <>
+                              <div className="border-t border-gray-100 my-1" />
+                              {/* Delete — Super Admin only */}
+                              <button
+                                onClick={() => { setOpenMenu(null); handleDeleteDevice(device); }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                {t('delete')}
+                              </button>
+                            </>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -839,6 +1035,9 @@ export default function DeviceSettings() {
           </table>
         </div>
       </div>
+
+      {/* Sync Overlay */}
+      <SyncOverlay visible={syncOverlay.visible} phase={syncOverlay.phase} deviceName={syncOverlay.deviceName} direction={syncOverlay.direction} />
 
       {/* Dialog Component */}
       <Dialog
@@ -1241,6 +1440,149 @@ export default function DeviceSettings() {
                 >
                   {t('close')}
                 </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Restore Modal ─────────────────────────────────────── */}
+      {showRestoreModal && restoreDevice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <RotateCcw className="w-5 h-5 text-amber-500" />
+                {t('restoreDevice') || 'Restore Device'} — {restoreDevice.name}
+              </h2>
+              <button
+                onClick={() => { setShowRestoreModal(false); setRestoreResult(null); }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              {!restoreResult ? (
+                <>
+                  {/* Warning banner */}
+                  <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                    <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <p>{t('restoreWarning') || 'This will write users and fingerprints back to the device. Existing users will be overwritten if the option below is enabled.'}</p>
+                  </div>
+
+                  {/* File picker */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      {t('selectBackupFile') || 'Select backup file (.json)'}
+                    </label>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={e => setRestoreFile(e.target.files[0] || null)}
+                      className="block w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-4 file:rounded-lg file:border file:border-gray-300 file:text-sm file:font-medium file:text-gray-700 file:bg-white hover:file:bg-gray-50 cursor-pointer"
+                    />
+                    {restoreFile && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {restoreFile.name} ({(restoreFile.size / 1024).toFixed(1)} KB)
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Overwrite option */}
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={restoreOverwrite}
+                      onChange={e => setRestoreOverwrite(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-amber-600"
+                    />
+                    <span className="text-sm text-gray-700">
+                      {t('restoreOverwrite') || 'Overwrite existing users (recommended)'}
+                    </span>
+                  </label>
+
+                  {/* Actions */}
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      onClick={() => { setShowRestoreModal(false); setRestoreResult(null); }}
+                      className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+                    >
+                      {t('cancel')}
+                    </button>
+                    <button
+                      onClick={handleRestore}
+                      disabled={restoring || !restoreFile}
+                      className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
+                    >
+                      {restoring ? (
+                        <Loader className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="w-4 h-4" />
+                      )}
+                      {restoring ? (t('restoring') || 'Restoring...') : (t('startRestore') || 'Start Restore')}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                /* Results panel */
+                <>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-green-700">{restoreResult.restored}</p>
+                      <p className="text-green-600">{t('usersRestored') || 'Users restored'}</p>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-blue-700">{restoreResult.fingerprints_restored}</p>
+                      <p className="text-blue-600">{t('fingerprintsRestored') || 'Fingerprints'}</p>
+                    </div>
+                    {restoreResult.skipped > 0 && (
+                      <div className="bg-gray-50 border rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold text-gray-600">{restoreResult.skipped}</p>
+                        <p className="text-gray-500">{t('skipped') || 'Skipped'}</p>
+                      </div>
+                    )}
+                    {restoreResult.errors > 0 && (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold text-red-600">{restoreResult.errors}</p>
+                        <p className="text-red-500">{t('errorsLabel') || 'Errors'}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Per-user detail */}
+                  <div className="max-h-48 overflow-y-auto border rounded-lg divide-y text-sm">
+                    {restoreResult.results.map((r, i) => (
+                      <div key={i} className={`flex items-center gap-3 px-3 py-2 ${r.status === 'error' ? 'bg-red-50' : ''}`}>
+                        {r.status === 'restored' ? (
+                          <ShieldCheck className="w-4 h-4 text-green-500 flex-shrink-0" />
+                        ) : r.status === 'skipped' ? (
+                          <RotateCcw className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                        )}
+                        <span className="flex-1 truncate font-medium text-gray-900">{r.name}</span>
+                        {r.status === 'restored' && r.fingerprints_restored > 0 && (
+                          <span className="text-xs text-blue-600 whitespace-nowrap">
+                            {r.fingerprints_restored} fp
+                          </span>
+                        )}
+                        {r.error && <span className="text-xs text-red-600 truncate">{r.error}</span>}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => { setShowRestoreModal(false); setRestoreResult(null); }}
+                      className="px-5 py-2 text-sm font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-800"
+                    >
+                      {t('close')}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>

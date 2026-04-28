@@ -58,3 +58,11 @@ frontend/node_modules/
 # Backups
 backups/
 Thumbs.db
+
+# Deployment build artefacts
+rtconnect_package/
+*.zip
+db_dump.sql
+
+# Example / test data (may contain real employee info)
+example/

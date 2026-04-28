@@ -3,6 +3,15 @@ import { useTranslation } from 'react-i18next';
 import { Filter, Download, FileText, Loader, Users, Clock, CalendarDays, Search, BarChart3 } from 'lucide-react';
 import api from '../services/api';
 
+const PUNCH_CATEGORY_STYLES = {
+  entry:         { bg: 'bg-green-100', text: 'text-green-800', key: 'punchEntry' },
+  break_out:     { bg: 'bg-amber-100', text: 'text-amber-800', key: 'punchBreakOut' },
+  break_in:      { bg: 'bg-cyan-100',  text: 'text-cyan-800',  key: 'punchBreakIn' },
+  exit:          { bg: 'bg-blue-100',  text: 'text-blue-800',  key: 'punchExit' },
+  overtime_exit: { bg: 'bg-purple-100',text: 'text-purple-800',key: 'punchOvertimeExit' },
+  unknown:       { bg: 'bg-gray-100',  text: 'text-gray-600',  key: 'punchUnknown' },
+};
+
 export default function Reports() {
   const { t, i18n } = useTranslation();
   const [mode, setMode] = useState('range');
@@ -12,7 +21,7 @@ export default function Reports() {
   const [employeeName, setEmployeeName] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [devices, setDevices] = useState([]);
-  const [groupBy, setGroupBy] = useState('employee'); // 'none' | 'date' | 'employee'
+  const [groupBy, setGroupBy] = useState(''); // '' | 'employee' | 'date' | 'department'
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(null); // 'csv' | 'pdf' | null
   const [records, setRecords] = useState([]);
@@ -20,6 +29,8 @@ export default function Reports() {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('summary'); // 'summary' | 'details'
   const [hasSearched, setHasSearched] = useState(false);
+  const [attendanceMode, setAttendanceMode] = useState('simple');
+  const [employeeMode, setEmployeeMode] = useState('shared');
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -65,6 +76,8 @@ export default function Reports() {
       const [recData, sumData] = await Promise.all([recResp.json(), sumResp.json()]);
       setRecords(recData.records || []);
       setSummary(sumData.summary || []);
+      setAttendanceMode(sumData.attendance_mode || 'simple');
+      setEmployeeMode(sumData.employee_mode || 'shared');
     } catch (e) {
       setError(e?.message || t('failedToLoadReport'));
       setRecords([]);
@@ -108,7 +121,7 @@ export default function Reports() {
     try {
       const params = buildParams();
       params.append('lang', i18n.language || 'en');
-      if (groupBy && groupBy !== 'none') params.append('group_by', groupBy);
+      if (groupBy) params.append('group_by', groupBy);
       const resp = await api.authFetch(`/api/reports/attendance/export.pdf?${params}`, { method: 'GET' });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -131,7 +144,7 @@ export default function Reports() {
   };
 
   // Stats cards
-  const uniqueEmployees = new Set(summary.map(r => r.employee_name)).size;
+  const uniqueEmployees = new Set(summary.map(r => r.employee_id)).size;
   const totalSwipes = summary.reduce((s, r) => s + r.swipes, 0);
   const uniqueDays = new Set(summary.map(r => r.date)).size;
 
@@ -139,22 +152,61 @@ export default function Reports() {
   const groupData = (data, key) => {
     const map = new Map();
     data.forEach(item => {
-      const groupKey = key === 'employee' ? (item.employee_name || 'Unknown') : (item.date || 'Unknown');
+      const groupKey =
+        key === 'employee'   ? (item.employee_id || 'Unknown') :
+        key === 'department' ? (item.department  || '-')        :
+                               (item.date        || 'Unknown');
       if (!map.has(groupKey)) map.set(groupKey, []);
       map.get(groupKey).push(item);
     });
-    return Array.from(map.entries()); // [[groupKey, [items]], ...]
+    return Array.from(map.entries());
   };
 
-  const groupedSummary = groupBy !== 'none' ? groupData(summary, groupBy) : null;
-  const groupedRecords = groupBy !== 'none' ? groupData(records, groupBy) : null;
+  const groupLabel = (key, group, items) => {
+    if (key === 'employee') return items[0]?.employee_name || group;
+    return group;
+  };
+
+  const groupedSummary = groupBy ? groupData(summary, groupBy) : null;
+  const groupedRecords = groupBy ? groupData(records, groupBy) : null;
+
+  const fmtMin = (m) => {
+    if (m == null) return '-';
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    return h > 0 ? `${h}h${r > 0 ? String(r).padStart(2, '0') + 'm' : ''}` : `${r}m`;
+  };
+
+  const colCount = attendanceMode === 'strict' ? 10 : 8;
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">{t('reports')}</h1>
-        <p className="text-sm text-gray-500">{t('generateReport')}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">{t('reports')}</h1>
+          <p className="text-sm text-gray-500">{t('generateReport')}</p>
+        </div>
+        {hasSearched && (
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
+              employeeMode === 'shared'
+                ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+            }`}>
+              <Users className="w-3.5 h-3.5" />
+              {employeeMode === 'shared' ? (t('employeeModeShared') || 'Shared') : (t('employeeModeSeparate') || 'Separate')}
+            </span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
+              attendanceMode === 'strict'
+                ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                : 'bg-gray-100 text-gray-600 border border-gray-200'
+            }`}>
+              <Clock className="w-3.5 h-3.5" />
+              {attendanceMode === 'strict' ? (t('attendanceModeStrict') || 'Strict') : (t('attendanceModeSimple') || 'Simple')}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Filters Card */}
@@ -267,9 +319,10 @@ export default function Reports() {
                 value={groupBy}
                 onChange={e => setGroupBy(e.target.value)}
               >
+                <option value="">{t('groupByNone') || 'No grouping'}</option>
                 <option value="employee">{t('groupByEmployee') || 'By Employee'}</option>
                 <option value="date">{t('groupByDate') || 'By Date'}</option>
-                <option value="none">{t('groupByNone') || 'No grouping'}</option>
+                <option value="department">{t('groupByDepartment') || 'By Department'}</option>
               </select>
             </div>
           </div>
@@ -403,6 +456,10 @@ export default function Reports() {
                     <th className="px-4 py-3">{t('department')}</th>
                     <th className="px-4 py-3">{t('firstCheckIn')}</th>
                     <th className="px-4 py-3">{t('lastCheckOut')}</th>
+                    <th className="px-4 py-3">{t('totalWorked')}</th>
+                    <th className="px-4 py-3">{t('overtime')}</th>
+                    {attendanceMode === 'strict' && <th className="px-4 py-3">{t('lateMinutes')}</th>}
+                    {attendanceMode === 'strict' && <th className="px-4 py-3">{t('earlyDeparture')}</th>}
                     <th className="px-4 py-3 text-center">{t('swipes') || 'Swipes'}</th>
                   </tr>
                 </thead>
@@ -411,9 +468,9 @@ export default function Reports() {
                     groupedSummary.map(([group, items]) => (
                       <React.Fragment key={group}>
                         <tr className="bg-primary-50/60">
-                          <td colSpan={6} className="px-4 py-2.5">
+                          <td colSpan={colCount} className="px-4 py-2.5">
                             <div className="flex items-center gap-2">
-                              <span className="font-semibold text-primary-800 text-sm">{group}</span>
+                              <span className="font-semibold text-primary-800 text-sm">{groupLabel(groupBy, group, items)}</span>
                               <span className="text-xs text-primary-500 bg-primary-100 px-2 py-0.5 rounded-full">{items.length} {items.length === 1 ? t('record') || 'record' : t('records') || 'records'}</span>
                               <span className="text-xs text-gray-500 ml-auto">{t('totalSwipes') || 'Total swipes'}: {items.reduce((s, r) => s + r.swipes, 0)}</span>
                             </div>
@@ -444,6 +501,26 @@ export default function Reports() {
                                 <span className="text-gray-400">-</span>
                               )}
                             </td>
+                            <td className="px-4 py-2.5 text-gray-700">{fmtMin(r.total_minutes)}</td>
+                            <td className="px-4 py-2.5">
+                              {r.overtime_minutes > 0 ? (
+                                <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
+                              ) : <span className="text-gray-400">-</span>}
+                            </td>
+                            {attendanceMode === 'strict' && (
+                              <td className="px-4 py-2.5">
+                                {r.late_minutes > 0 ? (
+                                  <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span>
+                                ) : <span className="text-gray-400">-</span>}
+                              </td>
+                            )}
+                            {attendanceMode === 'strict' && (
+                              <td className="px-4 py-2.5">
+                                {r.early_departure_minutes > 0 ? (
+                                  <span className="text-orange-700 font-medium">{fmtMin(r.early_departure_minutes)}</span>
+                                ) : <span className="text-gray-400">-</span>}
+                              </td>
+                            )}
                             <td className="px-4 py-2.5 text-center">
                               <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-xs font-semibold text-gray-700">
                                 {r.swipes}
@@ -479,6 +556,26 @@ export default function Reports() {
                             <span className="text-gray-400">-</span>
                           )}
                         </td>
+                        <td className="px-4 py-2.5 text-gray-700">{fmtMin(r.total_minutes)}</td>
+                        <td className="px-4 py-2.5">
+                          {r.overtime_minutes > 0 ? (
+                            <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
+                          ) : <span className="text-gray-400">-</span>}
+                        </td>
+                        {attendanceMode === 'strict' && (
+                          <td className="px-4 py-2.5">
+                            {r.late_minutes > 0 ? (
+                              <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span>
+                            ) : <span className="text-gray-400">-</span>}
+                          </td>
+                        )}
+                        {attendanceMode === 'strict' && (
+                          <td className="px-4 py-2.5">
+                            {r.early_departure_minutes > 0 ? (
+                              <span className="text-orange-700 font-medium">{fmtMin(r.early_departure_minutes)}</span>
+                            ) : <span className="text-gray-400">-</span>}
+                          </td>
+                        )}
                         <td className="px-4 py-2.5 text-center">
                           <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-xs font-semibold text-gray-700">
                             {r.swipes}
@@ -489,7 +586,7 @@ export default function Reports() {
                   )}
                   {summary.length === 0 && (
                     <tr>
-                      <td className="px-4 py-12 text-center text-gray-400" colSpan={6}>
+                      <td className="px-4 py-12 text-center text-gray-400" colSpan={colCount}>
                         {t('noData')}
                       </td>
                     </tr>
@@ -509,6 +606,7 @@ export default function Reports() {
                     <th className="px-4 py-3">{t('department')}</th>
                     <th className="px-4 py-3">{t('device')}</th>
                     <th className="px-4 py-3">{t('type') || 'Type'}</th>
+                    <th className="px-4 py-3">{t('punchCategory') || 'Category'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -516,14 +614,16 @@ export default function Reports() {
                     groupedRecords.map(([group, items]) => (
                       <React.Fragment key={group}>
                         <tr className="bg-primary-50/60">
-                          <td colSpan={6} className="px-4 py-2.5">
+                          <td colSpan={7} className="px-4 py-2.5">
                             <div className="flex items-center gap-2">
-                              <span className="font-semibold text-primary-800 text-sm">{group}</span>
-                              <span className="text-xs text-primary-500 bg-primary-100 px-2 py-0.5 rounded-full">{items.length} {items.length === 1 ? t('record') || 'record' : t('records') || 'records'}</span>
+                              <span className="font-semibold text-primary-800 text-sm">{groupLabel(groupBy, group, items)}</span>
+                              <span className="text-xs text-gray-500">({items.length})</span>
                             </div>
                           </td>
                         </tr>
-                        {items.map(r => (
+                        {items.map(r => {
+                          const catStyle = PUNCH_CATEGORY_STYLES[r.punch_category] || PUNCH_CATEGORY_STYLES.unknown;
+                          return (
                           <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                             <td className="px-4 py-2.5 font-mono text-gray-700">{r.date}</td>
                             <td className="px-4 py-2.5 font-mono text-gray-700">{r.time}</td>
@@ -541,12 +641,20 @@ export default function Reports() {
                                 {r.punch === 0 ? (t('checkIn') || 'In') : r.punch === 1 ? (t('checkOut') || 'Out') : `#${r.punch}`}
                               </span>
                             </td>
+                            <td className="px-4 py-2.5">
+                              <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${catStyle.bg} ${catStyle.text}`}>
+                                {t(catStyle.key)}
+                              </span>
+                            </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </React.Fragment>
                     ))
                   ) : (
-                    records.map(r => (
+                    records.map(r => {
+                      const catStyle = PUNCH_CATEGORY_STYLES[r.punch_category] || PUNCH_CATEGORY_STYLES.unknown;
+                      return (
                       <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-2.5 font-mono text-gray-700">{r.date}</td>
                         <td className="px-4 py-2.5 font-mono text-gray-700">{r.time}</td>
@@ -564,12 +672,18 @@ export default function Reports() {
                             {r.punch === 0 ? (t('checkIn') || 'In') : r.punch === 1 ? (t('checkOut') || 'Out') : `#${r.punch}`}
                           </span>
                         </td>
+                        <td className="px-4 py-2.5">
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${catStyle.bg} ${catStyle.text}`}>
+                            {t(catStyle.key)}
+                          </span>
+                        </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                   {records.length === 0 && (
                     <tr>
-                      <td className="px-4 py-12 text-center text-gray-400" colSpan={6}>
+                      <td className="px-4 py-12 text-center text-gray-400" colSpan={7}>
                         {t('noData')}
                       </td>
                     </tr>

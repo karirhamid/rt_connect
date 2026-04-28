@@ -6,7 +6,7 @@ from app.database.schema import (
     Company, Department, Position, Employee, Device, Attendance
 )
 from app.database.shift_schema import (
-    Shift, ShiftTiming, EmployeeShift, Holiday
+    Shift, ShiftTiming, EmployeeShift, Holiday, EmployeeSchedule, DepartmentSchedule, DailyShiftRecord
 )
 
 __all__ = [
@@ -25,5 +25,8 @@ __all__ = [
     "Shift",
     "ShiftTiming",
     "EmployeeShift",
-    "Holiday"
+    "Holiday",
+    "EmployeeSchedule",
+    "DepartmentSchedule",
+    "DailyShiftRecord",
 ]

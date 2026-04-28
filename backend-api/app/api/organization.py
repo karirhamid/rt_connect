@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from app.database import get_db
 from app.database.schema import Company, Department, Position, Employee, Device as DBDevice
+from app.database.shift_schema import EmployeeSchedule
 from app.services.device_store import device_store
 from app.services.device_manager import ZKTecoDeviceManager
 import logging
@@ -966,3 +967,353 @@ async def delete_employee(employee_id: int, db: Session = Depends(get_db)):
         logger.warning(f"Employee deleted from DB but some devices failed: {sync_errors}")
     
     return response
+
+# ── Device-Sync: Copy employees between devices ──────────────────────────────
+
+class CopyToDeviceRequest(BaseModel):
+    employee_ids: List[int]
+    target_device_id: str
+    copy_fingerprints: bool = True
+
+
+@router.get("/employees/device-sync/devices-summary")
+async def get_devices_with_employees(db: Session = Depends(get_db)):
+    """List all devices with their employees (DB data only, no device connections)."""
+    devices = device_store.get_all()
+    result = []
+    for dev in devices:
+        employees = (
+            db.query(Employee)
+            .filter(Employee.source_device_id == dev.id)
+            .all()
+        )
+        result.append({
+            "id": dev.id,
+            "name": dev.name,
+            "ip": dev.ip,
+            "employee_count": len(employees),
+            "employees": [
+                {
+                    "id": e.id,
+                    "device_user_id": e.device_user_id,
+                    "user_id": e.user_id,
+                    "name": e.name,
+                    "department_name": e.department.name if e.department else None,
+                    "privilege": e.privilege,
+                }
+                for e in employees
+            ],
+        })
+    return {"devices": result}
+
+
+@router.post("/employees/device-sync/copy")
+async def copy_employees_to_device(payload: CopyToDeviceRequest, db: Session = Depends(get_db)):
+    """Copy selected employees (with fingerprints) from their source devices to a target device.
+
+    Groups employees by source device to minimise connections.  Uses one
+    persistent connection per source device and one for the target device.
+    Returns per-employee success/failure details.
+    """
+    from collections import defaultdict
+
+    target_config = device_store.get_by_id(payload.target_device_id)
+    if not target_config:
+        raise HTTPException(status_code=404, detail=f"Target device {payload.target_device_id} not found")
+
+    if not payload.employee_ids:
+        raise HTTPException(status_code=400, detail="employee_ids must not be empty")
+
+    employees = db.query(Employee).filter(Employee.id.in_(payload.employee_ids)).all()
+    if not employees:
+        raise HTTPException(status_code=404, detail="No employees found for given IDs")
+
+    by_source: dict = defaultdict(list)
+    results = []
+
+    for emp in employees:
+        if not emp.source_device_id:
+            results.append({
+                "employee_id": emp.id,
+                "name": emp.name,
+                "success": False,
+                "fingerprints_copied": 0,
+                "error": "Employee has no source device assigned",
+            })
+        elif str(emp.source_device_id) == payload.target_device_id:
+            results.append({
+                "employee_id": emp.id,
+                "name": emp.name,
+                "success": False,
+                "fingerprints_copied": 0,
+                "error": "Employee is already on the target device",
+            })
+        else:
+            by_source[str(emp.source_device_id)].append(emp)
+
+    if not by_source:
+        success_count = 0
+        return {
+            "total": len(results),
+            "success": success_count,
+            "failed": len(results) - success_count,
+            "results": results,
+        }
+
+    def _next_free_uid(used: set) -> int:
+        for i in range(1, 100_000):
+            if i not in used:
+                return i
+        return -1
+
+    target_manager = ZKTecoDeviceManager(ip=target_config.ip, port=target_config.port, timeout=30)
+
+    try:
+        with target_manager.session() as tgt:
+            try:
+                raw_tgt_users = tgt.conn.get_users() or []
+            except Exception as e:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Cannot connect to target device '{target_config.name}': {e}",
+                )
+
+            tgt_userid_map = {str(getattr(u, "user_id", "")): u for u in raw_tgt_users}
+            tgt_uids_used = {int(u.uid) for u in raw_tgt_users}
+
+            # Build a map of user_id → DB employee id for employees whose home device IS the target.
+            # This lets us distinguish "same employee synced across devices" from
+            # "a completely different employee who happens to share the same badge ID".
+            target_db_user_id_map: dict[str, int] = {
+                str(e.user_id): e.id
+                for e in db.query(Employee)
+                .filter(Employee.source_device_id == payload.target_device_id)
+                .all()
+            }
+            # Also build a set of source employee DB ids so we can recognise
+            # "same person on both devices" (same user_id, different source_device).
+            source_emp_user_ids = {str(e.user_id) for e in employees}
+
+            for source_device_id, emp_group in by_source.items():
+                source_config = device_store.get_by_id(source_device_id)
+                if not source_config:
+                    for emp in emp_group:
+                        results.append({
+                            "employee_id": emp.id,
+                            "name": emp.name,
+                            "success": False,
+                            "fingerprints_copied": 0,
+                            "error": f"Source device {source_device_id} not found",
+                        })
+                    continue
+
+                src_manager = ZKTecoDeviceManager(
+                    ip=source_config.ip, port=source_config.port, timeout=30
+                )
+                try:
+                    with src_manager.session() as src:
+                        all_src_templates = []
+                        if payload.copy_fingerprints:
+                            try:
+                                all_src_templates = src.conn.get_templates() or []
+                            except Exception as e:
+                                for emp in emp_group:
+                                    results.append({
+                                        "employee_id": emp.id,
+                                        "name": emp.name,
+                                        "success": False,
+                                        "fingerprints_copied": 0,
+                                        "error": f"Cannot read templates from '{source_config.name}': {e}",
+                                    })
+                                continue
+
+                        for emp in emp_group:
+                            try:
+                                src_uid = int(emp.device_user_id)
+                                emp_templates = [
+                                    f for f in all_src_templates if int(f.uid) == src_uid
+                                ]
+
+                                # ── Resolve UID on target ──────────────────────────────────────────
+                                # Priority:
+                                #  1. employee's user_id is already on the target device:
+                                #     a. it maps to a target-device DB employee → CONFLICT (different person, same badge ID)
+                                #     b. it maps to an orphan/legacy entry   → reuse that slot (update)
+                                #  2. source uid slot is free on target       → use the same slot
+                                #  3. source uid slot is taken on target      → find next free slot
+                                user_id_str = str(emp.user_id)
+                                existing_on_device = tgt_userid_map.get(user_id_str)
+
+                                if existing_on_device is not None:
+                                    # This badge ID already exists on the target device.
+                                    target_db_owner = target_db_user_id_map.get(user_id_str)
+                                    if target_db_owner is not None and user_id_str not in source_emp_user_ids:
+                                        # A genuinely different person on the target owns this badge ID.
+                                        # Copying would overwrite them → refuse.
+                                        results.append({
+                                            "employee_id": emp.id,
+                                            "name": emp.name,
+                                            "success": False,
+                                            "fingerprints_copied": 0,
+                                            "assigned_uid": None,
+                                            "uid_changed": False,
+                                            "error": (
+                                                f"Badge ID '{user_id_str}' is already assigned to "
+                                                f"another employee on the target device. "
+                                                f"Resolve the ID conflict first."
+                                            ),
+                                        })
+                                        continue
+                                    else:
+                                        # Same person already on both devices, or legacy entry.
+                                        # Reuse the existing UID slot → update in plac
+                                        tgt_uid = int(existing_on_device.uid)
+                                elif src_uid not in tgt_uids_used:
+                                    tgt_uid = src_uid
+                                else:
+                                    # uid slot is taken by a different employee → use next free slot
+                                    tgt_uid = _next_free_uid(tgt_uids_used)
+                                    logger.info(
+                                        f"UID slot {src_uid} taken on target; "
+                                        f"assigning {emp.name} to free slot {tgt_uid}"
+                                    )
+
+                                uid_changed = (tgt_uid != src_uid)
+                                tgt_uids_used.add(tgt_uid)
+
+                                tgt_privilege = (
+                                    0 if emp.privilege == 0
+                                    else 14 if emp.privilege == 14
+                                    else emp.privilege
+                                )
+
+                                # Write user record to target
+                                tgt.conn.set_user(
+                                    uid=tgt_uid,
+                                    name=emp.name,
+                                    privilege=tgt_privilege,
+                                    password=emp.password or "",
+                                    group_id=emp.group_id or "",
+                                    user_id=emp.user_id,
+                                    card=emp.card_number or 0,
+                                )
+
+                                # Write fingerprint templates to target (only if requested)
+                                fp_copied = 0
+                                if payload.copy_fingerprints and emp_templates:
+                                    refreshed_tgt = tgt.conn.get_users() or []
+                                    pyzk_tgt_user = next(
+                                        (u for u in refreshed_tgt if int(u.uid) == tgt_uid), None
+                                    )
+                                    if pyzk_tgt_user:
+                                        for f in emp_templates:
+                                            f.uid = tgt_uid
+                                        tgt.conn.save_user_template(pyzk_tgt_user, emp_templates)
+                                        fp_copied = len(emp_templates)
+                                        # Refresh cache for next iteration
+                                        tgt_userid_map[user_id_str] = pyzk_tgt_user
+                                    else:
+                                        logger.warning(
+                                            f"User UID={tgt_uid} not found on target after "
+                                            f"set_user; fingerprints skipped for {emp.name}"
+                                        )
+
+                                # ── Sync DB record for target device ───────────────────────
+                                # If the same person has a DB row for the target device,
+                                # update it with the source employee's web-app fields
+                                # (gender, schedule, etc.) that don't live on the hardware.
+                                target_emp = (
+                                    db.query(Employee)
+                                    .filter(
+                                        Employee.source_device_id == payload.target_device_id,
+                                        Employee.user_id == str(emp.user_id),
+                                    )
+                                    .first()
+                                )
+                                if target_emp:
+                                    # Profile fields (DB-only)
+                                    target_emp.name = emp.name
+                                    target_emp.privilege = emp.privilege
+                                    target_emp.password = emp.password
+                                    target_emp.group_id = emp.group_id
+                                    target_emp.card_number = emp.card_number
+                                    target_emp.gender = emp.gender
+                                    target_emp.email = emp.email
+                                    target_emp.phone = emp.phone
+                                    target_emp.address = emp.address
+                                    target_emp.birth_date = emp.birth_date
+                                    target_emp.emergency_contact_name = emp.emergency_contact_name
+                                    target_emp.emergency_contact_phone = emp.emergency_contact_phone
+                                    target_emp.synced_at = datetime.now(timezone.utc)
+
+                                    # Copy personal schedule (7-day work timing)
+                                    src_schedules = (
+                                        db.query(EmployeeSchedule)
+                                        .filter(EmployeeSchedule.employee_id == emp.id)
+                                        .all()
+                                    )
+                                    if src_schedules:
+                                        # Remove old target schedule rows
+                                        db.query(EmployeeSchedule).filter(
+                                            EmployeeSchedule.employee_id == target_emp.id
+                                        ).delete()
+                                        # Insert copies from source
+                                        for sched in src_schedules:
+                                            db.add(EmployeeSchedule(
+                                                employee_id=target_emp.id,
+                                                day_of_week=sched.day_of_week,
+                                                is_day_off=sched.is_day_off,
+                                                work_start=sched.work_start,
+                                                work_end=sched.work_end,
+                                                has_break=sched.has_break,
+                                                break_start=sched.break_start,
+                                                break_end=sched.break_end,
+                                            ))
+                                    db.commit()
+
+                                results.append({
+                                    "employee_id": emp.id,
+                                    "name": emp.name,
+                                    "success": True,
+                                    "fingerprints_copied": fp_copied,
+                                    "assigned_uid": tgt_uid,
+                                    "uid_changed": uid_changed,
+                                    "error": None,
+                                })
+
+                            except Exception as e:
+                                logger.error(
+                                    f"copy_employees_to_device: error copying {emp.name}: {e}"
+                                )
+                                results.append({
+                                    "employee_id": emp.id,
+                                    "name": emp.name,
+                                    "success": False,
+                                    "fingerprints_copied": 0,
+                                    "assigned_uid": None,
+                                    "uid_changed": False,
+                                    "error": str(e),
+                                })
+
+                except (ConnectionError, TimeoutError, OSError) as e:
+                    for emp in emp_group:
+                        results.append({
+                            "employee_id": emp.id,
+                            "name": emp.name,
+                            "success": False,
+                            "fingerprints_copied": 0,
+                            "error": f"Cannot connect to source '{source_config.name}': {e}",
+                        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error during copy: {e}")
+
+    success_count = sum(1 for r in results if r.get("success"))
+    return {
+        "total": len(results),
+        "success": success_count,
+        "failed": len(results) - success_count,
+        "results": results,
+    }

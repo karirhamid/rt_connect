@@ -35,12 +35,6 @@ class Attendance(BaseModel):
     punch: int
 
 
-class DeviceConnection(BaseModel):
-    ip: str
-    port: int
-    timeout: int = 10
-
-
 class ResponseMessage(BaseModel):
     success: bool
     message: str
@@ -55,9 +49,3 @@ class UserCreate(BaseModel):
     group_id: str = ""
     user_id: str
     card: int = 0
-
-
-class AttendanceQuery(BaseModel):
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-    user_id: Optional[str] = None

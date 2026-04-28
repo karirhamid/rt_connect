@@ -1,20 +1,20 @@
 [
   {
-    "id": "433202ac-99a3-4e53-a32e-0244c8daa4a4",
-    "name": "RDC",
-    "ip": "10.185.1.202",
-    "port": 4370,
-    "tag": "UNIBIO",
-    "serial_number": "A2NC180560088",
-    "date_format": "YYYY-MM-DD"
-  },
-  {
-    "id": "97a19e3e-7e2e-448b-8e24-73cb2a03501f",
-    "name": "TECHNIQUE",
+    "id": "9ff1ed80-54a8-4b5f-9ec5-d1f78ef00832",
+    "name": "POINTEUSE TECHNIQUE",
     "ip": "10.185.1.201",
     "port": 4370,
     "tag": "UNIBIO",
     "serial_number": "OMA6050486050500094",
+    "date_format": "YYYY-MM-DD"
+  },
+  {
+    "id": "fff00b00-a830-47d3-b678-426ccddba8cc",
+    "name": "POINTEUSE RDC",
+    "ip": "10.185.1.202",
+    "port": 4370,
+    "tag": "UNIBIO",
+    "serial_number": "A2NC180560088",
     "date_format": "YYYY-MM-DD"
   }
 ]

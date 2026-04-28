@@ -23,20 +23,33 @@ export default function UsersManagement() {
     try {
       const res = await api.listSystemUsers();
       setUsers(res || []);
-      const roles = await api.getRoles();
-      setAvailableRoles(roles || []);
-      // load current user and permissions
-      try{
-        const me = await api.getCurrentUser();
-        setCurrentUser(me || null);
-        // collect permission codes from roles if present
-        const perms = new Set();
-        (me?.roles || []).forEach(rname => {}); // keep for future
-        // fetch explicit permissions list and map to a set
-        const p = await api.getPermissions();
-        (p || []).forEach(x => perms.add(x.code));
-        setPermissions(perms);
-      }catch(e){ /* ignore */ }
+
+      // Load current user first — we need their role names to derive permissions
+      let me = null;
+      try { me = await api.getCurrentUser(); setCurrentUser(me || null); } catch (e) { /* ignore */ }
+
+      // Load roles (requires roles.read — may fail for restricted users)
+      let roles = [];
+      try { roles = await api.getRoles() || []; } catch (e) { /* no roles.read permission */ }
+      setAvailableRoles(roles);
+
+      // Derive this user's permissions from their roles — NOT from the global permission list
+      const myRoleNames = new Set(me?.roles || []);
+      const perms = new Set();
+      roles.forEach(r => {
+        if (myRoleNames.has(r.name)) {
+          (r.permissions || []).forEach(p => perms.add(p));
+        }
+      });
+      // Super Admin: if user has Administrator role, ensure all perms represented
+      if (myRoleNames.has('Administrator')) {
+        perms.add('users.create'); perms.add('users.update');
+        perms.add('users.delete'); perms.add('roles.manage');
+      }
+      setPermissions(perms);
+
+      // Store in localStorage so other pages can read them without an extra API call
+      try { localStorage.setItem('_userPerms', JSON.stringify([...perms])); } catch (e) {}
     } catch (e) {
       console.error(e);
       setNotification({ type: 'error', message: t('failedToLoadUsers') });
@@ -212,7 +225,8 @@ export default function UsersManagement() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t('roles')}</label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {availableRoles.map(r => (
+                  {/* Admins cannot assign the Super Admin (Administrator) role */}
+                  {availableRoles.filter(r => permissions.has('roles.manage') || r.name !== 'Administrator').map(r => (
                     <label key={r.id} className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${(form.roles||[]).includes(r.name) ? 'bg-primary-50 border-primary-300 ring-1 ring-primary-200' : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
                       <input
                         type="checkbox"

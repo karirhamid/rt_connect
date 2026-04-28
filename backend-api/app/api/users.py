@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from app.database.connection import get_db_session
 from app.database.schema import User, Role, Permission
-from app.core.security import get_password_hash, require_permission, get_current_user
+from app.core.security import get_password_hash, require_permission, get_current_user, user_has_permission
 
 router = APIRouter()
 
@@ -30,34 +30,20 @@ class UpdateUserIn(BaseModel):
     roles: Optional[List[str]] = None
 
 
-@router.get('/users', response_model=List[UserOut])
-def list_users(current=Depends(get_current_user)):
-    with get_db_session() as db:
-        users = db.query(User).all()
-        out = []
-        for u in users:
-            out.append(UserOut(id=u.id, username=u.username, email=u.email, is_active=u.is_active, roles=[r.name for r in u.roles]))
-        return out
-
-# Convenience alias: GET /api/users -> list users (same as /api/users/users)
-@router.get('/', response_model=List[UserOut])
-def list_users_root(current=Depends(get_current_user)):
-    with get_db_session() as db:
-        users = db.query(User).all()
-        out = []
-        for u in users:
-            out.append(UserOut(id=u.id, username=u.username, email=u.email, is_active=u.is_active, roles=[r.name for r in u.roles]))
-        return out
-
-
-# Also support no-slash path for convenience (maps to /api/users)
 @router.get('', response_model=List[UserOut])
-def list_users_empty(current=Depends(get_current_user)):
+@router.get('/', response_model=List[UserOut], include_in_schema=False)
+@router.get('/users', response_model=List[UserOut], include_in_schema=False)
+def list_users(current=Depends(get_current_user)):
+    is_super_admin = user_has_permission(current, 'roles.manage')
     with get_db_session() as db:
         users = db.query(User).all()
         out = []
         for u in users:
-            out.append(UserOut(id=u.id, username=u.username, email=u.email, is_active=u.is_active, roles=[r.name for r in u.roles]))
+            user_role_names = [r.name for r in u.roles]
+            # Non-super-admins cannot see Administrator users
+            if not is_super_admin and 'Administrator' in user_role_names:
+                continue
+            out.append(UserOut(id=u.id, username=u.username, email=u.email, is_active=u.is_active, roles=user_role_names))
         return out
 
 

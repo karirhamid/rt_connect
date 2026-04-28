@@ -363,8 +363,15 @@ async def get_statistics(db: Session = Depends(get_db)):
             "recent_devices": []
         }
     
-    # Get total users (employees)
-    total_users = db.query(DBEmployee).count()
+    # Get total users (depends on employee_mode setting)
+    from app.database.schema import AppSettings as _AppSettings
+    _settings = db.query(_AppSettings).first()
+    employee_mode = getattr(_settings, 'employee_mode', None) or 'shared'
+
+    if employee_mode == 'shared':
+        total_users = db.query(func.count(func.distinct(DBEmployee.user_id))).scalar()
+    else:
+        total_users = db.query(DBEmployee).count()
     
     # Get today's attendance count
     today_start = datetime.combine(today, datetime.min.time())
@@ -413,8 +420,11 @@ async def get_statistics(db: Session = Depends(get_db)):
         else:
             device_status["offline"] += 1
         
-        # Get employee count (all employees in system)
-        user_count = db.query(DBEmployee).count()
+        # Get employee count per device
+        if employee_mode == 'shared':
+            user_count = db.query(func.count(func.distinct(DBEmployee.user_id))).filter(DBEmployee.source_device_id == device.id).scalar()
+        else:
+            user_count = db.query(DBEmployee).filter(DBEmployee.source_device_id == device.id).count()
         
         recent_devices.append({
             "name": device.name,
@@ -443,7 +453,8 @@ async def get_statistics(db: Session = Depends(get_db)):
         "active_devices": active_devices,
         "weekly_attendance": weekly_data,
         "device_status": status_data,
-        "recent_devices": recent_devices[:5]  # Last 5 devices
+        "recent_devices": recent_devices[:5],  # Last 5 devices
+        "employee_mode": employee_mode,
     }
 
 
@@ -605,7 +616,7 @@ async def sync_employees_from_device(
         for user in users:
             existing = db.query(DBEmployee).filter(
                 DBEmployee.source_device_id == device_id,
-                DBEmployee.device_user_id == user.user_id
+                DBEmployee.device_user_id == user.uid
             ).first()
             
             app_privilege = 14 if user.privilege in (6, 14) else 0
@@ -672,21 +683,24 @@ async def confirm_employee_sync(device_id: str, db: Session = Depends(get_db)):
 
         for user in users:
             try:
+                # Match by device uid scoped to this device — allow same user_id on different devices
                 existing = db.query(DBEmployee).filter(
                     DBEmployee.source_device_id == device_id,
-                    DBEmployee.device_user_id == user.user_id
+                    DBEmployee.device_user_id == user.uid
                 ).first()
 
                 if existing:
+                    # Update sync timestamp
+                    existing.synced_at = datetime.now(timezone.utc)
                     skipped += 1
                     continue
 
                 # New employee — insert
                 app_privilege = 14 if user.privilege in (6, 14) else 0
-                logger.info(f"Adding new employee '{user.name}' (UID={user.user_id}): privilege={app_privilege}")
+                logger.info(f"Adding new employee '{user.name}' (uid={user.uid}, user_id={user.user_id}): privilege={app_privilege}")
                 new_employee = DBEmployee(
                     name=user.name,
-                    device_user_id=user.user_id,
+                    device_user_id=user.uid,
                     user_id=str(user.user_id),
                     source_device_id=device_id,
                     privilege=app_privilege,
@@ -1070,4 +1084,227 @@ async def sync_attendance_from_device(
         "skipped": skipped,
         "filtered_count": filtered_count,
         "errors": errors[:20]
+    }
+
+
+# ── Device Backup & Restore ───────────────────────────────────────────────────
+
+class RestoreOptions(BaseModel):
+    overwrite_existing: bool = True   # If False, skip users already on the device
+
+
+@router.get("/devices/{device_id}/backup")
+async def backup_device(device_id: str):
+    """Download a full backup of all users + fingerprint templates from a device.
+
+    The backup is a JSON file containing every user record and all their
+    fingerprint templates (templates stored as hex strings via pyzk's built-in
+    ``Finger.json_pack()``).  The file can later be uploaded to
+    ``POST /api/devices/{device_id}/restore`` to recreate all users/fingerprints.
+
+    The device is connected for the minimum time needed: users are fetched first,
+    then all templates are fetched in one call.
+    """
+    from fastapi.responses import StreamingResponse
+    import json as _json
+    from zk.finger import Finger
+
+    device = device_store.get_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail=f"Device {device_id} not found")
+
+    manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=30)
+
+    try:
+        with manager.session() as mgr:
+            try:
+                raw_users = mgr.conn.get_users() or []
+            except Exception as e:
+                raise HTTPException(status_code=503, detail=f"Cannot connect to device '{device.name}': {e}")
+
+            try:
+                all_templates = mgr.conn.get_templates() or []
+            except Exception as e:
+                logger.warning(f"Backup: could not read templates from '{device.name}': {e}")
+                all_templates = []
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Device communication error: {e}")
+
+    # Build template index: uid → list of finger dicts
+    fp_index: dict = {}
+    for f in all_templates:
+        uid_key = int(f.uid)
+        fp_index.setdefault(uid_key, []).append(f.json_pack())
+
+    backup = {
+        "version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "device_id": device_id,
+        "device_name": device.name,
+        "users": [
+            {
+                "uid": u.uid,
+                "name": u.name,
+                "privilege": u.privilege,
+                "password": u.password if hasattr(u, "password") else "",
+                "group_id": u.group_id if hasattr(u, "group_id") else "",
+                "user_id": u.user_id,
+                "card": u.card if hasattr(u, "card") else 0,
+                "fingerprints": fp_index.get(int(u.uid), []),
+            }
+            for u in raw_users
+        ],
+    }
+
+    payload = _json.dumps(backup, ensure_ascii=False, indent=2).encode("utf-8")
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in device.name)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"backup_{safe_name}_{ts}.json"
+
+    return StreamingResponse(
+        iter([payload]),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# The restore endpoint — receives the backup JSON as the raw request body
+from fastapi import Request as _Request
+
+@router.post("/devices/{device_id}/restore-backup")
+async def restore_device_backup(
+    device_id: str,
+    request: _Request,
+    overwrite_existing: bool = True,
+):
+    """Restore a device from a backup JSON (the file content sent as request body).
+
+    Body: the JSON file produced by GET /api/devices/{device_id}/backup.
+    Query param: overwrite_existing (default true) — if false, skip users that
+    already exist on the device (matched by user_id string).
+    """
+    import json as _json
+    from zk.finger import Finger
+
+    device = device_store.get_by_id(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail=f"Device {device_id} not found")
+
+    try:
+        body_bytes = await request.body()
+        backup = _json.loads(body_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON backup file: {e}")
+
+    users_in_backup = backup.get("users", [])
+    if not users_in_backup:
+        raise HTTPException(status_code=400, detail="Backup contains no users.")
+
+    results = []
+
+    manager = ZKTecoDeviceManager(ip=device.ip, port=device.port, timeout=30)
+    try:
+        with manager.session() as mgr:
+            try:
+                existing_raw = mgr.conn.get_users() or []
+            except Exception as e:
+                raise HTTPException(status_code=503, detail=f"Cannot connect to device '{device.name}': {e}")
+
+            # Map user_id → pyzk user object for quick lookup
+            existing_by_userid = {str(getattr(u, "user_id", "")): u for u in existing_raw}
+
+            for u in users_in_backup:
+                uid = int(u.get("uid", 0))
+                user_id_str = str(u.get("user_id", ""))
+                name = u.get("name", "")
+                fingerprints_data = u.get("fingerprints", [])
+
+                try:
+                    if user_id_str in existing_by_userid:
+                        if not overwrite_existing:
+                            results.append({
+                                "uid": uid, "name": name,
+                                "status": "skipped", "fingerprints_restored": 0, "error": None,
+                            })
+                            continue
+                        # Overwrite: delete existing (clears old templates)
+                        existing_uid = int(existing_by_userid[user_id_str].uid)
+                        try:
+                            mgr.conn.delete_user(uid=existing_uid)
+                        except Exception:
+                            pass
+
+                    # Write user record
+                    mgr.conn.set_user(
+                        uid=uid,
+                        name=name,
+                        privilege=int(u.get("privilege", 0)),
+                        password=u.get("password") or "",
+                        group_id=u.get("group_id") or "",
+                        user_id=user_id_str,
+                        card=int(u.get("card") or 0),
+                    )
+
+                    # Write fingerprints
+                    fp_restored = 0
+                    if fingerprints_data:
+                        # Build pyzk Finger objects from backup
+                        fingers = []
+                        for fp in fingerprints_data:
+                            try:
+                                f = Finger.json_unpack(fp)
+                                f.uid = uid  # ensure UID matches
+                                fingers.append(f)
+                            except Exception as fe:
+                                logger.warning(f"Restore: could not unpack finger for uid={uid}: {fe}")
+
+                        if fingers:
+                            # Get fresh user object (needed by save_user_template)
+                            refreshed = mgr.conn.get_users() or []
+                            pyzk_user = next(
+                                (u2 for u2 in refreshed if int(u2.uid) == uid), None
+                            )
+                            if pyzk_user:
+                                mgr.conn.save_user_template(pyzk_user, fingers)
+                                fp_restored = len(fingers)
+                                # Update cache for subsequent iterations
+                                existing_by_userid[user_id_str] = pyzk_user
+                            else:
+                                logger.warning(f"Restore: user uid={uid} not found after set_user; fingerprints skipped.")
+
+                    results.append({
+                        "uid": uid, "name": name,
+                        "status": "restored", "fingerprints_restored": fp_restored, "error": None,
+                    })
+
+                except Exception as e:
+                    logger.error(f"Restore: error for uid={uid} ({name}): {e}")
+                    results.append({
+                        "uid": uid, "name": name,
+                        "status": "error", "fingerprints_restored": 0, "error": str(e),
+                    })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Device communication error: {e}")
+
+    restored = sum(1 for r in results if r["status"] == "restored")
+    skipped = sum(1 for r in results if r["status"] == "skipped")
+    errors = sum(1 for r in results if r["status"] == "error")
+    total_fp = sum(r["fingerprints_restored"] for r in results)
+
+    return {
+        "success": True,
+        "device_id": device_id,
+        "device_name": device.name,
+        "total": len(results),
+        "restored": restored,
+        "skipped": skipped,
+        "errors": errors,
+        "fingerprints_restored": total_fp,
+        "results": results,
     }

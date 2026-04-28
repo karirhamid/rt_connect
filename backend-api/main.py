@@ -4,18 +4,20 @@ from fastapi.responses import Response
 import logging
 from contextlib import asynccontextmanager
 from app.core import settings
-from app.api import device_router, users_router, attendance_router
+from app.api.users import router as users_router
+from app.api.attendance import router as attendance_router
 from app.api import auth as auth_module
 from app.api.devices import router as devices_router
 from app.api.organization import router as organization_router
 from app.api.shifts import router as shifts_router
 from app.api.employee_shifts import router as employee_shifts_router
 from app.api.holidays import router as holidays_router
-from app.api.statistics import router as statistics_router
 from app.api.settings import router as settings_router
 from app.api.reports import router as reports_router
 from app.api.maintenance import router as maintenance_router
-from app.api import device_users_router
+from app.api.employee_schedules import router as employee_schedules_router
+from app.api.email_settings import router as email_settings_router
+from app.api.report_schedules import router as report_schedules_router
 from app.database import init_db
 from app.database.connection import get_db_session
 from app.database.schema import AppSettings
@@ -37,6 +39,17 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
+    # Auto-migrate: add columns that may not exist in older databases
+    try:
+        from app.database.connection import engine
+        with engine.connect() as conn:
+            conn.execute(__import__('sqlalchemy').text(
+                "ALTER TABLE report_schedules ADD COLUMN IF NOT EXISTS group_by VARCHAR(20) DEFAULT 'employee'"
+            ))
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Auto-migration warning (safe to ignore on fresh DB): {e}")
+
     # Ensure default app settings exist
     with get_db_session() as db:
         settings_row = db.query(AppSettings).first()
@@ -47,45 +60,108 @@ async def lifespan(app: FastAPI):
             db.refresh(settings_row)
             logger.info("Created default AppSettings")
 
-    # Seed default permissions, roles, and admin user
+    # Seed default permissions, roles, and users
     try:
         from app.database.schema import Permission, Role, User
         from app.core.security import get_password_hash
         with get_db_session() as db:
-            # Define a minimal canonical permission set
+            # Full permission set
             default_perms = [
-                'users.create', 'users.read', 'users.update', 'users.delete',
-                'roles.read', 'roles.manage',
-                'devices.manage', 'attendance.read', 'shifts.manage'
+                ('users.create',     'Create system users'),
+                ('users.read',       'View system users'),
+                ('users.update',     'Edit system users'),
+                ('users.delete',     'Delete system users'),
+                ('roles.read',       'View roles'),
+                ('roles.manage',     'Create and edit roles'),
+                ('devices.manage',   'Add, edit and delete devices'),
+                ('devices.sync',     'Sync users and logs from devices'),
+                ('attendance.read',  'View attendance records'),
+                ('reports.view',     'Generate and view reports'),
+                ('settings.manage',  'Manage application settings'),
+                ('shifts.manage',    'Manage shifts and schedules'),
+                ('employees.manage', 'Add, edit and delete employees'),
             ]
-            # Create permissions if missing
-            for code in default_perms:
+            for code, desc in default_perms:
                 if not db.query(Permission).filter(Permission.code == code).first():
-                    db.add(Permission(code=code, description=f'Permission for {code}'))
+                    db.add(Permission(code=code, description=desc))
             db.commit()
 
-            # Ensure Administrator role exists with all permissions
-            admin_role = db.query(Role).filter(Role.name == 'Administrator').first()
+            def _get_perms(codes):
+                return db.query(Permission).filter(Permission.code.in_(codes)).all()
+
+            # ── Super Admin (Administrator) — full access ──────────────────
+            super_role = db.query(Role).filter(Role.name == 'Administrator').first()
+            if not super_role:
+                super_role = Role(name='Administrator', description='Super Admin — full system access')
+                db.add(super_role)
+                db.commit()
+                db.refresh(super_role)
+            super_role.permissions = db.query(Permission).all()
+            db.add(super_role)
+            db.commit()
+
+            # ── Admin — manage users/attendance/settings, sync devices, no device add/edit ──
+            admin_role = db.query(Role).filter(Role.name == 'Admin').first()
             if not admin_role:
-                admin_role = Role(name='Administrator', description='Full access')
+                admin_role = Role(name='Admin', description='Admin — manage users, attendance, settings and sync devices')
                 db.add(admin_role)
                 db.commit()
                 db.refresh(admin_role)
-            # Assign all permissions to admin role
-            perms = db.query(Permission).all()
-            admin_role.permissions = perms
+            admin_role.permissions = _get_perms([
+                'users.create', 'users.read', 'users.update', 'users.delete',
+                'roles.read',
+                'devices.sync',
+                'attendance.read', 'reports.view',
+                'settings.manage', 'shifts.manage',
+                'employees.manage',
+            ])
             db.add(admin_role)
             db.commit()
 
-            # Create admin user if not exists (per user choice: admin/admin123)
+            # ── Reporting User — sync logs + generate reports only ─────────
+            report_role = db.query(Role).filter(Role.name == 'Reporting User').first()
+            if not report_role:
+                report_role = Role(name='Reporting User', description='Reporting User — sync logs and generate reports only')
+                db.add(report_role)
+                db.commit()
+                db.refresh(report_role)
+            report_role.permissions = _get_perms([
+                'devices.sync', 'attendance.read', 'reports.view',
+            ])
+            db.add(report_role)
+            db.commit()
+
+            # ── admin user (Super Admin) ───────────────────────────────────
             admin_user = db.query(User).filter(User.username == 'admin').first()
             if not admin_user:
                 admin_user = User(username='admin', email=None, password_hash=get_password_hash('admin123'), is_active=True)
-                admin_user.roles = [admin_role]
                 db.add(admin_user)
                 db.commit()
                 db.refresh(admin_user)
                 logger.info('Seeded admin user (username=admin, password=admin123)')
+            if super_role not in admin_user.roles:
+                admin_user.roles = [super_role]
+                db.add(admin_user)
+                db.commit()
+
+            # ── hayat (Admin role) ─────────────────────────────────────────
+            hayat = db.query(User).filter(User.username == 'hayat').first()
+            if not hayat:
+                hayat = User(username='hayat', email=None, password_hash=get_password_hash('Temp1234'), is_active=True)
+                hayat.roles = [admin_role]
+                db.add(hayat)
+                db.commit()
+                logger.info('Seeded hayat user (Admin role)')
+
+            # ── salma (Reporting User role) ────────────────────────────────
+            salma = db.query(User).filter(User.username == 'salma').first()
+            if not salma:
+                salma = User(username='salma', email=None, password_hash=get_password_hash('Temp1234'), is_active=True)
+                salma.roles = [report_role]
+                db.add(salma)
+                db.commit()
+                logger.info('Seeded salma user (Reporting User role)')
+
     except Exception as e:
         logger.error(f'Error seeding default RBAC data: {e}')
 
@@ -119,10 +195,23 @@ async def lifespan(app: FastAPI):
 
     # All data sync is manual — triggered from the device menu in the web UI.
     logger.info("Ready — all sync is manual from the device menu.")
-    
+
+    # Start background scheduler for automated email reports
+    try:
+        from app.services.scheduler import start as start_scheduler, stop as stop_scheduler
+        start_scheduler()
+        logger.info("Report scheduler started")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {e}")
+
     yield
-    
+
     # Shutdown
+    try:
+        from app.services.scheduler import stop as stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
     logger.info("Shutting down...")
 
 
@@ -207,19 +296,19 @@ async def ensure_cors_headers(request, call_next):
 
 # Include routers
 app.include_router(devices_router, prefix="/api", tags=["Devices Management"])
-app.include_router(device_router, prefix="/api/device", tags=["Device"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(auth_module.router, prefix="/api", tags=["Auth"])
 app.include_router(attendance_router, prefix="/api/attendance", tags=["Attendance"])
 app.include_router(organization_router, prefix="/api", tags=["Organization"])
 app.include_router(shifts_router, tags=["Shift Management"])
-app.include_router(employee_shifts_router, tags=["Employee Shifts"])  # Already has /api/employees prefix
+app.include_router(employee_shifts_router, tags=["Employee Shifts"])
 app.include_router(holidays_router, tags=["Holiday Calendar"])
-app.include_router(statistics_router, tags=["Statistics"])
 app.include_router(settings_router, prefix="/api", tags=["Settings"])
 app.include_router(reports_router, prefix="/api/reports", tags=["Reports"])
 app.include_router(maintenance_router, prefix="/api", tags=["Maintenance"])
-app.include_router(device_users_router, prefix="/api/device/users", tags=["Device Users"])
+app.include_router(employee_schedules_router, prefix="/api", tags=["Employee Schedules"])
+app.include_router(email_settings_router, prefix="/api", tags=["Email Settings"])
+app.include_router(report_schedules_router, prefix="/api", tags=["Report Schedules"])
 
 
 @app.get("/")

@@ -141,7 +141,7 @@ export default function Sidebar({
         </div>
 
         {/* ─── Navigation tree ─── */}
-        <nav className="flex-1 overflow-y-auto py-3 px-2">
+        <nav className={`flex-1 ${sidebarCollapsed ? 'overflow-visible' : 'overflow-y-auto'} py-3 px-2`}>
           {sidebarCollapsed ? (
             /* Collapsed icon list */
             <div className="space-y-1">
