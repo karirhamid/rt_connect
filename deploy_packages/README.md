@@ -4,9 +4,12 @@ A self-contained Docker Compose stack: **Caddy (HTTPS) + frontend + backend + Po
 Designed for client demos and small/medium production deployments on a single
 server (Linux or Windows with Docker Desktop).
 
-> **Non-IT users:** read [QUICKSTART.md](QUICKSTART.md) instead — it walks
-> through the full install in plain language with screenshots-style steps.
-> This README is the reference for IT-literate operators.
+> **Two guides depending on your audience:**
+> - [QUICKSTART.md](QUICKSTART.md) — plain-language guide for non-IT staff
+> - [INSTALL_GUIDE.md](INSTALL_GUIDE.md) — step-by-step deployment with
+>   troubleshooting from real installs (recommended for first deployment)
+>
+> This README is the architectural / ops reference.
 
 ---
 
