@@ -44,8 +44,14 @@ def _fmt_date(d: date, lang: str = 'fr') -> str:
 
 
 def _calc_period(data_period: str, ref: datetime) -> tuple[date, date]:
-    """Return (start_date, end_date) for a given data_period token."""
-    today = ref.date()
+    """Return (start_date, end_date) for a given data_period token.
+
+    `ref` is a UTC datetime; we convert to server local time so that
+    'yesterday' means the user's local yesterday, not UTC's yesterday.
+    Attendance timestamps are stored as device local time, so the date
+    comparison must also be local.
+    """
+    today = ref.astimezone().date()
 
     if data_period == 'today':
         return today, today
@@ -158,6 +164,40 @@ def _generate_pdf(schedule, start: date, end: date) -> tuple[bytes, int, int]:
     return pdf_bytes, total_emp, total_rec
 
 
+def _auto_sync_devices(device_ids: list | None) -> None:
+    """Sync devices before report generation.
+
+    - If `device_ids` is provided, sync only those.
+    - If None, sync all active devices in the device store.
+    Each device's session is opened and closed inside _sync_device_blocking,
+    so devices remain reachable between syncs and on failure.
+    Failures are logged, not raised — we still send the report with whatever
+    data is in the DB.
+    """
+    try:
+        from app.services.sync_service import sync_service
+        from app.services.device_store import device_store
+
+        if device_ids:
+            target_ids = list(device_ids)
+        else:
+            target_ids = [d.id for d in device_store.get_all()]
+
+        if not target_ids:
+            logger.info('[Auto-sync] No devices to sync')
+            return
+
+        logger.info(f'[Auto-sync] Syncing {len(target_ids)} device(s) before report')
+        for dev_id in target_ids:
+            try:
+                sync_service._sync_device_blocking(dev_id)
+                logger.info(f'[Auto-sync] Device {dev_id} synced')
+            except Exception as e:
+                logger.warning(f'[Auto-sync] Device {dev_id} sync failed: {e}')
+    except Exception as e:
+        logger.error(f'[Auto-sync] Unexpected error: {e}')
+
+
 def run_schedule(schedule_id: int) -> dict:
     """Execute one schedule: generate PDF and send emails.
 
@@ -233,12 +273,27 @@ def run_schedule(schedule_id: int) -> dict:
 
     start, end = _calc_period(sched_snap['data_period'], now)
 
+    logger.info(
+        f"[Schedule {schedule_id}] '{sched_snap['name']}' running "
+        f"period={sched_snap['data_period']} → {start}..{end} "
+        f"filters: device_ids={sched_snap['device_ids']} "
+        f"company_id={sched_snap['company_id']} department_id={sched_snap['department_id']} "
+        f"group_by={sched_snap['group_by']}"
+    )
+
     log_entry = ReportScheduleLog(
         schedule_id=schedule_id,
         executed_at=now,
         period_start=datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc),
         period_end=datetime.combine(end, datetime.min.time()).replace(tzinfo=timezone.utc),
     )
+
+    # ── Auto-sync relevant devices before generating the report ─────────────
+    # Sync is normally manual, but for scheduled reports we open a session,
+    # pull the latest logs, and close it — so the latest data is in the DB
+    # before we query. Each device's session opens/closes per device, so
+    # other users / devices remain reachable between syncs.
+    _auto_sync_devices(sched_snap['device_ids'])
 
     error_msg = None
     try:
@@ -253,6 +308,12 @@ def run_schedule(schedule_id: int) -> dict:
         sp.group_by      = sched_snap.get('group_by', 'employee')
 
         pdf_bytes, total_emp, total_rec = _generate_pdf(sp, start, end)
+
+        logger.info(
+            f"[Schedule {schedule_id}] query result: "
+            f"total_employees={total_emp} total_records={total_rec} "
+            f"pdf_size={len(pdf_bytes)} bytes"
+        )
 
         variables = _build_variables(sp, start, end, sched_snap['language'], total_emp, total_rec)
 

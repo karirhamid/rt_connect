@@ -1,0 +1,100 @@
+services:
+  # ── PostgreSQL database ────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: rtconnect-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME}
+      POSTGRES_USER:     ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TZ:                ${TZ}
+      PGTZ:              ${TZ}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [rtnet]
+
+  # ── FastAPI backend ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+    image: rtconnect-api:${APP_VERSION:-2.1.0}
+    container_name: rtconnect-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST:          postgres
+      DB_PORT:          5432
+      DB_NAME:          ${DB_NAME}
+      DB_USER:          ${DB_USER}
+      DB_PASSWORD:      ${DB_PASSWORD}
+      API_HOST:         0.0.0.0
+      API_PORT:         8000
+      API_VERSION:      ${APP_VERSION:-2.1.0}
+      ALLOWED_ORIGINS:  ${ALLOWED_ORIGINS}
+      DEVICE_IP:        ${DEVICE_IP:-127.0.0.1}
+      DEVICE_PORT:      ${DEVICE_PORT:-4370}
+      DEVICE_TIMEOUT:   ${DEVICE_TIMEOUT:-30}
+      DEVICE_PASSWORD:  ${DEVICE_PASSWORD:-0}
+      TZ:               ${TZ}
+    networks: [rtnet]
+
+  # ── Nginx + built React frontend (internal only — Caddy fronts it) ────────
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Empty string → frontend uses relative URLs (/api/...) which Nginx
+        # proxies to the backend, regardless of the server's IP. This means
+        # the same image runs on any LAN IP without rebuilding.
+        VITE_API_URL: ""
+    image: rtconnect-web:${APP_VERSION:-2.1.0}
+    container_name: rtconnect-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    expose:
+      - "80"
+    environment:
+      TZ: ${TZ}
+    networks: [rtnet]
+
+  # ── Caddy reverse proxy with auto self-signed HTTPS ───────────────────────
+  # Listens on the host's 80 (redirect) and 443 (HTTPS).
+  # Generates and rotates a local-CA-signed cert for whatever
+  # IP / hostname clients use — no public DNS or domain required.
+  caddy:
+    image: caddy:2-alpine
+    container_name: rtconnect-proxy
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # persists the local CA so it survives restarts
+      - caddy_config:/config
+    environment:
+      TZ: ${TZ}
+    networks: [rtnet]
+
+volumes:
+  postgres_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+networks:
+  rtnet:
+    driver: bridge

@@ -27,6 +27,8 @@ echo "  RT Connect — Deployment Configuration"
 echo "========================================"
 echo ""
 read -p "Server IP or domain (e.g. 192.168.1.100): " SERVER_HOST
+read -p "Server timezone [Africa/Casablanca]: " SERVER_TZ
+SERVER_TZ="${SERVER_TZ:-Africa/Casablanca}"
 read -s -p "PostgreSQL password for '$DB_USER' (choose a strong one): " DB_PASSWORD
 echo ""
 read -s -p "Confirm password: " DB_PASSWORD_CONFIRM
@@ -34,6 +36,10 @@ echo ""
 [[ "$DB_PASSWORD" != "$DB_PASSWORD_CONFIRM" ]] && error "Passwords do not match"
 read -p "Restore database from dump? [y/N]: " RESTORE_DB
 echo ""
+
+# ── Set system timezone ─────────────────────────────────────
+info "Setting timezone to $SERVER_TZ..."
+timedatectl set-timezone "$SERVER_TZ" || warn "Could not set timezone"
 
 # ── System update ───────────────────────────────────────────
 info "Updating system packages..."

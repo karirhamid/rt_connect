@@ -184,51 +184,62 @@ def _apply(row: ReportSchedule, p: ScheduleIn):
 # ── next_run_at calculation ───────────────────────────────────────────────────
 
 def _calc_next(s: ReportSchedule, after: datetime | None = None) -> datetime:
-    """Return the next UTC datetime this schedule should fire."""
-    now = after or datetime.now(timezone.utc)
-    h, m = s.send_hour, s.send_minute
+    """Return the next UTC datetime this schedule should fire.
+
+    send_hour / send_minute are interpreted as the **server's local timezone**
+    (the user enters them in their UI, which they think of as local). We compute
+    the next firing time in local time, then convert to UTC for storage.
+    """
+    now_utc   = after or datetime.now(timezone.utc)
+    now_local = now_utc.astimezone()  # naive-ish but tz-aware in local TZ
+    h, m      = s.send_hour, s.send_minute
+
+    def to_utc(local_dt: datetime) -> datetime:
+        return local_dt.astimezone(timezone.utc)
 
     if s.schedule_type == 'daily':
-        candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        if candidate <= now:
+        candidate = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+        if candidate <= now_local:
             candidate += timedelta(days=1)
-        return candidate
+        return to_utc(candidate)
 
     if s.schedule_type == 'weekly':
         wd = s.week_day or 0  # 0=Mon
-        days_ahead = (wd - now.weekday()) % 7
+        days_ahead = (wd - now_local.weekday()) % 7
         if days_ahead == 0:
-            candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
-            if candidate <= now:
+            candidate = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+            if candidate <= now_local:
                 days_ahead = 7
             else:
-                return candidate
-        return (now + timedelta(days=days_ahead)).replace(hour=h, minute=m, second=0, microsecond=0)
+                return to_utc(candidate)
+        candidate = (now_local + timedelta(days=days_ahead)).replace(
+            hour=h, minute=m, second=0, microsecond=0
+        )
+        return to_utc(candidate)
 
     if s.schedule_type == 'monthly_day':
         md = max(1, min(28, s.month_day or 1))
-        candidate = now.replace(day=md, hour=h, minute=m, second=0, microsecond=0)
-        if candidate <= now:
-            # next month
-            if now.month == 12:
-                candidate = candidate.replace(year=now.year + 1, month=1)
+        candidate = now_local.replace(day=md, hour=h, minute=m, second=0, microsecond=0)
+        if candidate <= now_local:
+            if now_local.month == 12:
+                candidate = candidate.replace(year=now_local.year + 1, month=1)
             else:
-                candidate = candidate.replace(month=now.month + 1)
-        return candidate
+                candidate = candidate.replace(month=now_local.month + 1)
+        return to_utc(candidate)
 
     if s.schedule_type == 'monthly_last':
-        last = calendar.monthrange(now.year, now.month)[1]
-        candidate = now.replace(day=last, hour=h, minute=m, second=0, microsecond=0)
-        if candidate <= now:
-            if now.month == 12:
-                yr, mo = now.year + 1, 1
+        last = calendar.monthrange(now_local.year, now_local.month)[1]
+        candidate = now_local.replace(day=last, hour=h, minute=m, second=0, microsecond=0)
+        if candidate <= now_local:
+            if now_local.month == 12:
+                yr, mo = now_local.year + 1, 1
             else:
-                yr, mo = now.year, now.month + 1
+                yr, mo = now_local.year, now_local.month + 1
             last = calendar.monthrange(yr, mo)[1]
             candidate = candidate.replace(year=yr, month=mo, day=last)
-        return candidate
+        return to_utc(candidate)
 
-    return now + timedelta(days=1)
+    return now_utc + timedelta(days=1)
 
 
 # ── CRUD endpoints ────────────────────────────────────────────────────────────

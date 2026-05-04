@@ -1,0 +1,25 @@
+# Local config (per-deployment)
+.env
+
+# Backups
+backups/
+
+# Extracted CA cert (regenerated on demand)
+rtconnect-ca.crt
+
+# ── Source folders are populated by build.sh / build.bat ──────────────────
+# Don't commit them — they're a copy of ../backend-api and ../frontend.
+# Only the deploy-specific files (Dockerfile, .dockerignore, nginx.conf)
+# are version-controlled inside backend/ and frontend/.
+backend/*
+!backend/Dockerfile
+!backend/.dockerignore
+
+frontend/*
+!frontend/Dockerfile
+!frontend/.dockerignore
+!frontend/nginx.conf
+
+# Caddy runtime data (only Caddyfile is version-controlled)
+caddy/data/
+caddy/config/

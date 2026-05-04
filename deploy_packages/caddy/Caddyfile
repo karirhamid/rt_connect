@@ -1,0 +1,45 @@
+# ============================================================================
+# Caddy reverse proxy — terminates HTTPS for the LAN-only deployment.
+#
+#   • `tls internal`  → Caddy auto-generates a local CA + server cert.
+#                       Browsers will warn unless you install the CA cert
+#                       (see extract-ca.sh / extract-ca.bat).
+#   • Catch-all site  → matches any IP or hostname the user types in.
+#   • HTTP → HTTPS    → :80 redirects to :443.
+# ============================================================================
+
+{
+    # No public ACME / Let's Encrypt — this is a LAN install with no domain.
+    # All certificates come from the local internal CA stored in /data.
+    auto_https disable_redirects
+    local_certs
+
+    # Suppress the public ACME storage warning
+    admin off
+}
+
+# ── HTTPS site (catch-all on :443) ──────────────────────────────────────────
+# Matches any host: 192.168.1.50, https://server.local, https://10.0.0.5, etc.
+:443 {
+    tls internal
+
+    # Forward everything to the frontend Nginx container
+    reverse_proxy frontend:80
+
+    # Reasonable security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Frame-Options            "SAMEORIGIN"
+        X-Content-Type-Options     "nosniff"
+        Referrer-Policy            "strict-origin-when-cross-origin"
+        # Caddy adds its own Server header — hide it
+        -Server
+    }
+
+    encode gzip zstd
+}
+
+# ── HTTP site — redirect to HTTPS ────────────────────────────────────────────
+:80 {
+    redir https://{host}{uri} permanent
+}

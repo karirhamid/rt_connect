@@ -1,4 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// In Docker / production builds, VITE_API_URL is set to "" so the frontend
+// uses relative paths (/api/...) — Nginx proxies them to the backend.
+// In local dev (no env var), fall back to the dev server on :8000.
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
 class ApiService {
   constructor(){

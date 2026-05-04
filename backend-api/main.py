@@ -50,6 +50,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Auto-migration warning (safe to ignore on fresh DB): {e}")
 
+    # Recompute next_run_at for all active schedules so the timezone fix
+    # (send_hour/minute now treated as local time, not UTC) takes effect on
+    # existing rows. Without this, old next_run_at values stay wrong.
+    try:
+        from app.database.schema import ReportSchedule
+        from app.api.report_schedules import _calc_next
+        with get_db_session() as db:
+            for sch in db.query(ReportSchedule).filter(ReportSchedule.is_active == True).all():
+                sch.next_run_at = _calc_next(sch)
+            db.commit()
+        logger.info("Recomputed next_run_at for all active schedules")
+    except Exception as e:
+        logger.warning(f"Could not recompute next_run_at: {e}")
+
     # Ensure default app settings exist
     with get_db_session() as db:
         settings_row = db.query(AppSettings).first()
