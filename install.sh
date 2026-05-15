@@ -205,8 +205,7 @@ DB_PASSWORD=$DB_PASSWORD
 APP_VERSION=2.2.1
 TZ=$TZ_VAL
 
-DEVICE_IP=127.0.0.1
-DEVICE_PORT=4370
+# Devices are managed in the web admin. These are fallback connect defaults.
 DEVICE_TIMEOUT=30
 DEVICE_PASSWORD=0
 EOF

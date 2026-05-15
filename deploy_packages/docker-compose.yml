@@ -39,8 +39,6 @@ services:
       API_PORT:         8000
       API_VERSION:      ${APP_VERSION:-2.1.0}
       ALLOWED_ORIGINS:  ${ALLOWED_ORIGINS}
-      DEVICE_IP:        ${DEVICE_IP:-127.0.0.1}
-      DEVICE_PORT:      ${DEVICE_PORT:-4370}
       DEVICE_TIMEOUT:   ${DEVICE_TIMEOUT:-30}
       DEVICE_PASSWORD:  ${DEVICE_PASSWORD:-0}
       TZ:               ${TZ}
