@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ChevronRight, X, Info } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -256,29 +256,6 @@ export default function Sidebar({
           )}
         </nav>
 
-        {/* ─── Footer ─── */}
-        <div className="shrink-0 px-3 py-3 border-t border-gray-200">
-          {!sidebarCollapsed ? (
-            <div className="text-[11px] text-gray-400 leading-relaxed">
-              <p className="font-semibold text-gray-600">RIRAKTECH SARL</p>
-              <p>Hamid KARIR</p>
-              <p className="mt-0.5">hamid.karir@riraktech.ma</p>
-              <p>+212 611 644 6889</p>
-              <p className="mt-1.5 text-gray-300">© 2025 RIRAKTECH</p>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center">
-              <button
-                title={
-                  'RIRAKTECH SARL\nHamid KARIR\nhamid.karir@riraktech.ma\n+212 611 644 6889\n© 2025 RIRAKTECH'
-                }
-                className="text-gray-400 p-2 rounded-lg hover:bg-gray-100 hover:text-gray-600"
-              >
-                <Info className="w-5 h-5" />
-              </button>
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
