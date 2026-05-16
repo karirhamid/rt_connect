@@ -608,7 +608,7 @@ export default function DeviceSettings() {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., 10.185.1.201"
+                  placeholder="ex. 192.168.1.100"
                   value={formData.ip}
                   onChange={(e) => setFormData({ ...formData, ip: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -796,7 +796,7 @@ export default function DeviceSettings() {
                 </label>
                 <input
                   type="text"
-                  placeholder="10.185.1.201"
+                  placeholder="192.168.1.100"
                   value={formData.ip}
                   onChange={(e) => setFormData({ ...formData, ip: e.target.value })}
                   required

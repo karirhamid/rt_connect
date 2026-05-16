@@ -138,7 +138,7 @@ class ZKTecoDeviceManager:
     Usage patterns:
     
     1. Simple (auto connect/disconnect per call):
-        manager = ZKTecoDeviceManager(ip="10.185.1.202", port=4370)
+        manager = ZKTecoDeviceManager(ip="192.168.1.100", port=4370)
         users = manager.get_users()
     
     2. Reuse connection (single connect for multiple operations):
@@ -549,8 +549,8 @@ class ZKTecoDeviceManager:
             self._ensure_connected()
             
             # Resolve the REAL device UID for this user_id.
-            # On many devices uid == user_id, but some (Unibio 202 etc.)
-            # assign their own internal UIDs that don't match.
+            # On many devices uid == user_id, but some older firmwares assign
+            # their own internal UIDs that don't match.
             real_uid = uid
             if user_id:
                 try:

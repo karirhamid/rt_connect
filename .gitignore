@@ -66,3 +66,8 @@ db_dump.sql
 
 # Example / test data (may contain real employee info)
 example/
+
+# Runtime device list — populated per-deployment; never share real IPs
+backend-api/devices.json
+deploy_packages/backend/devices.json
+/devices.json

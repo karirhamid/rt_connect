@@ -1,12 +1,19 @@
-"""Force-kill any stuck ZKTeco device sessions by sending CMD_EXIT."""
+"""Force-kill any stuck ZKTeco device sessions by sending CMD_EXIT.
+
+Reads device IPs from devices.json (the same file the backend uses).
+Run from the backend-api directory:  python _kill_sessions.py
+"""
+import json
 import socket
 import struct
+from pathlib import Path
 
-DEVICES = [
-    ("10.185.1.201", 4370),
-    ("10.185.1.202", 4370),
-    ("10.186.1.201", 4370),
-]
+try:
+    with open(Path(__file__).parent / 'devices.json', 'r', encoding='utf-8') as f:
+        _devices = json.load(f)
+    DEVICES = [(d['ip'], int(d.get('port') or 4370)) for d in _devices if d.get('ip')]
+except Exception:
+    DEVICES = []  # no devices.json yet, or empty
 
 CMD_EXIT = 1001
 

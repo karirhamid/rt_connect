@@ -4,7 +4,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Device Configuration
-    DEVICE_IP: str = "10.185.1.201"
+    DEVICE_IP: str = "192.168.1.100"
     DEVICE_PORT: int = 4370
     DEVICE_TIMEOUT: int = 30
     DEVICE_PASSWORD: int = 0

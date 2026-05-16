@@ -20,25 +20,20 @@ from datetime import datetime, timezone
 from zk import ZK
 import psycopg2
 
-# ── Device list ──────────────────────────────────────────────────────
-DEVICES = [
-    {
-        "id": "9ff1ed80-54a8-4b5f-9ec5-d1f78ef00832",
-        "name": "POINTEUSE TECHNIQUE",
-        "ip": "10.185.1.201",
-        "port": 4370,
-    },
-    {
-        "id": "fff00b00-a830-47d3-b678-426ccddba8cc",
-        "name": "POINTEUSE RDC",
-        "ip": "10.185.1.202",
-        "port": 4370,
-    },
-]
+# ── Device list — read from backend-api/devices.json ────────────────
+import json as _json
+import os as _os
+try:
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    with open(_os.path.join(_here, 'backend-api', 'devices.json'), 'r', encoding='utf-8') as _f:
+        DEVICES = _json.load(_f)
+except Exception:
+    DEVICES = []  # devices.json not present yet — script will be a no-op
 
-DB_NAME = "rtzkconnect_db"
-DB_USER = "postgres"
-DB_PASS = "Amen"
+# DB credentials — override via env vars to avoid hardcoding
+DB_NAME = _os.environ.get('DB_NAME', 'rtzkconnect_db')
+DB_USER = _os.environ.get('DB_USER', 'postgres')
+DB_PASS = _os.environ.get('DB_PASSWORD', '')
 
 
 def connect_device(ip, port):

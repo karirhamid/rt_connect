@@ -22,7 +22,7 @@
 }
 
 # ── HTTPS catch-all on :443 ─────────────────────────────────────────────────
-# Matches any host: 192.168.1.50, 172.16.1.10, https://server.local, etc.
+# Matches any host: 192.168.1.50, 10.0.0.5, https://server.local, etc.
 :443 {
     tls {
         on_demand

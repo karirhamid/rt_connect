@@ -75,7 +75,7 @@ ipconfig | findstr IPv4
 Sample output:
 ```
    Adresse IPv4. . . . . : 10.0.85.101
-   Adresse IPv4. . . . . : 172.16.1.10
+   Adresse IPv4. . . . . : 192.168.1.50
    Adresse IPv4. . . . . : 192.168.1.9
    Adresse IPv4. . . . . : 192.168.48.1
 ```
@@ -95,9 +95,9 @@ notepad .env
 In Notepad, change at minimum:
 
 ```env
-SERVER_IP=172.16.1.10                                   # the IP you picked
+SERVER_IP=192.168.1.50                                   # the IP you picked
 DB_PASSWORD=ChangeThisToASomethingStrong123!            # invent one, save it
-ALLOWED_ORIGINS=https://172.16.1.10,http://172.16.1.10,https://localhost
+ALLOWED_ORIGINS=https://192.168.1.50,http://192.168.1.50,https://localhost
 TZ=Africa/Casablanca                                    # adjust if needed
 ```
 
@@ -249,7 +249,7 @@ docker exec rtconnect-proxy wget -qO- --no-check-certificate https://localhost/a
 In any browser on the server **or any client PC on the LAN**:
 
 ```
-https://172.16.1.10        ← whatever you put in SERVER_IP
+https://192.168.1.50        ← whatever you put in SERVER_IP
 https://localhost          ← only from the server itself
 ```
 
@@ -257,7 +257,7 @@ You'll see **"Your connection is not private"**. This is normal: Caddy
 generates a self-signed certificate from a local CA (no public domain
 involved). Click:
 
-- **Advanced** → **Proceed to 172.16.1.10 (unsafe)**
+- **Advanced** → **Proceed to 192.168.1.50 (unsafe)**
 
 Login: **admin / admin123**. Change the password from the profile menu
 right after you log in.
@@ -440,7 +440,7 @@ docker compose exec postgres psql -U rtconnect_user -d rtzkconnect_db
 
 ---
 
-### Issue 5 — `https://172.16.1.10` works on the server but not from another PC
+### Issue 5 — `https://192.168.1.50` works on the server but not from another PC
 
 **Likely causes and checks** (run them in order):
 
@@ -448,7 +448,7 @@ docker compose exec postgres psql -U rtconnect_user -d rtzkconnect_db
    ```powershell
    ipconfig | findstr IPv4
    ```
-   If 172.16.1.10 isn't in the list, update `.env` with one that is.
+   If 192.168.1.50 isn't in the list, update `.env` with one that is.
 
 2. **Windows Firewall** is blocking ports 80/443. Allow them:
    ```powershell
