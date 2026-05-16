@@ -72,6 +72,50 @@ async def get_devices():
     devices = device_store.get_all()
     return {"devices": [d.dict() for d in devices]}
 
+
+@router.get("/devices/status")
+async def get_devices_status(db: Session = Depends(get_db)):
+    """Heartbeat status for every active device.
+
+    is_online = the last successful ping was within (2 * interval).
+    Two intervals of slack tolerate one missed heartbeat (e.g. a brief
+    network blip) without flipping the badge to red.
+    """
+    from app.database.schema import AppSettings
+    settings = db.query(AppSettings).first()
+    interval_sec = int(getattr(settings, 'device_heartbeat_interval_sec', 300) or 300) if settings else 300
+    online_window = timedelta(seconds=2 * interval_sec)
+    now = datetime.now(timezone.utc)
+
+    rows = db.query(DBDevice).filter(DBDevice.is_active == True).all()
+    out = []
+    for d in rows:
+        last_seen = d.last_seen_at
+        is_online = bool(last_seen and (now - last_seen) <= online_window)
+        out.append({
+            "id":            d.id,
+            "name":          d.name,
+            "ip":            d.ip,
+            "port":          d.port,
+            "is_online":     is_online,
+            "last_seen_at":  last_seen.isoformat() if last_seen else None,
+            "last_ping_at":  d.last_ping_at.isoformat() if d.last_ping_at else None,
+        })
+    return {
+        "devices":      out,
+        "interval_sec": interval_sec,
+        "online_count": sum(1 for x in out if x["is_online"]),
+        "total_count":  len(out),
+    }
+
+
+@router.post("/devices/{device_id}/ping")
+async def force_ping_device(device_id: str):
+    """Manually trigger a heartbeat on one device. Returns the result immediately."""
+    from app.services.device_heartbeat import ping_now
+    ok = ping_now(device_id)
+    return {"id": device_id, "is_online": ok}
+
 def _check_port(ip: str, port: int, timeout: float = 5.0) -> bool:
     """Test if a TCP port is reachable (quick connectivity check)."""
     try:

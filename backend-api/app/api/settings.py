@@ -22,6 +22,8 @@ class GeneralSettings(BaseModel):
     pdf_show_total_worked: bool = Field(default=True, description="Show total worked column in PDF reports")
     app_name: Optional[str] = Field(default="RTPointage", description="System name shown on login + sidebar")
     client_name: Optional[str] = Field(default=None, description="Client / customer organization name shown on login")
+    device_heartbeat_enabled: bool = Field(default=True, description="Periodically ping devices to track online status")
+    device_heartbeat_interval_sec: int = Field(default=300, ge=60, le=3600, description="Seconds between device heartbeats (60–3600)")
 
 
 class PublicBranding(BaseModel):
@@ -69,6 +71,8 @@ async def get_general_settings():
             pdf_show_total_worked=getattr(row, 'pdf_show_total_worked', True) if hasattr(row, 'pdf_show_total_worked') else True,
             app_name=getattr(row, 'app_name', None) or 'RTPointage',
             client_name=getattr(row, 'client_name', None),
+            device_heartbeat_enabled=bool(getattr(row, 'device_heartbeat_enabled', True)),
+            device_heartbeat_interval_sec=int(getattr(row, 'device_heartbeat_interval_sec', 300) or 300),
         )
 
 
@@ -93,6 +97,8 @@ async def update_general_settings(payload: GeneralSettings):
             row.app_name = payload.app_name.strip() or 'RTPointage'
         if payload.client_name is not None:
             row.client_name = payload.client_name.strip() or None
+        row.device_heartbeat_enabled = bool(payload.device_heartbeat_enabled)
+        row.device_heartbeat_interval_sec = max(60, min(3600, int(payload.device_heartbeat_interval_sec or 300)))
         db.commit()
         db.refresh(row)
 
@@ -109,4 +115,6 @@ async def update_general_settings(payload: GeneralSettings):
         pdf_show_total_worked=getattr(row, 'pdf_show_total_worked', True) if hasattr(row, 'pdf_show_total_worked') else True,
         app_name=getattr(row, 'app_name', None) or 'RTPointage',
         client_name=getattr(row, 'client_name', None),
+        device_heartbeat_enabled=bool(getattr(row, 'device_heartbeat_enabled', True)),
+        device_heartbeat_interval_sec=int(getattr(row, 'device_heartbeat_interval_sec', 300) or 300),
     )

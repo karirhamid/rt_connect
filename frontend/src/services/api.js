@@ -142,6 +142,17 @@ class ApiService {
     return true;
   }
 
+  // Device heartbeat status
+  async getDevicesStatus() {
+    const { data } = await this.get('/devices/status');
+    return data;
+  }
+
+  async forcePingDevice(deviceId) {
+    const { data } = await this.post(`/devices/${deviceId}/ping`, {});
+    return data;
+  }
+
   // Public branding (no auth — for login page)
   async getPublicBranding() {
     try {

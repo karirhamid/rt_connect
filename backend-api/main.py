@@ -53,6 +53,18 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS client_name VARCHAR(255)"
             ))
+            conn.execute(sa_text(
+                "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS device_heartbeat_enabled BOOLEAN DEFAULT TRUE"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS device_heartbeat_interval_sec INTEGER DEFAULT 300"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_ping_at TIMESTAMP"
+            ))
             conn.commit()
     except Exception as e:
         logger.warning(f"Auto-migration warning (safe to ignore on fresh DB): {e}")
@@ -225,12 +237,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start scheduler: {e}")
 
+    # Start device heartbeat (lightweight TCP probe to verify reachability)
+    try:
+        from app.services.device_heartbeat import start as start_heartbeat
+        start_heartbeat()
+        logger.info("Device heartbeat started")
+    except Exception as e:
+        logger.error(f"Failed to start device heartbeat: {e}")
+
     yield
 
     # Shutdown
     try:
         from app.services.scheduler import stop as stop_scheduler
         stop_scheduler()
+    except Exception:
+        pass
+    try:
+        from app.services.device_heartbeat import stop as stop_heartbeat
+        stop_heartbeat()
     except Exception:
         pass
     logger.info("Shutting down...")

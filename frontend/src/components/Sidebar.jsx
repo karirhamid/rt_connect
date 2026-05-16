@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { ChevronRight, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useEffect, useState } from 'react';
+import api from '../services/api';
 
 /**
  * pgAdmin 4-inspired tree-view sidebar (white background).
@@ -23,7 +25,14 @@ export default function Sidebar({
   isRTL,
 }) {
   const { t } = useTranslation();
-  
+  const [branding, setBranding] = useState({ app_name: 'RTPointage', client_name: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getPublicBranding().then(b => { if (!cancelled) setBranding(b); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
 
   /* ───────── Collapsed: icon per section + hover flyout ───────── */
   const renderCollapsedSection = (section) => {
@@ -117,18 +126,30 @@ export default function Sidebar({
             sidebarCollapsed ? 'px-3 justify-center' : 'px-4'
           } h-16 border-b border-gray-200 flex items-center shrink-0`}
         >
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 bg-gradient-to-br from-primary-600 to-primary-400 rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-md shrink-0">
-              Z
-            </div>
-            {!sidebarCollapsed && (
-              <div className="min-w-0">
-                <h1 className="text-sm font-bold text-gray-900 tracking-wide truncate">
-                  {t('zktecoAdmin')}
+          <div className="flex items-center w-full min-w-0">
+            {sidebarCollapsed ? (
+              /* Collapsed: large bold "RT" letters, centered */
+              <h1
+                className="w-full text-center text-2xl font-extrabold text-slate-900 tracking-tight select-none leading-none"
+                style={{ letterSpacing: '-0.05em' }}
+              >
+                RT
+              </h1>
+            ) : (
+              /* Expanded: full RTPointage wordmark + client name */
+              <div className="min-w-0 w-full">
+                <h1
+                  className="text-2xl font-extrabold text-slate-900 tracking-tight truncate leading-none"
+                  style={{ letterSpacing: '-0.03em' }}
+                >
+                  <span>RT</span>
+                  <span className="text-slate-500 font-light">Pointage</span>
                 </h1>
-                <p className="text-[10px] text-gray-400 uppercase tracking-widest truncate">
-                  {t('unifiedAttendance')}
-                </p>
+                {branding.client_name && (
+                  <p className="mt-1 text-[10px] text-gray-400 uppercase tracking-widest truncate">
+                    {branding.client_name}
+                  </p>
+                )}
               </div>
             )}
           </div>

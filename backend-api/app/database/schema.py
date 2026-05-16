@@ -137,6 +137,8 @@ class Device(Base):
     is_active = Column(Boolean, default=True)
     last_sync = Column(DateTime, nullable=True)
     last_attendance_sync = Column(DateTime, nullable=True)  # Track last attendance sync for incremental updates
+    last_seen_at = Column(DateTime, nullable=True)  # Last successful heartbeat / ping
+    last_ping_at = Column(DateTime, nullable=True)  # Last heartbeat attempt (success or fail)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
@@ -205,6 +207,10 @@ class AppSettings(Base):
     # Branding (shown on login + sidebar)
     app_name    = Column(String(100), nullable=True, default='RTPointage')
     client_name = Column(String(255), nullable=True)  # The customer org using this install
+
+    # Device heartbeat (network ping to verify devices are reachable)
+    device_heartbeat_enabled      = Column(Boolean, default=True,  nullable=False)
+    device_heartbeat_interval_sec = Column(Integer, default=300,   nullable=False)  # 5 min
 
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

@@ -4,29 +4,6 @@ import api from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Lock, LogIn } from 'lucide-react';
 
-// ── Brand logo (pure CSS / typography, no image) ───────────────────────────
-// Two-letter mark "RT" in a rounded square with a soft gradient.
-function BrandLogo({ size = 'md' }){
-  const dims = size === 'lg' ? 'w-20 h-20 text-3xl rounded-3xl' : 'w-12 h-12 text-lg rounded-2xl';
-  return (
-    <div
-      className={`${dims} relative flex items-center justify-center
-                  bg-gradient-to-br from-slate-800 via-slate-900 to-black
-                  shadow-xl shadow-black/40 ring-1 ring-white/10
-                  select-none`}
-    >
-      {/* faint inner highlight */}
-      <div className="absolute inset-0 rounded-[inherit] bg-gradient-to-b from-white/10 to-transparent pointer-events-none" />
-      <span
-        className="font-black tracking-tight text-white"
-        style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", Inter, sans-serif', letterSpacing: '-0.04em' }}
-      >
-        RT
-      </span>
-    </div>
-  );
-}
-
 export default function Login(){
   const { t } = useTranslation();
   const [username, setUsername] = useState('');
@@ -68,11 +45,9 @@ export default function Login(){
                     p-4 sm:p-6">
       <div className="w-full max-w-md">
 
-        {/* ── Header: logo + app name + client name ── */}
+        {/* ── Header: app name + client name ── */}
         <div className="flex flex-col items-center mb-8">
-          <BrandLogo size="lg" />
-
-          <h1 className="mt-5 text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900"
+          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900"
               style={{ letterSpacing: '-0.02em' }}>
             <span className="text-slate-900">RT</span>
             <span className="text-slate-500 font-light">Pointage</span>
@@ -83,10 +58,6 @@ export default function Login(){
               {branding.client_name}
             </p>
           )}
-
-          <p className="mt-3 text-sm text-slate-500">
-            {t('loginWelcome', 'Welcome — please sign in to continue')}
-          </p>
         </div>
 
         {/* ── Login card ── */}

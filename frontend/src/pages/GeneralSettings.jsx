@@ -68,6 +68,8 @@ function GeneralSettings() {
   const [requireSyncConfirmation, setRequireSyncConfirmation] = useState(true);
   const [appName, setAppName] = useState('RTPointage');
   const [clientName, setClientName] = useState('');
+  const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
+  const [heartbeatIntervalMin, setHeartbeatIntervalMin] = useState(5);
   const [validateTimestamps, setValidateTimestamps] = useState(true);
   const [loadingSync, setLoadingSync] = useState(false);
 
@@ -124,6 +126,8 @@ function GeneralSettings() {
       setValidateTimestamps(settings.validate_timestamps !== undefined ? !!settings.validate_timestamps : true);
       setAppName(settings.app_name || 'RTPointage');
       setClientName(settings.client_name || '');
+      setHeartbeatEnabled(settings.device_heartbeat_enabled !== false);
+      setHeartbeatIntervalMin(Math.max(1, Math.round((settings.device_heartbeat_interval_sec || 300) / 60)));
     } catch (err) {
       console.error('Failed to load settings:', err);
       showNotification('error', t('failedToLoadData'));
@@ -142,6 +146,8 @@ function GeneralSettings() {
         timing_enabled: timingMode !== 'off',
         app_name: (appName || 'RTPointage').trim(),
         client_name: (clientName || '').trim() || null,
+        device_heartbeat_enabled: !!heartbeatEnabled,
+        device_heartbeat_interval_sec: Math.max(60, Math.min(3600, (parseInt(heartbeatIntervalMin, 10) || 5) * 60)),
       };
       await api.updateGeneralSettings(payload);
       showNotification('success', t('settingsSaved'));
@@ -632,6 +638,34 @@ function GeneralSettings() {
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* ── Device heartbeat (network reachability) ── */}
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <h3 className="text-md font-semibold text-gray-900 mb-1">{t('deviceHeartbeat') || 'Surveillance des appareils'}</h3>
+                  <p className="text-sm text-gray-600">{t('deviceHeartbeatDesc') || "Vérifie périodiquement si chaque appareil est joignable sur le réseau. N'ouvre pas de session sur l'appareil."}</p>
+                </div>
+                <label className="inline-flex items-center cursor-pointer shrink-0">
+                  <input type="checkbox" className="sr-only peer" checked={heartbeatEnabled} onChange={e => setHeartbeatEnabled(e.target.checked)} />
+                  <div className="relative w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer-checked:bg-slate-900 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+                </label>
+              </div>
+              <div className="mt-4 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700">{t('heartbeatInterval') || 'Intervalle'}</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="60"
+                  value={heartbeatIntervalMin}
+                  onChange={e => setHeartbeatIntervalMin(e.target.value)}
+                  disabled={!heartbeatEnabled}
+                  className="w-20 px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-slate-300 focus:border-slate-400 disabled:opacity-50"
+                />
+                <span className="text-sm text-gray-600">{t('minutes') || 'minutes'}</span>
+                <span className="text-xs text-gray-400 ml-2">{t('defaultFive') || '(défaut: 5)'}</span>
               </div>
             </div>
 

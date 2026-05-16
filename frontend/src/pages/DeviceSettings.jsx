@@ -19,6 +19,7 @@ const canManageSettings = () => {
 export default function DeviceSettings() {
   const { t } = useTranslation();
   const [devices, setDevices] = useState([]);
+  const [deviceStatus, setDeviceStatus] = useState({});  // id → { is_online, last_seen_at }
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showDiscovery, setShowDiscovery] = useState(false);
@@ -74,7 +75,29 @@ export default function DeviceSettings() {
 
   useEffect(() => {
     fetchDevices();
+    fetchStatus();
+    // Refresh status every 30s so the dot reflects recent heartbeats
+    const t = setInterval(fetchStatus, 30 * 1000);
+    return () => clearInterval(t);
   }, []);
+
+  const fetchStatus = async () => {
+    try {
+      const data = await api.getDevicesStatus();
+      const map = {};
+      (data.devices || []).forEach(d => { map[d.id] = d; });
+      setDeviceStatus(map);
+    } catch (e) { /* ignore — devices still render */ }
+  };
+
+  const _fmtRelative = (iso) => {
+    if (!iso) return '—';
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60)      return `il y a ${Math.round(diff)} s`;
+    if (diff < 3600)    return `il y a ${Math.round(diff / 60)} min`;
+    if (diff < 86400)   return `il y a ${Math.round(diff / 3600)} h`;
+    return new Date(iso).toLocaleString();
+  };
 
   const fetchDevices = async () => {
     setLoading(true);
@@ -895,10 +918,27 @@ export default function DeviceSettings() {
                   </td>
                 </tr>
               ) : (
-                devices.map((device) => (
+                devices.map((device) => {
+                  const st = deviceStatus[device.id];
+                  const online = !!st?.is_online;
+                  const dotTitle = st
+                    ? (online
+                        ? `${t('online') || 'En ligne'} · ${t('lastSeen') || 'Vu'} ${_fmtRelative(st.last_seen_at)}`
+                        : `${t('offline') || 'Hors ligne'} · ${t('lastSeen') || 'Vu'} ${_fmtRelative(st.last_seen_at)}`)
+                    : (t('online') || 'Status inconnu');
+                  return (
                   <tr key={device.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{device.name}</div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          title={dotTitle}
+                          className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
+                            online ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.15)]'
+                                   : 'bg-gray-300'
+                          }`}
+                        />
+                        <div className="text-sm font-medium text-gray-900">{device.name}</div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {device.ip}:{device.port}
@@ -1029,7 +1069,8 @@ export default function DeviceSettings() {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -331,14 +331,10 @@ function AppContent() {
             >
               <Menu className="w-6 h-6" />
             </button>
-            <div className="hidden md:flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-gray-800 truncate max-w-xs">
+            <div className="hidden md:flex items-center">
+              <h2 className="text-lg font-semibold text-gray-800 truncate max-w-md">
                 {activeItemName}
               </h2>
-              <div className="h-6 w-px bg-gray-200" />
-              <div className="relative">
-                <input aria-label={t('search')} placeholder={t('searchPlaceholder')} className="hidden md:block w-60 pl-3 pr-10 py-1.5 border rounded-md text-sm bg-gray-50 focus:outline-none focus:ring-1 focus:ring-primary-200" />
-              </div>
             </div>
           </div>
 
