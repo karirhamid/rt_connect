@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 
 export default function RolePermissionMatrix({ value = [], onChange }) {
+  const { t } = useTranslation();
   const [permissions, setPermissions] = useState([]);
   const [selected, setSelected] = useState(new Set(value || []));
 
@@ -31,7 +33,7 @@ export default function RolePermissionMatrix({ value = [], onChange }) {
   };
 
   if (!permissions || permissions.length === 0) {
-    return <div className="text-sm text-gray-500">No permissions available</div>;
+    return <div className="text-sm text-gray-500">{t('noPermissionsAvailable') || 'Aucune permission disponible'}</div>;
   }
 
   return (
