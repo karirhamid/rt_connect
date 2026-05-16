@@ -18,8 +18,11 @@ so all subsequent punches that day are classified against the same schedule.
 """
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional, Tuple
+import random
+import time as _time
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 import logging
 
@@ -32,12 +35,20 @@ from app.database.shift_schema import (
 logger = logging.getLogger(__name__)
 
 
+_DEADLOCK_PGCODE = '40P01'
+_UPSERT_MAX_RETRIES = 5
+
+
 def _upsert_daily_shift(db: Session, employee_id: int, punch_date, **kwargs) -> DailyShiftRecord:
     """Insert a DailyShiftRecord atomically using ON CONFLICT DO NOTHING.
 
-    Using a plain INSERT + IntegrityError catch caused PostgreSQL deadlocks when
-    two concurrent requests both tried to insert rows for the same employees in
-    the same order.  The atomic upsert avoids any row-level lock contention.
+    ON CONFLICT eliminates row-level contention but PostgreSQL can still
+    raise an index-level deadlock (SQLSTATE 40P01) when two concurrent
+    transactions try to insert overlapping rows in different orders.
+
+    We do each upsert inside its own SAVEPOINT and retry with jitter on
+    deadlock — the surrounding transaction is preserved, so partial work
+    in the caller isn't lost.
     """
     # Core INSERT requires enum values as strings; ORM defaults don't apply.
     values = dict(kwargs)
@@ -50,9 +61,35 @@ def _upsert_daily_shift(db: Session, employee_id: int, punch_date, **kwargs) -> 
         .values(employee_id=employee_id, date=punch_date, **values)
         .on_conflict_do_nothing(constraint="uq_employee_day")
     )
-    db.execute(stmt)
-    db.flush()
 
+    last_err = None
+    for attempt in range(_UPSERT_MAX_RETRIES):
+        savepoint = db.begin_nested()
+        try:
+            db.execute(stmt)
+            savepoint.commit()
+            last_err = None
+            break
+        except OperationalError as e:
+            savepoint.rollback()
+            last_err = e
+            pgcode = getattr(getattr(e, 'orig', None), 'pgcode', None)
+            if pgcode != _DEADLOCK_PGCODE:
+                # Not a deadlock — surface immediately
+                raise
+            # Random backoff so the two losers don't keep colliding
+            wait = 0.05 + random.random() * 0.20 * (attempt + 1)
+            logger.warning(
+                "DailyShiftRecord upsert deadlock for employee=%s date=%s "
+                "(attempt %d/%d), retrying in %.0fms",
+                employee_id, punch_date, attempt + 1, _UPSERT_MAX_RETRIES, wait * 1000,
+            )
+            _time.sleep(wait)
+    else:
+        if last_err is not None:
+            raise last_err
+
+    db.flush()
     return db.query(DailyShiftRecord).filter(
         and_(
             DailyShiftRecord.employee_id == employee_id,
