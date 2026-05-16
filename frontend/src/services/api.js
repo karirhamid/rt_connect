@@ -142,6 +142,17 @@ class ApiService {
     return true;
   }
 
+  // Public branding (no auth — for login page)
+  async getPublicBranding() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/public/branding`);
+      if (!response.ok) return { app_name: 'RTPointage', client_name: null };
+      return response.json();
+    } catch (e) {
+      return { app_name: 'RTPointage', client_name: null };
+    }
+  }
+
   // App Settings
   async getGeneralSettings() {
     const response = await fetch(`${API_BASE_URL}/api/settings/general`);

@@ -201,6 +201,11 @@ class AppSettings(Base):
     pdf_style = Column(String(20), default='style1', nullable=False)  # style1 | style2
     pdf_show_overtime = Column(Boolean, default=True, nullable=False)  # Show overtime column in PDF
     pdf_show_total_worked = Column(Boolean, default=True, nullable=False)  # Show total worked column in PDF
+
+    # Branding (shown on login + sidebar)
+    app_name    = Column(String(100), nullable=True, default='RTPointage')
+    client_name = Column(String(255), nullable=True)  # The customer org using this install
+
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 

@@ -20,6 +20,27 @@ class GeneralSettings(BaseModel):
     pdf_style: str = Field(default="style1", description="PDF report style: style1 | style2")
     pdf_show_overtime: bool = Field(default=True, description="Show overtime column in PDF reports")
     pdf_show_total_worked: bool = Field(default=True, description="Show total worked column in PDF reports")
+    app_name: Optional[str] = Field(default="RTPointage", description="System name shown on login + sidebar")
+    client_name: Optional[str] = Field(default=None, description="Client / customer organization name shown on login")
+
+
+class PublicBranding(BaseModel):
+    """Public branding info, no auth required (used by login page)."""
+    app_name: str = "RTPointage"
+    client_name: Optional[str] = None
+
+
+@router.get("/public/branding", response_model=PublicBranding)
+async def get_public_branding():
+    """Return branding info shown on the login page. No auth required."""
+    with get_db_session() as db:
+        row = db.query(AppSettings).first()
+        if not row:
+            return PublicBranding()
+        return PublicBranding(
+            app_name=(getattr(row, 'app_name', None) or 'RTPointage'),
+            client_name=getattr(row, 'client_name', None),
+        )
 
 
 @router.get("/settings/general", response_model=GeneralSettings)
@@ -46,6 +67,8 @@ async def get_general_settings():
             pdf_style=getattr(row, 'pdf_style', None) or 'style1',
             pdf_show_overtime=getattr(row, 'pdf_show_overtime', True) if hasattr(row, 'pdf_show_overtime') else True,
             pdf_show_total_worked=getattr(row, 'pdf_show_total_worked', True) if hasattr(row, 'pdf_show_total_worked') else True,
+            app_name=getattr(row, 'app_name', None) or 'RTPointage',
+            client_name=getattr(row, 'client_name', None),
         )
 
 
@@ -66,6 +89,10 @@ async def update_general_settings(payload: GeneralSettings):
         row.pdf_style = payload.pdf_style if payload.pdf_style in ('style1', 'style2') else 'style1'
         row.pdf_show_overtime = payload.pdf_show_overtime
         row.pdf_show_total_worked = payload.pdf_show_total_worked
+        if payload.app_name is not None:
+            row.app_name = payload.app_name.strip() or 'RTPointage'
+        if payload.client_name is not None:
+            row.client_name = payload.client_name.strip() or None
         db.commit()
         db.refresh(row)
 
@@ -80,4 +107,6 @@ async def update_general_settings(payload: GeneralSettings):
         pdf_style=getattr(row, 'pdf_style', None) or 'style1',
         pdf_show_overtime=getattr(row, 'pdf_show_overtime', True) if hasattr(row, 'pdf_show_overtime') else True,
         pdf_show_total_worked=getattr(row, 'pdf_show_total_worked', True) if hasattr(row, 'pdf_show_total_worked') else True,
+        app_name=getattr(row, 'app_name', None) or 'RTPointage',
+        client_name=getattr(row, 'client_name', None),
     )

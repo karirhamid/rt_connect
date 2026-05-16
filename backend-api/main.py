@@ -43,8 +43,15 @@ async def lifespan(app: FastAPI):
     try:
         from app.database.connection import engine
         with engine.connect() as conn:
-            conn.execute(__import__('sqlalchemy').text(
+            sa_text = __import__('sqlalchemy').text
+            conn.execute(sa_text(
                 "ALTER TABLE report_schedules ADD COLUMN IF NOT EXISTS group_by VARCHAR(20) DEFAULT 'employee'"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS app_name VARCHAR(100) DEFAULT 'RTPointage'"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS client_name VARCHAR(255)"
             ))
             conn.commit()
     except Exception as e:

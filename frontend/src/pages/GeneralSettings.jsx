@@ -66,6 +66,8 @@ function GeneralSettings() {
 
   // Sync settings state
   const [requireSyncConfirmation, setRequireSyncConfirmation] = useState(true);
+  const [appName, setAppName] = useState('RTPointage');
+  const [clientName, setClientName] = useState('');
   const [validateTimestamps, setValidateTimestamps] = useState(true);
   const [loadingSync, setLoadingSync] = useState(false);
 
@@ -120,6 +122,8 @@ function GeneralSettings() {
       const settings = await api.getGeneralSettings();
       setRequireSyncConfirmation(!!settings.require_sync_confirmation);
       setValidateTimestamps(settings.validate_timestamps !== undefined ? !!settings.validate_timestamps : true);
+      setAppName(settings.app_name || 'RTPointage');
+      setClientName(settings.client_name || '');
     } catch (err) {
       console.error('Failed to load settings:', err);
       showNotification('error', t('failedToLoadData'));
@@ -131,11 +135,13 @@ function GeneralSettings() {
   const saveGeneralSettings = async () => {
     setLoadingSync(true);
     try {
-      const payload = { 
+      const payload = {
         require_sync_confirmation: !!requireSyncConfirmation,
         validate_timestamps: !!validateTimestamps,
         timing_mode: timingMode,
         timing_enabled: timingMode !== 'off',
+        app_name: (appName || 'RTPointage').trim(),
+        client_name: (clientName || '').trim() || null,
       };
       await api.updateGeneralSettings(payload);
       showNotification('success', t('settingsSaved'));
@@ -600,6 +606,35 @@ function GeneralSettings() {
 
         {activeTab === 'sync' && (
           <div className="p-6 space-y-6">
+
+            {/* ── Branding (system name + client name) ── */}
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <h3 className="text-md font-semibold text-gray-900 mb-1">{t('branding') || 'Identité visuelle'}</h3>
+              <p className="text-sm text-gray-600 mb-3">{t('brandingDesc') || 'Affichés sur la page de connexion et dans la barre latérale.'}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('appNameLabel') || 'Nom du système'}</label>
+                  <input
+                    type="text"
+                    value={appName}
+                    onChange={e => setAppName(e.target.value)}
+                    placeholder="RTPointage"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">{t('clientNameLabel') || 'Nom du client / société'}</label>
+                  <input
+                    type="text"
+                    value={clientName}
+                    onChange={e => setClientName(e.target.value)}
+                    placeholder={t('clientNamePlaceholder') || 'ex. Centre de biologie Unibio'}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="mb-2">
                <h2 className="text-lg font-semibold text-gray-900 mb-1">{t('syncSettingsTitle')}</h2>
                <p className="text-sm text-gray-600">{t('syncSettingsDesc')}</p>
