@@ -633,6 +633,9 @@ const resources = {
       online: "En ligne",
       offline: "Hors ligne",
       lastSeen: "Vu pour la dernière fois",
+      devicesStatusTitle: "État des appareils",
+      heartbeatEvery: "Vérification toutes les",
+      never: "jamais",
       systemUsers: "Utilisateurs Système",
       createUser: "Créer un Utilisateur",
       editUser: "Modifier l'Utilisateur",
@@ -1475,6 +1478,9 @@ const resources = {
       minutes: "minutes",
       defaultFive: "(default: 5)",
       lastSeen: "Last seen",
+      devicesStatusTitle: "Device status",
+      heartbeatEvery: "Checked every",
+      never: "never",
 
       // Users Management
       systemUsers: "System Users",
@@ -2423,6 +2429,9 @@ const resources = {
       online: "متصل",
       offline: "غير متصل",
       lastSeen: "آخر ظهور",
+      devicesStatusTitle: "حالة الأجهزة",
+      heartbeatEvery: "التحقق كل",
+      never: "أبداً",
 
       // Users Management
       systemUsers: "مستخدمو النظام",

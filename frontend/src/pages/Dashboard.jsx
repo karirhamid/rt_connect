@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, Monitor, Clock, Activity } from 'lucide-react';
+import { Users, Monitor, Clock, Activity, HardDrive } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 
@@ -12,6 +12,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [deviceStatus, setDeviceStatus] = useState({ devices: [], online_count: 0, total_count: 0, interval_sec: 300 });
 
   useEffect(() => {
     // Load auto-refresh setting from backend
@@ -28,12 +29,32 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchStats();
-    // Auto-refresh only if enabled
+    fetchDeviceStatus();
+    // Refresh device heartbeats every 30 s — much shorter than the
+    // 5-min stats refresh because heartbeats are what people watch.
+    const heartbeatTimer = setInterval(fetchDeviceStatus, 30 * 1000);
     if (autoRefreshEnabled) {
       const interval = setInterval(() => fetchStats(false), 300000); // 5 minutes
-      return () => clearInterval(interval);
+      return () => { clearInterval(interval); clearInterval(heartbeatTimer); };
     }
+    return () => clearInterval(heartbeatTimer);
   }, [autoRefreshEnabled]);
+
+  const fetchDeviceStatus = async () => {
+    try {
+      const data = await api.getDevicesStatus();
+      setDeviceStatus(data);
+    } catch (e) { /* silent — card just keeps old values */ }
+  };
+
+  const _fmtRelative = (iso) => {
+    if (!iso) return t('never') || 'jamais';
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60)    return `il y a ${Math.round(diff)} s`;
+    if (diff < 3600)  return `il y a ${Math.round(diff / 60)} min`;
+    if (diff < 86400) return `il y a ${Math.round(diff / 3600)} h`;
+    return new Date(iso).toLocaleDateString();
+  };
 
   const fetchStats = async (showLoading = true) => {
     if (showLoading) {
@@ -196,6 +217,60 @@ export default function Dashboard() {
             </PieChart>
           </ResponsiveContainer>
         </div>
+      </div>
+
+      {/* ── Live device status (heartbeat) ── */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+        <div className="p-5 border-b border-slate-200/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center">
+              <HardDrive className="w-5 h-5 text-slate-700" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">{t('devicesStatusTitle') || 'État des appareils'}</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {t('heartbeatEvery') || 'Vérification toutes les'} {Math.round((deviceStatus.interval_sec || 300) / 60)} min
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl font-bold text-slate-900">{deviceStatus.online_count}</span>
+            <span className="text-sm text-slate-400">/ {deviceStatus.total_count}</span>
+            <span className="text-sm text-slate-500 ml-1">{t('online') || 'en ligne'}</span>
+          </div>
+        </div>
+
+        {deviceStatus.devices.length === 0 ? (
+          <div className="p-8 text-center text-sm text-slate-400">
+            {t('noDevicesRegistered') || 'Aucun appareil enregistré'}
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {deviceStatus.devices.map((d) => (
+              <li key={d.id} className="px-5 py-3 flex items-center gap-3 hover:bg-slate-50/60">
+                <span
+                  className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
+                    d.is_online
+                      ? 'bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.15)]'
+                      : 'bg-gray-300'
+                  }`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-900 truncate">{d.name}</div>
+                  <div className="text-xs text-slate-500 font-mono">{d.ip}:{d.port}</div>
+                </div>
+                <div className="text-right text-xs">
+                  <div className={d.is_online ? 'text-emerald-700 font-medium' : 'text-slate-500'}>
+                    {d.is_online ? (t('online') || 'En ligne') : (t('offline') || 'Hors ligne')}
+                  </div>
+                  <div className="text-slate-400 mt-0.5">
+                    {(t('lastSeen') || 'Vu')} {_fmtRelative(d.last_seen_at)}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
     </div>
