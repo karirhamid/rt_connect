@@ -65,6 +65,12 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_ping_at TIMESTAMP"
             ))
+            conn.execute(sa_text(
+                "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_storage_type VARCHAR(20) DEFAULT 'none'"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_storage_config TEXT"
+            ))
             conn.commit()
     except Exception as e:
         logger.warning(f"Auto-migration warning (safe to ignore on fresh DB): {e}")

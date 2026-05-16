@@ -212,6 +212,12 @@ class AppSettings(Base):
     device_heartbeat_enabled      = Column(Boolean, default=True,  nullable=False)
     device_heartbeat_interval_sec = Column(Integer, default=300,   nullable=False)  # 5 min
 
+    # External backup storage destination (SMB / S3 / SFTP / ...)
+    # backup_storage_type   : 'none' | 'smb' (more types later)
+    # backup_storage_config : JSON string with type-specific fields
+    backup_storage_type   = Column(String(20),  default='none',  nullable=False)
+    backup_storage_config = Column(Text,        nullable=True)
+
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
