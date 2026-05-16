@@ -2885,13 +2885,20 @@ i18n
   .use(initReactI18next)
   .init({
     resources,
+    // French is the deployment default. Users can override per-browser via
+    // Settings → Language; that choice is then cached in localStorage.
+    // The navigator check is intentionally omitted so French-speaking
+    // clients on Windows machines with browser language = 'en' don't
+    // get the English UI on first visit.
     fallbackLng: 'fr',
+    supportedLngs: ['fr', 'en', 'ar'],
+    nonExplicitSupportedLngs: true,
     defaultNS: 'translation',
     interpolation: {
       escapeValue: false
     },
     detection: {
-      order: ['localStorage', 'navigator'],
+      order: ['localStorage'],
       caches: ['localStorage']
     }
   });
