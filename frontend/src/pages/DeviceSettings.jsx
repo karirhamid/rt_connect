@@ -822,7 +822,7 @@ export default function DeviceSettings() {
                 </label>
                 <input
                   type="text"
-                  placeholder="Auto-filled from device"
+                  placeholder={t('autoFilledFromDevice') || 'Auto-rempli depuis l\'appareil'}
                   value={formData.serial_number}
                   onChange={(e) => setFormData({ ...formData, serial_number: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
@@ -1004,7 +1004,7 @@ export default function DeviceSettings() {
                               setOpenMenu({ id: device.id, top: rect.bottom + 4, left: rect.right - 176 });
                             }}
                             className="p-1.5 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
-                            title="More actions"
+                            title={t('moreActions') || 'Plus d\'actions'}
                           >
                             <MoreVertical className="w-4 h-4" />
                           </button>
@@ -1387,9 +1387,9 @@ export default function DeviceSettings() {
                   <thead className="bg-gray-50 sticky top-0">
                     <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       <th className="px-5 py-2.5">{t('status')}</th>
-                      <th className="px-5 py-2.5">User ID</th>
-                      <th className="px-5 py-2.5">{t('employee') || 'Employee'}</th>
-                      <th className="px-5 py-2.5">{t('timestamp') || 'Timestamp'}</th>
+                      <th className="px-5 py-2.5">{t('userId') || 'ID Utilisateur'}</th>
+                      <th className="px-5 py-2.5">{t('employee') || 'Employé'}</th>
+                      <th className="px-5 py-2.5">{t('timestamp') || 'Horodatage'}</th>
                       <th className="px-5 py-2.5">{t('type') || 'Type'}</th>
                     </tr>
                   </thead>
