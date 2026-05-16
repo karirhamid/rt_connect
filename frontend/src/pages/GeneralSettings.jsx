@@ -450,48 +450,59 @@ function GeneralSettings() {
 
   return (
     <>
-    <div className="space-y-6">
-      {/* Notification Toast */}
+    <div className="space-y-6 max-w-6xl mx-auto">
+      {/* Notification Toast — responsive on mobile */}
       {notification && (
-        <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-6 py-4 rounded-lg shadow-lg transform transition-all duration-300 ${
-          notification.type === 'success' 
-            ? 'bg-green-50 text-green-800 border border-green-200' 
+        <div className={`fixed top-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-md
+                         z-50 flex items-center gap-3 px-4 sm:px-6 py-3 sm:py-4
+                         rounded-lg shadow-lg transition-all duration-300 ${
+          notification.type === 'success'
+            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
             : notification.type === 'warning'
-            ? 'bg-yellow-50 text-yellow-800 border border-yellow-200'
+            ? 'bg-amber-50 text-amber-800 border border-amber-200'
             : 'bg-red-50 text-red-800 border border-red-200'
         }`}>
           {notification.type === 'success' ? (
-            <Check className="w-5 h-5 text-green-600" />
+            <Check className="w-5 h-5 text-emerald-600 shrink-0" />
           ) : notification.type === 'warning' ? (
-            <AlertCircle className="w-5 h-5 text-yellow-600" />
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
           ) : (
-            <AlertCircle className="w-5 h-5 text-red-600" />
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
           )}
-          <span className="font-medium">{notification.message}</span>
+          <span className="font-medium text-sm">{notification.message}</span>
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">{t('generalSettings')}</h1>
+      {/* Page header */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight" style={{ letterSpacing: '-0.02em' }}>
+            {t('generalSettings')}
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {t('generalSettingsDesc') || 'Configuration du système, des appareils, des rapports et des comptes.'}
+          </p>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
+      {/* Tabs — horizontal scroll on mobile, slate accent */}
+      <div className="border-b border-slate-200 -mx-4 sm:mx-0">
+        <nav className="px-4 sm:px-0 -mb-px flex gap-1 sm:gap-6 overflow-x-auto">
           {tabs.map((tab) => {
             const Icon = tab.icon;
+            const active = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                className={`group flex items-center gap-2 py-3 px-3 border-b-2 font-medium text-sm
+                            whitespace-nowrap shrink-0 transition-colors ${
+                  active
+                    ? 'border-slate-900 text-slate-900'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
                 }`}
               >
-                <Icon className="w-5 h-5" />
+                <Icon className={`w-4 h-4 ${active ? 'text-slate-900' : 'text-slate-400 group-hover:text-slate-600'}`} />
                 {tab.name}
               </button>
             );
@@ -499,8 +510,8 @@ function GeneralSettings() {
         </nav>
       </div>
 
-      {/* Tab Content */}
-      <div className="bg-white rounded-lg shadow">
+      {/* Tab content card */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200/60">
         {activeTab === 'language' && (
           <div className="p-6">
             <div className="mb-6">

@@ -77,6 +77,7 @@ const resources = {
       
       // General Settings
       generalSettings: "Paramètres Généraux",
+      generalSettingsDesc: "Configuration du système, des appareils, des rapports et des comptes.",
       languageSettings: "Paramètres de Langue",
       selectLanguage: "Sélectionner la langue",
       french: "Français",
@@ -942,6 +943,7 @@ const resources = {
       
       // General Settings
       generalSettings: "General Settings",
+      generalSettingsDesc: "System, devices, reports, and account configuration.",
       languageSettings: "Language Settings",
       selectLanguage: "Select Language",
       french: "French",
@@ -1877,6 +1879,7 @@ const resources = {
       
       // General Settings
       generalSettings: "الإعدادات العامة",
+      generalSettingsDesc: "إعدادات النظام، الأجهزة، التقارير، والحسابات.",
       languageSettings: "إعدادات اللغة",
       selectLanguage: "اختر اللغة",
       french: "الفرنسية",
