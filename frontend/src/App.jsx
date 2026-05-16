@@ -106,13 +106,16 @@ function AppContent() {
     },
     {
       key: 'admin',
-      title: t('sidebarAdmin'),
-      icon: ShieldCheck,
+      title: t('sidebarSettings') || 'Paramètres',
+      icon: Settings,
       items: [
-        { name: t('users') || 'Users', href: '/settings/users', icon: Users },
-        { name: t('roles') || 'Roles', href: '/settings/roles', icon: UserCog },
-        { name: t('companyConfig'), href: '/settings/company', icon: Building2 },
-        { name: t('general'), href: '/settings/general', icon: Settings },
+        { type: 'divider', label: t('groupSystem') || 'Système' },
+        { name: t('general'),       href: '/settings/general',     icon: Settings },
+        { name: t('companyConfig'), href: '/settings/company',     icon: Building2 },
+        { type: 'divider', label: t('groupAccess') || 'Accès' },
+        { name: t('users') || 'Utilisateurs', href: '/settings/users', icon: Users },
+        { name: t('roles') || 'Rôles',        href: '/settings/roles', icon: UserCog },
+        { type: 'divider', label: t('groupTools') || 'Outils' },
         { name: t('maintenance') || 'Maintenance', href: '/settings/maintenance', icon: Wrench },
       ],
     },
@@ -142,7 +145,18 @@ function AppContent() {
         )};
       }
       return s;
-    }).filter(s => s.items.length > 0);
+    }).map(s => {
+      // Strip orphaned dividers (no link items after them before the next divider / end)
+      const items = s.items.filter((item, i, arr) => {
+        if (item.type !== 'divider') return true;
+        for (let j = i + 1; j < arr.length; j++) {
+          if (arr[j].type === 'divider') return false;
+          return true;
+        }
+        return false;
+      });
+      return { ...s, items };
+    }).filter(s => s.items.filter(i => i.type !== 'divider').length > 0);
   }
 
   // Determine which section owns the current route.

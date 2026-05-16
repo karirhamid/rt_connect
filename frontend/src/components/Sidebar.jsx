@@ -38,12 +38,14 @@ export default function Sidebar({
   const renderCollapsedSection = (section) => {
     if (!section) return null;
     const SectionIcon = section.icon;
-    const hasActive = section.items.some((i) => isActive(i.href));
+    // Filter out divider items for hover-flyout + active checks
+    const linkItems = section.items.filter(i => i.type !== 'divider');
+    const hasActive = linkItems.some((i) => isActive(i.href));
 
-    if (section.items.length === 1) {
+    if (linkItems.length === 1) {
       return (
         <Link
-          to={section.items[0].href}
+          to={linkItems[0].href}
           onClick={() => setSidebarOpen(false)}
           className={`flex items-center justify-center p-2 rounded-lg transition-colors ${
             hasActive
@@ -80,7 +82,15 @@ export default function Sidebar({
             <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100 mb-1">
               {section.title}
             </div>
-            {section.items.map((item) => {
+            {section.items.map((item, idx) => {
+              if (item.type === 'divider') {
+                return (
+                  <div key={`div-${idx}`}
+                       className="mx-3 mt-2 mb-1 pt-2 border-t border-gray-100 text-[9px] font-semibold uppercase tracking-wider text-gray-400">
+                    {item.label}
+                  </div>
+                );
+              }
               const Icon = item.icon;
               return (
                 <Link
@@ -177,12 +187,13 @@ export default function Sidebar({
             <div className="space-y-0.5">
               {sections.map((section) => {
                 const SectionIcon = section.icon;
-                const hasActive = section.items.some((i) => isActive(i.href));
+                const linkItems = section.items.filter(i => i.type !== 'divider');
+                const hasActive = linkItems.some((i) => isActive(i.href));
                 const isOpen = openSections[section.key];
 
                 /* ---- Single-item section → direct link (e.g. Dashboard) ---- */
-                if (section.items.length === 1) {
-                  const item = section.items[0];
+                if (linkItems.length === 1) {
+                  const item = linkItems[0];
                   const Icon = item.icon;
                   const active = isActive(item.href);
                   return (
@@ -239,7 +250,19 @@ export default function Sidebar({
                             : 'ml-[18px] border-l border-gray-200'
                         }`}
                       >
-                        {section.items.map((item) => {
+                        {section.items.map((item, idx) => {
+                          // Sub-group label inside a section (visual divider)
+                          if (item.type === 'divider') {
+                            return (
+                              <div
+                                key={`div-${idx}`}
+                                className={`${idx === 0 ? 'mt-0' : 'mt-2'} mb-1 ${isRTL ? 'pr-5' : 'pl-5'}
+                                            text-[10px] font-semibold uppercase tracking-wider text-gray-400 select-none`}
+                              >
+                                {item.label}
+                              </div>
+                            );
+                          }
                           const Icon = item.icon;
                           const active = isActive(item.href);
                           return (

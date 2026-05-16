@@ -626,6 +626,10 @@ const resources = {
       sidebarScheduling: "Planification",
       sidebarDevices: "Appareils",
       sidebarAdmin: "Administration",
+      sidebarSettings: "Paramètres",
+      groupSystem: "Système",
+      groupAccess: "Accès",
+      groupTools: "Outils",
       expandSidebar: "Agrandir la barre latérale",
       collapseSidebar: "Réduire la barre latérale",
 
@@ -1523,6 +1527,10 @@ const resources = {
       sidebarScheduling: "Scheduling",
       sidebarDevices: "Devices",
       sidebarAdmin: "Administration",
+      sidebarSettings: "Settings",
+      groupSystem: "System",
+      groupAccess: "Access",
+      groupTools: "Tools",
       expandSidebar: "Expand sidebar",
       collapseSidebar: "Collapse sidebar",
 
@@ -2455,6 +2463,10 @@ const resources = {
       sidebarScheduling: "الجدولة",
       sidebarDevices: "الأجهزة",
       sidebarAdmin: "الإدارة",
+      sidebarSettings: "الإعدادات",
+      groupSystem: "النظام",
+      groupAccess: "الوصول",
+      groupTools: "الأدوات",
       expandSidebar: "توسيع الشريط الجانبي",
       collapseSidebar: "طي الشريط الجانبي",
 
