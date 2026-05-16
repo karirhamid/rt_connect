@@ -5,7 +5,7 @@ FROM python:3.11-slim
 
 # System dependencies needed for psycopg2 and the ZKTeco lib
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq-dev gcc curl tzdata \
+        libpq-dev gcc curl tzdata postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

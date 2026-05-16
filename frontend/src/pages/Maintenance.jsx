@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, Upload, Trash2, Plus, AlertCircle, CheckCircle, Loader } from 'lucide-react';
+import { Download, Upload, Trash2, Plus, AlertCircle, CheckCircle, Loader, Database, FileUp } from 'lucide-react';
 import api from '../services/api';
 
 export default function Maintenance() {
@@ -12,8 +12,11 @@ export default function Maintenance() {
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
   const [totalSize, setTotalSize] = useState(0);
+  const [pgDumpAvailable, setPgDumpAvailable] = useState(true);
   const [selectedBackup, setSelectedBackup] = useState(null);
   const [showConfirmRestore, setShowConfirmRestore] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   // Load backups on mount
   useEffect(() => {
@@ -27,6 +30,7 @@ export default function Maintenance() {
       const response = await api.get('/maintenance/backups');
       setBackups(response.data.backups || []);
       setTotalSize(response.data.total_size_mb || 0);
+      setPgDumpAvailable(response.data.pg_dump_available !== false);
     } catch (err) {
       setError(err.response?.data?.detail || t('failedToLoadBackups'));
       setBackups([]);
@@ -87,6 +91,50 @@ export default function Maintenance() {
     }
   };
 
+  const handleUploadAndRestore = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Browser confirm — restore is destructive
+    if (!window.confirm(
+      t('confirmUploadRestore') ||
+      `Restore the database from "${file.name}"? This will REPLACE all current data.`
+    )) {
+      event.target.value = '';
+      return;
+    }
+
+    setUploading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      // Use raw fetch — api.post serializes JSON; FormData needs multipart
+      const resp = await fetch(
+        `${import.meta.env.VITE_API_URL ?? ''}/api/maintenance/restore-upload`,
+        {
+          method: 'POST',
+          body: form,
+          headers: { Authorization: `Bearer ${api.getAccessToken()}` },
+          credentials: 'include',
+        }
+      );
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j.detail || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      setMessage(`${t('backupRestored') || 'Restored'}: ${data.restored_from}`);
+      await loadBackups();
+    } catch (err) {
+      setError(err.message || (t('failedToRestoreBackup') || 'Restore failed'));
+    } finally {
+      setUploading(false);
+      if (event.target) event.target.value = '';
+    }
+  };
+
   const handleDeleteBackup = async (filename) => {
     if (!window.confirm(t('confirmDeleteBackup'))) return;
 
@@ -112,59 +160,127 @@ export default function Maintenance() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-6xl mx-auto">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">{t('maintenance')}</h1>
-        <p className="text-gray-600 mt-1">{t('maintenanceDesc')}</p>
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight" style={{ letterSpacing: '-0.02em' }}>
+          {t('maintenance')}
+        </h1>
+        <p className="mt-1 text-sm text-slate-500">
+          {t('maintenanceDesc') || 'Sauvegarde et restauration de la base de données (toutes les données + configuration).'}
+        </p>
       </div>
+
+      {/* pg_dump missing warning */}
+      {!pgDumpAvailable && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <h3 className="font-semibold text-amber-800">
+              {t('pgDumpMissing') || 'pg_dump n\'est pas disponible'}
+            </h3>
+            <p className="text-amber-700 mt-1">
+              {t('pgDumpMissingDesc') ||
+                "Le backend ne peut pas créer de nouvelles sauvegardes. Installez le paquet « postgresql-client » dans le Dockerfile et reconstruisez l'image."}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Alerts */}
       {message && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
-          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <h3 className="font-semibold text-green-800">Success</h3>
-            <p className="text-green-700 text-sm">{message}</p>
-          </div>
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+          <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+          <p className="text-emerald-800 text-sm">{message}</p>
         </div>
       )}
-
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <h3 className="font-semibold text-red-800">Error</h3>
-            <p className="text-red-700 text-sm">{error}</p>
-          </div>
+          <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <p className="text-red-800 text-sm">{error}</p>
         </div>
       )}
 
-      {/* Create Backup Section */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-gray-900">{t('createNewBackup')}</h2>
+      {/* Backup + Restore actions — side-by-side cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        {/* Create backup */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 p-6">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center">
+              <Database className="w-5 h-5 text-slate-700" />
+            </div>
+            <h2 className="text-lg font-semibold text-slate-900">{t('createNewBackup') || 'Créer une sauvegarde'}</h2>
+          </div>
+          <p className="text-sm text-slate-600 mb-4">
+            {t('createBackupDesc') ||
+              'Sauvegarde complète : schéma, données, configurations, utilisateurs. Compatible PostgreSQL 16+.'}
+          </p>
+          <button
+            onClick={handleCreateBackup}
+            disabled={creating || !pgDumpAvailable}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
+                       bg-slate-900 text-white rounded-lg hover:bg-slate-800 active:bg-black
+                       disabled:bg-slate-300 disabled:cursor-not-allowed
+                       transition-colors font-medium text-sm"
+          >
+            {creating ? <Loader className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            {creating ? (t('creatingBackup') || 'Sauvegarde…') : (t('createNewBackup') || 'Créer une sauvegarde')}
+          </button>
         </div>
-        <p className="text-gray-600 text-sm mb-4">
-          {t('createBackupDesc')}
-        </p>
-        <button
-          onClick={handleCreateBackup}
-          disabled={creating}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 disabled:bg-gray-400 transition"
-        >
-          {creating ? <Loader className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-          {creating ? t('creatingBackup') : t('createNewBackup')}
-        </button>
+
+        {/* Upload + restore */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 p-6">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center">
+              <FileUp className="w-5 h-5 text-slate-700" />
+            </div>
+            <h2 className="text-lg font-semibold text-slate-900">{t('restoreFromFile') || 'Restaurer depuis un fichier'}</h2>
+          </div>
+          <p className="text-sm text-slate-600 mb-4">
+            {t('restoreFromFileDesc') ||
+              "Importer une sauvegarde .dump ou .json.gz d'un autre serveur. Remplace toutes les données."}
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".dump,.gz,.json,.json.gz"
+            onChange={handleUploadAndRestore}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
+                       border border-slate-300 text-slate-800 rounded-lg
+                       hover:bg-slate-50 active:bg-slate-100
+                       disabled:opacity-50 disabled:cursor-not-allowed
+                       transition-colors font-medium text-sm"
+          >
+            {uploading ? <Loader className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {uploading ? (t('uploadingRestoring') || 'Restauration…') : (t('chooseBackupFile') || 'Choisir un fichier')}
+          </button>
+        </div>
+
       </div>
 
       {/* Backups List Section */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">{t('availableBackups')}</h2>
-          <p className="text-gray-600 text-sm mt-1">
-            {t('totalStorage')}: {totalSize} MB
-          </p>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+        <div className="p-6 border-b border-slate-200/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">{t('availableBackups') || 'Sauvegardes disponibles'}</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {backups.length} {(t('files') || 'fichier(s)')} · {totalSize} MB {(t('total') || 'au total')}
+            </p>
+          </div>
+          <button
+            onClick={loadBackups}
+            disabled={loading}
+            className="text-xs text-slate-600 hover:text-slate-900 inline-flex items-center gap-1 self-start"
+          >
+            {loading ? <Loader className="w-3.5 h-3.5 animate-spin" /> : null}
+            {t('refresh') || 'Actualiser'}
+          </button>
         </div>
 
         {loading ? (
@@ -179,43 +295,50 @@ export default function Maintenance() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-slate-50/70 border-b border-slate-200/60">
                 <tr>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">{t('filename')}</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">{t('created')}</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">{t('sizeLabel')}</th>
-                  <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">{t('actions')}</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">{t('filename') || 'Fichier'}</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider hidden sm:table-cell">{t('format') || 'Format'}</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider hidden md:table-cell">{t('created') || 'Créé le'}</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">{t('sizeLabel') || 'Taille'}</th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">{t('actions') || 'Actions'}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-slate-100">
                 {backups.map((backup) => (
-                  <tr key={backup.filename} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 text-sm text-gray-900 font-mono">{backup.filename}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{formatDate(backup.created_at)}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{formatBytes(backup.size_bytes)}</td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                  <tr key={backup.filename} className="hover:bg-slate-50/60">
+                    <td className="px-6 py-3 text-sm text-slate-900 font-mono text-xs">{backup.filename}</td>
+                    <td className="px-6 py-3 hidden sm:table-cell">
+                      <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full uppercase tracking-wider ${
+                        backup.format === 'pgdump'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}>
+                        {backup.format === 'pgdump' ? 'pg_dump' : 'legacy'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 text-sm text-slate-600 hidden md:table-cell">{formatDate(backup.created_at)}</td>
+                    <td className="px-6 py-3 text-sm text-slate-600">{formatBytes(backup.size_bytes)}</td>
+                    <td className="px-6 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => handleDownload(backup.filename)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition"
-                          title={t('download')}
+                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+                          title={t('download') || 'Télécharger'}
                         >
                           <Download className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => {
-                            setSelectedBackup(backup.filename);
-                            setShowConfirmRestore(true);
-                          }}
-                          className="p-2 text-green-600 hover:bg-green-50 rounded-md transition"
-                          title={t('restore')}
+                          onClick={() => { setSelectedBackup(backup.filename); setShowConfirmRestore(true); }}
+                          className="p-2 text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors"
+                          title={t('restore') || 'Restaurer'}
                         >
                           <Upload className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDeleteBackup(backup.filename)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-md transition"
-                          title={t('delete')}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                          title={t('delete') || 'Supprimer'}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -231,38 +354,38 @@ export default function Maintenance() {
 
       {/* Restore Confirmation Modal */}
       {showConfirmRestore && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full max-h-[90vh] overflow-y-auto">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">{t('confirmRestore')}</h2>
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full">
+            <div className="px-6 py-4 border-b border-slate-200">
+              <h2 className="text-lg font-semibold text-slate-900">{t('confirmRestore') || 'Confirmer la restauration'}</h2>
             </div>
             <div className="px-6 py-5 space-y-4">
-              <p className="text-sm text-gray-600">
-                {t('confirmRestoreMsg')} <span className="font-mono font-semibold text-gray-900">{selectedBackup}</span>
+              <p className="text-sm text-slate-600">
+                {t('confirmRestoreMsg') || 'Restaurer depuis :'}
+                <span className="font-mono font-semibold text-slate-900 ml-1 text-xs break-all">{selectedBackup}</span>
               </p>
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <p className="text-sm text-yellow-800">
-                  <strong>{t('warningLabel')}:</strong> {t('restoreWarning')}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="text-sm text-amber-800">
+                  <strong>{t('warningLabel') || 'Attention'} :</strong> {t('restoreWarning') ||
+                    'Toutes les données actuelles seront remplacées par celles de la sauvegarde.'}
                 </p>
               </div>
             </div>
-            <div className="flex gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
+            <div className="flex gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
               <button
-                onClick={() => {
-                  setShowConfirmRestore(false);
-                  setSelectedBackup(null);
-                }}
-                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm"
+                onClick={() => { setShowConfirmRestore(false); setSelectedBackup(null); }}
+                className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors font-medium text-sm"
               >
-                {t('cancel')}
+                {t('cancel') || 'Annuler'}
               </button>
               <button
                 onClick={handleRestoreBackup}
                 disabled={restoring}
-                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400 transition-colors inline-flex items-center justify-center gap-2 font-medium text-sm"
+                className="flex-1 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg
+                           disabled:bg-slate-400 transition-colors inline-flex items-center justify-center gap-2 font-medium text-sm"
               >
                 {restoring ? <Loader className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {restoring ? t('restoring') : t('restore')}
+                {restoring ? (t('restoring') || 'Restauration…') : (t('restore') || 'Restaurer')}
               </button>
             </div>
           </div>
