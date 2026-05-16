@@ -57,7 +57,7 @@ function EmployeeManagement() {
       const resp = await api.authFetch(`/api/reports/employees/export.pdf?${params}`, { method: 'GET' });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || 'Export failed');
+        throw new Error(err.detail || (t('exportFailed') || 'Export failed'));
       }
       const blob = await resp.blob();
       const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
@@ -103,7 +103,7 @@ function EmployeeManagement() {
       await loadEmployees();
     } catch (error) {
       console.error('Failed to load data:', error);
-      showNotification('error', 'Failed to load data: ' + error.message);
+      showNotification('error', (t('failedToLoadData') || 'Échec du chargement des données') + ': ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -134,7 +134,7 @@ function EmployeeManagement() {
       setEmployeeShifts(shiftsMap);
     } catch (error) {
       console.error('Failed to load employees:', error);
-      showNotification('error', 'Failed to load employees: ' + error.message);
+      showNotification('error', (t('failedToLoadEmployees') || 'Échec du chargement des employés') + ': ' + error.message);
     }
   };
 
