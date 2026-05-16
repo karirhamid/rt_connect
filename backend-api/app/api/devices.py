@@ -85,12 +85,17 @@ async def get_devices_status(db: Session = Depends(get_db)):
     settings = db.query(AppSettings).first()
     interval_sec = int(getattr(settings, 'device_heartbeat_interval_sec', 300) or 300) if settings else 300
     online_window = timedelta(seconds=2 * interval_sec)
-    now = datetime.now(timezone.utc)
+    # last_seen_at is stored as a naive UTC timestamp; strip tz from `now`
+    # so the subtraction in the comparison below doesn't blow up.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     rows = db.query(DBDevice).filter(DBDevice.is_active == True).all()
     out = []
     for d in rows:
         last_seen = d.last_seen_at
+        # Defensive: if a row was somehow saved with tz, normalize to naive UTC
+        if last_seen and last_seen.tzinfo is not None:
+            last_seen = last_seen.astimezone(timezone.utc).replace(tzinfo=None)
         is_online = bool(last_seen and (now - last_seen) <= online_window)
         out.append({
             "id":            d.id,
