@@ -113,6 +113,15 @@ ufw status numbered | sed 's/^/    /'
 # ── 4. DOCKER-USER — Docker-published ports (80, 443) ──────────────────────
 step "Configuring iptables DOCKER-USER chain (for Docker ports)"
 
+# Detect external interface so we ONLY filter packets arriving from outside.
+# Filtering blindly on port also catches container OUTBOUND traffic (e.g.,
+# npm install reaching out to registry.npmjs.org:443) which breaks builds.
+EXT_IF=$(ip route get 8.8.8.8 2>/dev/null | awk '/dev/ {for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+if [[ -z "$EXT_IF" ]]; then
+    EXT_IF=$(ip -o link show | awk -F': ' '!/lo:|docker|br-|veth/ {print $2; exit}')
+fi
+info "External interface detected: $EXT_IF"
+
 # Make sure the chain exists (Docker creates it when daemon starts)
 if ! iptables -L DOCKER-USER -n >/dev/null 2>&1; then
     iptables -N DOCKER-USER
@@ -121,26 +130,26 @@ fi
 # Reset our chain — then rebuild
 iptables -F DOCKER-USER
 
-# 4a. Allow return traffic for existing connections
+# 4a. Allow return traffic for existing connections (host or container)
 iptables -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
 
-# 4b. Allow allowlisted IPs to reach the protected ports
+# 4b. Allow allowlisted IPs arriving on the EXTERNAL interface only
 for ip in "${ALLOWED_IPS[@]}"; do
     for port in "${PROTECTED_PORTS[@]}"; do
-        iptables -A DOCKER-USER -p tcp -s "$ip" --dport "$port" -j RETURN
-        # Log dropped attempts to syslog (rate-limited so log doesn't fill up)
+        iptables -A DOCKER-USER -i "$EXT_IF" -p tcp -s "$ip" --dport "$port" -j RETURN
     done
 done
 
-# 4c. Log + drop everything else trying to reach those ports
+# 4c. Log + drop everything ELSE arriving on the external interface to those ports
 for port in "${PROTECTED_PORTS[@]}"; do
-    iptables -A DOCKER-USER -p tcp --dport "$port" \
+    iptables -A DOCKER-USER -i "$EXT_IF" -p tcp --dport "$port" \
         -m limit --limit 5/min --limit-burst 10 \
         -j LOG --log-prefix "FW-DROP $port: " --log-level 4
-    iptables -A DOCKER-USER -p tcp --dport "$port" -j DROP
+    iptables -A DOCKER-USER -i "$EXT_IF" -p tcp --dport "$port" -j DROP
 done
 
-# 4d. Default: let any other traffic continue through Docker's chain
+# 4d. Default: let any other traffic (container outbound, container↔container)
+#      continue through Docker's chain
 iptables -A DOCKER-USER -j RETURN
 
 info "DOCKER-USER rules installed"
