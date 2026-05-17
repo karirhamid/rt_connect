@@ -68,10 +68,10 @@ export default function SyncOverlay({
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center
-                 bg-slate-900/40 backdrop-blur-[2px] animate-[fadeIn_0.15s_ease-out]"
+                 pointer-events-none animate-[fadeIn_0.15s_ease-out]"
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl border border-slate-200/60
+        className="pointer-events-auto bg-white rounded-2xl shadow-2xl border border-slate-200/60
                    px-7 py-6 min-w-[320px] max-w-[480px]
                    animate-[popIn_0.18s_ease-out] flex flex-col items-center gap-3"
       >
