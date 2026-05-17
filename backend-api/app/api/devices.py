@@ -1041,8 +1041,12 @@ async def _sync_attendance_locked(
                     errors.append({"user_id": record.user_id, "timestamp": timestamp.isoformat(), "error": err})
                 continue
 
-            # Duplicate check (O(1) set)
-            is_dup = (employee.id, timestamp) in existing_set
+            # Duplicate check (O(1) set) — MUST normalise the same way the
+            # set was built (no tzinfo, microseconds=0). Otherwise a record
+            # that's already in the DB shows up as "new" because the raw
+            # device timestamp has tz/microsecond noise the set doesn't.
+            ts_key = _normalise_ts(timestamp)
+            is_dup = (employee.id, ts_key) in existing_set
 
             if preview_only:
                 preview_data.append({
@@ -1070,7 +1074,7 @@ async def _sync_attendance_locked(
                         status=record.status
                     ))
                     # Add to set so later duplicates in the same batch are caught
-                    existing_set.add((employee.id, timestamp))
+                    existing_set.add((employee.id, ts_key))
 
         except Exception as e:
             if preview_only:
