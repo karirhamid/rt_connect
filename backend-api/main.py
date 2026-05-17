@@ -72,6 +72,38 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_storage_config TEXT"
             ))
             conn.commit()
+
+        # Dedupe attendance + add unique constraint (idempotent).
+        # Earlier versions had a check-then-insert race condition: two
+        # concurrent syncs (e.g. scheduler auto-sync + manual UI sync) could
+        # each insert the same row. We collapse any existing duplicates,
+        # keeping the LOWEST id, then add a unique constraint so it can't
+        # happen again. The sync code uses ON CONFLICT DO NOTHING from now on.
+        with engine.connect() as conn:
+            res = conn.execute(sa_text("""
+                SELECT to_regclass('public.attendance') IS NOT NULL AS exists,
+                       EXISTS (
+                           SELECT 1 FROM pg_constraint
+                           WHERE conname = 'uq_attendance_device_uid_ts'
+                       ) AS has_uq
+            """)).first()
+            if res and res.exists:
+                if not res.has_uq:
+                    deleted = conn.execute(sa_text("""
+                        DELETE FROM attendance a USING attendance b
+                        WHERE a.id > b.id
+                          AND a.device_id = b.device_id
+                          AND a.uid       = b.uid
+                          AND a.timestamp = b.timestamp
+                    """)).rowcount
+                    if deleted:
+                        logger.warning(f"Removed {deleted} duplicate attendance row(s) before adding unique constraint")
+                    conn.execute(sa_text(
+                        "ALTER TABLE attendance ADD CONSTRAINT uq_attendance_device_uid_ts "
+                        "UNIQUE (device_id, uid, timestamp)"
+                    ))
+                    logger.info("Added uq_attendance_device_uid_ts constraint on attendance")
+                    conn.commit()
     except Exception as e:
         logger.warning(f"Auto-migration warning (safe to ignore on fresh DB): {e}")
 

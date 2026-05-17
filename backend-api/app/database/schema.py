@@ -152,11 +152,18 @@ class Attendance(Base):
     Links to Employee table via device_user_id and user_id_str.
     """
     __tablename__ = "attendance"
-    
+    __table_args__ = (
+        # One punch from a given device for the same uid at the same instant
+        # cannot legitimately occur twice. Concurrent syncs trying to insert
+        # the same row will fail this constraint at the DB level — the sync
+        # code uses ON CONFLICT DO NOTHING to skip them silently.
+        UniqueConstraint("device_id", "uid", "timestamp", name="uq_attendance_device_uid_ts"),
+    )
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     device_id = Column(String, ForeignKey("devices.id"), nullable=False)
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)  # Link to employee
-    
+
     # Device-specific fields
     uid = Column(Integer, nullable=False)
     user_id_str = Column(String, nullable=False)

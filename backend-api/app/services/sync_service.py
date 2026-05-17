@@ -1,13 +1,16 @@
 import logging
+import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.database import get_db_session
 from app.database.schema import (
-    Device as DBDevice, 
-    Employee as DBEmployee, 
-    Attendance as DBAttendance, 
+    Device as DBDevice,
+    Employee as DBEmployee,
+    Attendance as DBAttendance,
     SyncLog,
     Company,
     Department
@@ -25,10 +28,15 @@ DEFAULT_COMPANY_ID = 1
 DEFAULT_DEPARTMENT_ID = 1
 DEFAULT_POSITION_ID = 1
 
+# One lock per device_id — prevents two simultaneous syncs of the same
+# device (which would race on duplicate detection AND can crash older
+# ZKTeco firmware that doesn't support concurrent sessions).
+_device_locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
+
 
 class DeviceSyncService:
     """Service to sync device data to database (manual trigger only)."""
-    
+
     def __init__(self, max_retries: int = 3, retry_delay: int = 30):
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -37,10 +45,27 @@ class DeviceSyncService:
     def _sync_device_blocking(self, device_id: str):
         """
         Synchronous device sync — called via asyncio.to_thread().
-        
+
         Uses a SINGLE connection for get_device_info + get_users + get_attendance
         to avoid hammering older devices with multiple connect/disconnect cycles.
+
+        Serialised per device via _device_locks so a manual UI sync and the
+        scheduler's auto-sync can't both hit the same device at the same time.
+        If a sync is already running for this device, the second caller
+        waits for it to finish — same end result (records get synced once),
+        no duplicate INSERTs, no concurrent ZKTeco sessions.
         """
+        lock = _device_locks[device_id]
+        acquired = lock.acquire(blocking=False)
+        if not acquired:
+            logger.info(f"Sync already in progress for device {device_id} — waiting…")
+            lock.acquire()  # block until the other sync releases
+        try:
+            return self._sync_device_locked(device_id)
+        finally:
+            lock.release()
+
+    def _sync_device_locked(self, device_id: str):
         device_config = device_store.get_by_id(device_id)
         if not device_config:
             logger.warning(f"Device {device_id} not found")
@@ -195,23 +220,22 @@ class DeviceSyncService:
                     if isinstance(timestamp, str):
                         timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                     
-                    existing = db.query(DBAttendance).filter(
-                        DBAttendance.device_id == device_id,
-                        DBAttendance.uid == record_data['uid'],
-                        DBAttendance.timestamp == timestamp
-                    ).first()
-                    
-                    if not existing:
-                        db_attendance = DBAttendance(
-                            device_id=device_id,
-                            employee_id=db_employee.id,
-                            uid=record_data['uid'],
-                            user_id_str=record_data['user_id'],
-                            timestamp=timestamp,
-                            status=record_data['status'],
-                            punch=record_data['punch']
-                        )
-                        db.add(db_attendance)
+                    # Atomic upsert — protected by the uq_attendance_device_uid_ts
+                    # unique constraint. ON CONFLICT DO NOTHING means concurrent
+                    # syncs can't insert the same row twice.
+                    stmt = pg_insert(DBAttendance).values(
+                        device_id=device_id,
+                        employee_id=db_employee.id,
+                        uid=record_data['uid'],
+                        user_id_str=record_data['user_id'],
+                        timestamp=timestamp,
+                        status=record_data['status'],
+                        punch=record_data['punch'],
+                    ).on_conflict_do_nothing(
+                        constraint='uq_attendance_device_uid_ts'
+                    )
+                    result = db.execute(stmt)
+                    if result.rowcount > 0:
                         attendance_added += 1
                     else:
                         attendance_duplicates += 1
