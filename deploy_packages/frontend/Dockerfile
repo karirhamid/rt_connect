@@ -15,17 +15,18 @@ WORKDIR /app
 ARG VITE_API_URL=""
 ENV VITE_API_URL=$VITE_API_URL
 
-# Install deps (cache layer)
-# Explicitly include devDependencies — without this, NODE_ENV=production
-# in the host env can make npm skip them and 'vite' goes missing at build.
-# No --silent so we see real errors if install fails.
-ENV NODE_ENV=development
-COPY package*.json ./
-RUN npm ci --include=dev
-
-# Build
+# Build the React app
+#
+# Force NODE_ENV=development for the install so npm doesn't skip devDeps
+# (Vite is a devDep). The two-stage COPY-then-install-then-COPY pattern
+# was wiping node_modules in some hosts; this single COPY + single install
+# is bulletproof at the cost of slightly slower incremental rebuilds.
+ENV NODE_ENV=development \
+    NPM_CONFIG_PRODUCTION=false
 COPY . .
-RUN npm run build
+RUN npm install --include=dev --no-audit --no-fund \
+ && ls node_modules/.bin/vite \
+ && npm run build
 
 # ── Stage 2: serve ───────────────────────────────────────────────────────────
 FROM nginx:alpine
