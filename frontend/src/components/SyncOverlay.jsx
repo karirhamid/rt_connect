@@ -1,23 +1,20 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 /**
- * Compact terminal-style sync indicator (like Claude Code's submit spinner).
+ * Centered single-line sync indicator (Claude-Code-style spinner).
  *
- * Renders a small bottom-right card with rolling log lines:
- *   ✓ Connecté à POINTEUSE 201
- *   ✓ 152 enregistrements récupérés
- *   ⠋ Sauvegarde dans la base de données…
+ * Renders a small pill in the middle of the screen:
+ *   ⠋ Récupération des données…
+ *
+ * Each phase change REPLACES the line (no accumulating log).
  *
  * Props:
  *   visible    – boolean
  *   phase      – 'saving' | 'syncing' | 'done' | 'error'
  *   message    – optional override text for the active phase
- *   deviceName – device label shown in the header
+ *   deviceName – device label shown under the spinner line
  *   direction  – 'toDevice' | 'fromDevice'
- *
- * The parent passes simple phase changes; we synthesize the log progression
- * from them so the visual feels live without needing backend streaming.
  */
 export default function SyncOverlay({
   visible,
@@ -27,142 +24,99 @@ export default function SyncOverlay({
   direction = 'toDevice',
 }) {
   const { t } = useTranslation();
-  const [lines, setLines] = useState([]);
-  const lastPhaseRef = useRef(null);
+  const [displayText, setDisplayText] = useState('');
+  const [fading, setFading] = useState(false);
 
-  // ── Phase → log line text ───────────────────────────────────────────────
   const phaseLabel = (p) => {
     if (direction === 'fromDevice') {
-      if (p === 'saving')   return t('syncStepConnecting')  || 'Connexion à l\'appareil…';
-      if (p === 'syncing')  return t('syncStepFetching')    || 'Récupération des données…';
-      if (p === 'done')     return t('syncStepDone')        || 'Synchronisation terminée';
-      if (p === 'error')    return t('syncStepError')       || 'Échec de la synchronisation';
+      if (p === 'saving')  return t('syncStepConnecting') || 'Connexion à l\'appareil…';
+      if (p === 'syncing') return t('syncStepFetching')   || 'Récupération des données…';
+      if (p === 'done')    return t('syncStepDone')       || 'Synchronisation terminée';
+      if (p === 'error')   return t('syncStepError')      || 'Échec de la synchronisation';
     } else {
-      if (p === 'saving')   return t('syncStepSaving')      || 'Enregistrement côté serveur…';
-      if (p === 'syncing')  return t('syncStepPushing')     || 'Envoi vers l\'appareil…';
-      if (p === 'done')     return t('syncStepDone')        || 'Synchronisation terminée';
-      if (p === 'error')    return t('syncStepError')       || 'Échec de la synchronisation';
+      if (p === 'saving')  return t('syncStepSaving')     || 'Enregistrement côté serveur…';
+      if (p === 'syncing') return t('syncStepPushing')    || 'Envoi vers l\'appareil…';
+      if (p === 'done')    return t('syncStepDone')       || 'Synchronisation terminée';
+      if (p === 'error')   return t('syncStepError')      || 'Échec de la synchronisation';
     }
-    return 'Working…';
+    return '';
   };
 
-  // Append a log line when phase changes
+  // When the phase changes, fade out the current text and swap to the new one
   useEffect(() => {
-    if (!visible) {
-      setLines([]);
-      lastPhaseRef.current = null;
+    if (!visible) return;
+    const newText = message || phaseLabel(phase);
+    if (newText === displayText) return;
+    if (!displayText) {
+      setDisplayText(newText);
       return;
     }
-    if (phase === lastPhaseRef.current) return;
-
-    setLines((prev) => {
-      // Mark any in-progress line as done (or error) before adding the next
-      const finishedPrev = prev.map((l) =>
-        l.state === 'active'
-          ? { ...l, state: phase === 'error' ? 'error' : 'done' }
-          : l
-      );
-      // Don't add a new line for the terminal phases — they only "finish" the previous one
-      if (phase === 'done' || phase === 'error') {
-        return finishedPrev;
-      }
-      return [...finishedPrev, { text: message || phaseLabel(phase), state: 'active' }];
-    });
-
-    lastPhaseRef.current = phase;
+    setFading(true);
+    const t = setTimeout(() => {
+      setDisplayText(newText);
+      setFading(false);
+    }, 140);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, phase, message]);
-
-  // Auto-dismiss happens in the parent (setSyncOverlay({ visible:false, ... }))
-  // — we just render whatever it gives us.
 
   if (!visible) return null;
 
   const isDone  = phase === 'done';
   const isError = phase === 'error';
-  const headerTone =
-    isError ? 'text-red-700'
-    : isDone ? 'text-emerald-700'
-    : 'text-slate-700';
 
   return (
-    <div className="fixed bottom-4 right-4 z-[60] w-[340px] sm:w-[380px]
-                    bg-white rounded-xl shadow-2xl border border-slate-200/80
-                    animate-[slideUp_0.2s_ease-out]">
-
-      {/* Header */}
-      <div className="px-4 py-2.5 border-b border-slate-200/80 flex items-center gap-2">
-        {isDone ? (
-          <CheckIcon className="w-4 h-4 text-emerald-600 shrink-0" />
-        ) : isError ? (
-          <XIcon className="w-4 h-4 text-red-600 shrink-0" />
-        ) : (
-          <BrailleSpinner className="text-slate-600 shrink-0" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className={`text-sm font-semibold ${headerTone}`}>
-            {direction === 'fromDevice'
-              ? (t('syncFromDeviceTitle') || 'Synchronisation depuis l\'appareil')
-              : (t('syncToDeviceTitle')   || 'Synchronisation vers l\'appareil')}
-          </div>
-          {deviceName && (
-            <div className="text-[11px] text-slate-500 font-mono truncate">{deviceName}</div>
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center
+                 bg-slate-900/40 backdrop-blur-[2px] animate-[fadeIn_0.15s_ease-out]"
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl border border-slate-200/60
+                   px-7 py-6 min-w-[320px] max-w-[480px]
+                   animate-[popIn_0.18s_ease-out] flex flex-col items-center gap-3"
+      >
+        {/* Status icon */}
+        <div className="h-9 flex items-center justify-center">
+          {isDone ? (
+            <CheckIcon className="w-8 h-8 text-emerald-500 animate-[popIn_0.25s_ease-out]" />
+          ) : isError ? (
+            <XIcon className="w-8 h-8 text-red-500" />
+          ) : (
+            <BrailleSpinner className="text-slate-700 text-2xl" />
           )}
         </div>
-      </div>
 
-      {/* Log lines */}
-      <div className="px-4 py-3 space-y-1 max-h-48 overflow-y-auto font-mono text-[12px]">
-        {lines.map((l, i) => (
-          <div key={i} className="flex items-start gap-2 leading-relaxed">
-            {l.state === 'active' ? (
-              <BrailleSpinner className="text-slate-500 mt-[3px]" />
-            ) : l.state === 'error' ? (
-              <XIcon className="w-3.5 h-3.5 text-red-500 mt-[2px] shrink-0" />
-            ) : (
-              <CheckIcon className="w-3.5 h-3.5 text-emerald-500 mt-[2px] shrink-0" />
-            )}
-            <span className={
-              l.state === 'active' ? 'text-slate-800'
-              : l.state === 'error' ? 'text-red-600'
-              : 'text-slate-500'
-            }>
-              {l.text}
-            </span>
-          </div>
-        ))}
-        {(isDone || isError) && (
-          <div className="flex items-start gap-2 leading-relaxed pt-1">
-            {isDone
-              ? <CheckIcon className="w-3.5 h-3.5 text-emerald-600 mt-[2px] shrink-0" />
-              : <XIcon    className="w-3.5 h-3.5 text-red-600    mt-[2px] shrink-0" />}
-            <span className={isError ? 'text-red-700 font-medium' : 'text-emerald-700 font-medium'}>
-              {message || phaseLabel(phase)}
-            </span>
+        {/* Text line — fades between phase changes */}
+        <div
+          className={`text-[15px] font-medium text-center transition-opacity duration-150 ${
+            isError ? 'text-red-700' : isDone ? 'text-emerald-700' : 'text-slate-800'
+          } ${fading ? 'opacity-0' : 'opacity-100'}`}
+        >
+          {displayText || phaseLabel(phase)}
+        </div>
+
+        {/* Device name (small, under) */}
+        {deviceName && (
+          <div className="text-[11px] font-mono text-slate-400 -mt-1">
+            {deviceName}
           </div>
         )}
       </div>
 
       <style>{`
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes braille {
-          0%   { content: '\\28CB'; }   10%  { content: '\\2819'; }
-          20%  { content: '\\2839'; }   30%  { content: '\\2838'; }
-          40%  { content: '\\283C'; }   50%  { content: '\\2834'; }
-          60%  { content: '\\2826'; }   70%  { content: '\\2827'; }
-          80%  { content: '\\2807'; }   90%  { content: '\\280F'; }
-          100% { content: '\\28CB'; }
+        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes popIn {
+          0%   { opacity: 0; transform: scale(0.92); }
+          70%  { transform: scale(1.02); }
+          100% { opacity: 1; transform: scale(1); }
         }
       `}</style>
     </div>
   );
 }
 
-// ── Tiny terminal-style spinner using SVG (no font dependency) ─────────────
+// ── Spinner + tiny icons ───────────────────────────────────────────────────
 function BrailleSpinner({ className = '' }) {
-  // 10-frame Braille spinner. Each frame is one character; we rotate via state.
   const frames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
   const [i, setI] = useState(0);
   useEffect(() => {
@@ -170,10 +124,7 @@ function BrailleSpinner({ className = '' }) {
     return () => clearInterval(t);
   }, []);
   return (
-    <span
-      aria-hidden
-      className={`inline-block w-3.5 text-center font-mono text-[14px] leading-none ${className}`}
-    >
+    <span aria-hidden className={`inline-block w-6 text-center font-mono leading-none ${className}`}>
       {frames[i]}
     </span>
   );
@@ -181,7 +132,7 @@ function BrailleSpinner({ className = '' }) {
 
 function CheckIcon({ className = '' }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
          className={className}>
       <polyline points="20 6 9 17 4 12" />
     </svg>
@@ -190,7 +141,7 @@ function CheckIcon({ className = '' }) {
 
 function XIcon({ className = '' }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
          className={className}>
       <line x1="18" y1="6" x2="6" y2="18" />
       <line x1="6" y1="6" x2="18" y2="18" />
