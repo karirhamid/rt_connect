@@ -32,8 +32,7 @@ set -euo pipefail
 
 # ── Config — edit these to change who can access the VM ────────────────────
 ALLOWED_IPS=(
-    "10.185.1.208"   # office workstation
-    "10.10.0.100"    # VPN
+    "10.10.0.100"    # VPN only — single source of access
 )
 PROTECTED_PORTS=("80" "443")   # Docker-published — guarded by DOCKER-USER
 SSH_PORT="22"
