@@ -7,13 +7,14 @@ import socket
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from datetime import datetime, timedelta, timezone
 import logging
 from app.services.device_store import device_store, Device
 from app.services.device_manager import ZKTecoDeviceManager
 from app.database import get_db
 from app.database.schema import Device as DBDevice, Employee as DBEmployee, Attendance as DBAttendance
-from app.services.sync_service import sync_service
+from app.services.sync_service import sync_service, _device_locks
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -875,6 +876,30 @@ async def sync_attendance_from_device(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
+    # ── Per-device lock — serialise syncs of the same device ──
+    # Prevents concurrent calls (e.g. user + scheduler) from racing on the
+    # ZKTeco session (older firmware crashes) AND from racing on the
+    # duplicate-detection set. If another sync is in progress, wait for it.
+    lock = _device_locks[device_id]
+    if not lock.acquire(blocking=False):
+        # In preview mode we don't want to wait — fail fast
+        if preview_only:
+            raise HTTPException(status_code=409, detail="A sync is already running for this device")
+        logger.info(f"sync-attendance: another sync in progress for {device_id} — waiting…")
+        await asyncio.to_thread(lock.acquire)
+    try:
+        return await _sync_attendance_locked(
+            device, device_id, days, preview_only, start_date, end_date, db
+        )
+    finally:
+        lock.release()
+
+
+async def _sync_attendance_locked(
+    device, device_id, days, preview_only, start_date, end_date, db
+):
+    import time as _time
+    from app.utils.timestamp_validator import validate_and_correct_timestamp
     ensure_device_in_postgres(db, device)
 
     FETCH_TIMEOUT = 300  # hard limit — K40 with 50k records takes ~150s
@@ -1093,27 +1118,48 @@ async def sync_attendance_from_device(
             "preview_data": preview_data[:200]
         }
 
-    # Bulk insert
+    # Bulk insert — atomic upsert so a concurrent sync (or the scheduler's
+    # auto-sync of the same device) can't crash this one with a UniqueViolation.
+    # The uq_attendance_device_uid_ts constraint absorbs any duplicate rows
+    # the in-memory existing_set didn't catch (e.g. ones added between the
+    # initial SELECT and this INSERT by another sync).
     t4 = _time.perf_counter()
     count_before = db.query(DBAttendance).filter(DBAttendance.device_id == device_id).count()
+    inserted_now = 0
     try:
         if new_records:
-            db.bulk_save_objects(new_records)
+            values = [{
+                'employee_id': r.employee_id,
+                'device_id':   r.device_id,
+                'uid':         r.uid,
+                'user_id_str': r.user_id_str,
+                'timestamp':   r.timestamp,
+                'punch':       r.punch,
+                'status':      r.status,
+            } for r in new_records]
+            stmt = pg_insert(DBAttendance).values(values).on_conflict_do_nothing(
+                constraint='uq_attendance_device_uid_ts'
+            )
+            result = db.execute(stmt)
+            inserted_now = result.rowcount or 0
+            # Any row in new_records that DIDN'T insert is a dup we missed in-memory
+            absorbed_dups = len(new_records) - inserted_now
+            if absorbed_dups > 0:
+                skipped += absorbed_dups
+                logger.info(
+                    f"ON CONFLICT absorbed {absorbed_dups} duplicate rows that "
+                    f"existing_set didn't catch (likely a concurrent sync)"
+                )
         db.commit()
     except Exception as e:
         db.rollback()
         logger.error(f"Bulk insert failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database insert failed: {e}")
 
-    # Verify records were actually persisted
     count_after = db.query(DBAttendance).filter(DBAttendance.device_id == device_id).count()
-    if new_records and count_after == count_before:
-        logger.error(
-            f"COMMIT VERIFICATION FAILED: expected {count_before + len(new_records)} "
-            f"rows but found {count_after}"
-        )
-    else:
-        logger.info(f"DB attendance for device: {count_before} → {count_after} (+{count_after - count_before})")
+    logger.info(
+        f"DB attendance for device: {count_before} → {count_after} (+{count_after - count_before})"
+    )
 
     insert_time = _time.perf_counter() - t4
     total_time = _time.perf_counter() - t0
