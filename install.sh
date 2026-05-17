@@ -328,6 +328,12 @@ To remove the browser cert warning permanently, run:
     cd $DEPLOY_DIR && ./extract-ca.sh
 …then install the resulting rtconnect-ca.crt on each client computer
 (double-click → Trusted Root Certification Authorities).
+
+To lock the VM down to a specific IP allowlist (SSH + 80 + 443), edit
+the ALLOWED_IPS array in $DEPLOY_DIR/secure-vm.sh then run:
+    cd $DEPLOY_DIR && sudo bash secure-vm.sh
+This sets up ufw + fail2ban + interface-aware DOCKER-USER iptables rules
+so npm/apt/docker traffic from inside containers is never blocked.
 ================================================================================
 EOF
 chmod 600 "$SUMMARY_FILE"

@@ -169,6 +169,36 @@ docker compose down -v        # removes volumes too
 
 ---
 
+## Locking the VM to specific IPs (optional)
+
+By default the stack listens on all interfaces and any host that can route
+to the VM can browse the app. To restrict access to a known IP allowlist
+(SSH + 80 + 443), edit and run **`secure-vm.sh`**:
+
+```bash
+nano secure-vm.sh            # set ALLOWED_IPS at the top
+sudo bash secure-vm.sh
+```
+
+What it installs and configures:
+
+| Layer | Purpose |
+|------|---------|
+| **UFW** | host firewall — SSH (22) only from your allowlist |
+| **DOCKER-USER iptables chain** | Caddy ports 80/443 only from your allowlist. Filter is bound to the *external* interface (`-i eth0` / `-i ens18`) so the rules **never block container-outbound traffic** (npm install, apt-get, docker pulls, ZKTeco device polls all continue to work) |
+| **fail2ban** | 5 failed SSH attempts in 10 min → 1 h ban (your allowlist is exempt) |
+| **iptables-persistent** | DOCKER-USER rules survive reboot |
+| **unattended-upgrades** | Ubuntu security patches install daily |
+
+The script:
+- refuses to run if not root
+- aborts before touching the firewall if your current SSH source IP isn't in the allowlist (no accidental lockout)
+- ssh hardening is conservative — root login and password auth stay on by default. The summary at the end walks you through the next-step hardening once you have an SSH key set up.
+
+If you ever need to undo it, the summary printed by `secure-vm.sh` includes the exact rollback commands.
+
+---
+
 ## Networking notes
 
 ### Reaching ZKTeco devices on the LAN
