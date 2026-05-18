@@ -60,6 +60,10 @@ _PDF_LABELS = {
         "late_status": "En retard",
         "early_status": "Départ anticipé",
         "absent_status": "Absent",
+        "absentees_title": "Employés sans pointage",
+        "absentees_subtitle": "Pour la période sélectionnée",
+        "absentees_count": "absent(s)",
+        "absentees_empty": "Tous les employés ont pointé pendant la période.",
         "mode_simple": "Mode Simple",
         "mode_strict": "Mode Strict",
         "swipes": "Pointages",
@@ -109,6 +113,10 @@ _PDF_LABELS = {
         "late_status": "Late",
         "early_status": "Early Dep.",
         "absent_status": "Absent",
+        "absentees_title": "Employees with no attendance",
+        "absentees_subtitle": "For the selected period",
+        "absentees_count": "absent",
+        "absentees_empty": "All employees punched during the period.",
         "mode_simple": "Simple Mode",
         "mode_strict": "Strict Mode",
         "swipes": "Swipes",
@@ -158,6 +166,10 @@ _PDF_LABELS = {
         "late_status": "متأخر",
         "early_status": "مغادرة مبكرة",
         "absent_status": "غائب",
+        "absentees_title": "موظفون بدون تسجيل حضور",
+        "absentees_subtitle": "خلال الفترة المحددة",
+        "absentees_count": "غائب(ون)",
+        "absentees_empty": "جميع الموظفين قاموا بتسجيل حضورهم خلال الفترة.",
         "mode_simple": "الوضع البسيط",
         "mode_strict": "الوضع الصارم",
         "swipes": "تسجيلات",
@@ -1007,6 +1019,76 @@ def export_attendance_pdf(
         data_rows = [_build_row(r, include_employee=True, include_date=True) for r in flat_rows]
         inc = [i for i, r in enumerate(flat_rows) if r.get("incomplete")]
         story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
+
+    # ── Absentees section (employees with no punches in the period) ─────
+    # Queries all employees matching the same device/employee filters as the
+    # main report and lists the ones whose ID isn't in employee_set (i.e. who
+    # produced no punches at all during the period). Doesn't render anything
+    # if the period had no records at all (the empty-state block above
+    # already covers that case).
+    try:
+        with get_db_session() as _absdb:
+            _absq = (_absdb.query(DBEmployee)
+                          .outerjoin(DBDepartment, DBEmployee.department_id == DBDepartment.id))
+            if device_id:
+                _absq = _absq.filter(DBEmployee.source_device_id == device_id)
+            if employee_id:
+                _absq = _absq.filter(DBEmployee.user_id == employee_id)
+            _all_emps = _absq.all()
+
+            # Identify absent employees — employee_set is keyed by user_id in
+            # shared mode and by employee.id otherwise (see the rows loop above).
+            if shared:
+                _absent_emps = [e for e in _all_emps if e.user_id not in employee_set]
+            else:
+                _absent_emps = [e for e in _all_emps if e.id not in employee_set]
+
+            # Snapshot only what we need so we can use it after the session closes
+            _absent_data = [{
+                "name":       e.name,
+                "user_id":    str(e.user_id or ""),
+                "department": (e.department.name if e.department else "—"),
+            } for e in _absent_emps]
+    except Exception as _e:
+        logger.warning(f"Could not compute absentees list: {_e}")
+        _absent_data = []
+
+    if flat_rows and _absent_data:
+        story.append(Spacer(1, 8 * mm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_COLOR, spaceAfter=3 * mm))
+        story.append(Paragraph(
+            f"<b>{L['absentees_title']}</b> &nbsp; "
+            f"<font size=9 color='#64748b'>({len(_absent_data)} {L['absentees_count']})</font>",
+            ParagraphStyle("AbsTitle", parent=title_style, fontSize=14, spaceAfter=2),
+        ))
+        story.append(Paragraph(L['absentees_subtitle'], subtitle_style))
+        story.append(Spacer(1, 2 * mm))
+
+        # Build the absentees table — name | ID | department
+        _abs_headers = [L["employee"], "ID", L["department"]]
+        _abs_rows = [[d["name"], d["user_id"], d["department"]] for d in _absent_data]
+        _abs_table = Table(
+            [_abs_headers] + _abs_rows,
+            colWidths=[80 * mm, 25 * mm, 65 * mm],
+            repeatRows=1,
+        )
+        _abs_table.setStyle(TableStyle([
+            ("BACKGROUND",  (0, 0), (-1, 0), BRAND_COLOR),
+            ("TEXTCOLOR",   (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",    (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",    (0, 0), (-1, 0), 9),
+            ("FONTSIZE",    (0, 1), (-1, -1), 9),
+            ("ALIGN",       (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ("TOPPADDING",    (0, 0), (-1, 0), 6),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+            ("TOPPADDING",    (0, 1), (-1, -1), 4),
+            # Zebra rows
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("LINEBELOW",      (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+        ]))
+        story.append(_abs_table)
 
     # ── Footer ─────────────────────────────────────────────────────────
     story.append(Spacer(1, 6 * mm))
