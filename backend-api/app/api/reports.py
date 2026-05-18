@@ -490,7 +490,7 @@ def export_attendance_pdf(
     from reportlab.lib import colors
     from reportlab.platypus import (
         SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
-        KeepTogether,
+        KeepTogether, PageBreak,
     )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -1043,52 +1043,66 @@ def export_attendance_pdf(
             else:
                 _absent_emps = [e for e in _all_emps if e.id not in employee_set]
 
-            # Snapshot only what we need so we can use it after the session closes
-            _absent_data = [{
-                "name":       e.name,
-                "user_id":    str(e.user_id or ""),
-                "department": (e.department.name if e.department else "—"),
-            } for e in _absent_emps]
+            # DEDUPE — in shared mode the same person can be registered on
+            # multiple devices (one Employee row per device), so we keep only
+            # ONE row per logical person. Sort by user_id (numeric if possible)
+            # so the list is stable and easy to scan.
+            _seen = set()
+            _dedup_data = []
+            for e in _absent_emps:
+                key = e.user_id if shared else e.id
+                if key in _seen:
+                    continue
+                _seen.add(key)
+                _dedup_data.append({
+                    "name":       e.name or "—",
+                    "user_id":    str(e.user_id or ""),
+                    "department": (e.department.name if e.department else "—"),
+                })
+
+            def _sort_key(d):
+                try:    return (0, int(d["user_id"]))
+                except: return (1, d["user_id"])
+            _absent_data = sorted(_dedup_data, key=_sort_key)
     except Exception as _e:
         logger.warning(f"Could not compute absentees list: {_e}")
         _absent_data = []
 
     if flat_rows and _absent_data:
-        story.append(Spacer(1, 8 * mm))
-        story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_COLOR, spaceAfter=3 * mm))
+        # Start the absentees on a new page so the main attendance table stays
+        # visually grouped and the absentees list gets its own dedicated section.
+        story.append(PageBreak())
         story.append(Paragraph(
-            f"<b>{L['absentees_title']}</b> &nbsp; "
-            f"<font size=9 color='#64748b'>({len(_absent_data)} {L['absentees_count']})</font>",
-            ParagraphStyle("AbsTitle", parent=title_style, fontSize=14, spaceAfter=2),
+            f"<b>{L['absentees_title']}</b>",
+            ParagraphStyle("AbsTitle", parent=title_style, fontSize=16, spaceAfter=2),
         ))
-        story.append(Paragraph(L['absentees_subtitle'], subtitle_style))
-        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph(
+            f"{L['absentees_subtitle']}  &nbsp; |  &nbsp; "
+            f"<b>{len(_absent_data)}</b> {L['absentees_count']}",
+            subtitle_style,
+        ))
+        story.append(Spacer(1, 3 * mm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_COLOR, spaceAfter=4 * mm))
 
-        # Build the absentees table — name | ID | department
-        _abs_headers = [L["employee"], "ID", L["department"]]
-        _abs_rows = [[d["name"], d["user_id"], d["department"]] for d in _absent_data]
-        _abs_table = Table(
-            [_abs_headers] + _abs_rows,
-            colWidths=[80 * mm, 25 * mm, 65 * mm],
-            repeatRows=1,
+        # Wrap each cell in a Paragraph so the table picks up the same styling
+        # as the main attendance table via _make_table.
+        _abs_cell_style = ParagraphStyle(
+            "AbsCell", parent=cell_style, fontSize=9, alignment=TA_LEFT
         )
-        _abs_table.setStyle(TableStyle([
-            ("BACKGROUND",  (0, 0), (-1, 0), BRAND_COLOR),
-            ("TEXTCOLOR",   (0, 0), (-1, 0), colors.white),
-            ("FONTNAME",    (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",    (0, 0), (-1, 0), 9),
-            ("FONTSIZE",    (0, 1), (-1, -1), 9),
-            ("ALIGN",       (0, 0), (-1, -1), "LEFT"),
-            ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-            ("TOPPADDING",    (0, 0), (-1, 0), 6),
-            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
-            ("TOPPADDING",    (0, 1), (-1, -1), 4),
-            # Zebra rows
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-            ("LINEBELOW",      (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
-        ]))
-        story.append(_abs_table)
+        _abs_headers = [L["employee"], "ID", L["department"]]
+        _abs_rows = [
+            [
+                Paragraph(d["name"], _abs_cell_style),
+                Paragraph(d["user_id"], _abs_cell_style),
+                Paragraph(d["department"], _abs_cell_style),
+            ]
+            for d in _absent_data
+        ]
+        # Mirror the column widths used by _make_table so the look matches
+        story.append(_make_table(
+            _abs_headers, _abs_rows,
+            col_widths=[80 * mm, 25 * mm, 65 * mm],
+        ))
 
     # ── Footer ─────────────────────────────────────────────────────────
     story.append(Spacer(1, 6 * mm))
@@ -1149,7 +1163,7 @@ def export_employees_pdf(
     from reportlab.lib import colors
     from reportlab.platypus import (
         SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
-        KeepTogether,
+        KeepTogether, PageBreak,
     )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
