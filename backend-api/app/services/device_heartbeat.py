@@ -95,6 +95,13 @@ def _tick():
                 d.last_seen_at = ts
         db.commit()
 
+    # After updating last_seen, evaluate alerts. Best-effort, never throws.
+    try:
+        from app.services.device_alerts import check_devices_and_alert
+        check_devices_and_alert()
+    except Exception as exc:
+        logger.warning(f"device alert check failed: {exc}")
+
 
 def start():
     global _thread

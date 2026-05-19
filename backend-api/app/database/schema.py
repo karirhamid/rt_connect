@@ -251,6 +251,9 @@ class EmailSettings(Base):
     use_ssl      = Column(Boolean, default=False, nullable=False)
     from_name    = Column(String(255), nullable=True)
     from_address = Column(String(255), nullable=True)
+    # Device health alert recipient (separate from report recipients) — reuses SMTP above
+    alerts_enabled         = Column(Boolean, default=False, nullable=False)
+    alerts_recipient_email = Column(String(255), nullable=True)
     updated_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                           onupdate=lambda: datetime.now(timezone.utc))
 

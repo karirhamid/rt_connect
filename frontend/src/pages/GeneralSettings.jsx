@@ -27,6 +27,7 @@ function GeneralSettings() {
     is_enabled: false, host: '', port: 587, username: '',
     password: '', use_tls: true, use_ssl: false,
     from_name: '', from_address: '',
+    alerts_enabled: false, alerts_recipient_email: '',
   });
   const [emailHasPassword, setEmailHasPassword] = useState(false);
   const [loadingEmail, setLoadingEmail] = useState(false);
@@ -1312,6 +1313,56 @@ function GeneralSettings() {
                         ))}
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* ── Device health alerts ── */}
+                <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 className="text-md font-semibold text-gray-900">{t('deviceAlerts') || 'Alertes appareils'}</h3>
+                      <p className="text-sm text-gray-600 mt-0.5">
+                        {t('deviceAlertsDesc') || 'Email envoyé quand un appareil reste hors ligne plus de 30 minutes. Utilise la configuration SMTP ci-dessus.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEmailCfg(c => ({ ...c, alerts_enabled: !c.alerts_enabled }))}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${emailCfg.alerts_enabled ? 'bg-primary-600' : 'bg-gray-300'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${emailCfg.alerts_enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      {t('alertsRecipient') || "Email destinataire des alertes"}
+                    </label>
+                    <input
+                      type="email"
+                      value={emailCfg.alerts_recipient_email || ''}
+                      onChange={e => setEmailCfg(c => ({ ...c, alerts_recipient_email: e.target.value }))}
+                      disabled={!emailCfg.alerts_enabled}
+                      placeholder="alerts@example.com"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none disabled:bg-gray-100 disabled:text-gray-400"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      {t('alertsRecipientHint') || "Distinct des destinataires des rapports planifiés."}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const res = await api.post('/api/email-settings/test-alert');
+                          showNotification('success', res.data?.detail || 'Test alert envoyé');
+                        } catch (e) {
+                          showNotification('error', e?.response?.data?.detail || e.message);
+                        }
+                      }}
+                      disabled={!emailCfg.alerts_enabled || !emailCfg.alerts_recipient_email}
+                      className="mt-2 text-sm px-3 py-1.5 border border-primary-300 text-primary-700 rounded hover:bg-primary-50 disabled:opacity-50"
+                    >
+                      {t('sendTestAlert') || "Envoyer une alerte de test"}
+                    </button>
                   </div>
                 </div>
 

@@ -22,6 +22,8 @@ class EmailSettingsIn(BaseModel):
     use_ssl:      bool = False
     from_name:    Optional[str] = None
     from_address: Optional[str] = None
+    alerts_enabled:         bool = False
+    alerts_recipient_email: Optional[str] = None
 
 
 class EmailSettingsOut(BaseModel):
@@ -34,6 +36,8 @@ class EmailSettingsOut(BaseModel):
     use_ssl:      bool
     from_name:    Optional[str]
     from_address: Optional[str]
+    alerts_enabled:         bool = False
+    alerts_recipient_email: Optional[str] = None
 
 
 class TestEmailIn(BaseModel):
@@ -65,6 +69,8 @@ def get_email_settings():
             use_ssl=row.use_ssl,
             from_name=row.from_name,
             from_address=row.from_address,
+            alerts_enabled=bool(getattr(row, 'alerts_enabled', False)),
+            alerts_recipient_email=getattr(row, 'alerts_recipient_email', None),
         )
 
 
@@ -83,6 +89,8 @@ def update_email_settings(payload: EmailSettingsIn):
         row.use_ssl      = payload.use_ssl
         row.from_name    = payload.from_name
         row.from_address = payload.from_address
+        row.alerts_enabled         = bool(payload.alerts_enabled)
+        row.alerts_recipient_email = (payload.alerts_recipient_email or None)
         db.commit()
         db.refresh(row)
         return EmailSettingsOut(
@@ -95,7 +103,42 @@ def update_email_settings(payload: EmailSettingsIn):
             use_ssl=row.use_ssl,
             from_name=row.from_name,
             from_address=row.from_address,
+            alerts_enabled=bool(getattr(row, 'alerts_enabled', False)),
+            alerts_recipient_email=getattr(row, 'alerts_recipient_email', None),
         )
+
+
+@router.post('/email-settings/test-alert',
+             dependencies=[Depends(require_permission('roles.manage'))])
+def test_alert():
+    """Send a sample device-offline alert to the configured alerts recipient."""
+    with get_db_session() as db:
+        row = _get_or_create(db)
+        recipient = getattr(row, 'alerts_recipient_email', None)
+        if not recipient:
+            raise HTTPException(400, "alerts_recipient_email not set")
+        if not row.host or not row.from_address:
+            raise HTTPException(400, "SMTP not configured")
+        cfg = dict(host=row.host, port=row.port, username=row.username,
+                   password=row.password, use_tls=row.use_tls, use_ssl=row.use_ssl,
+                   from_name=row.from_name, from_address=row.from_address)
+
+    class _Cfg: pass
+    c = _Cfg()
+    for k, v in cfg.items():
+        setattr(c, k, v)
+    try:
+        _send_email(smtp_cfg=c, to_list=[recipient],
+                    subject="[RTPointage] Test d'alerte appareil",
+                    html_body=(
+                        '<div style="font-family:Arial,sans-serif;max-width:520px;padding:20px">'
+                        '<h2 style="color:#b91c1c;margin:0 0 12px">⚠ Test — Appareil hors ligne</h2>'
+                        '<p>Ceci est un test du système d\'alertes appareils. '
+                        'Vous recevrez ce type de message si un appareil reste injoignable.</p>'
+                        '</div>'))
+        return {"ok": True, "detail": f"Test alert sent to {recipient}"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 @router.post('/email-settings/test',

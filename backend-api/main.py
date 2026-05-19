@@ -91,6 +91,21 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "CREATE INDEX IF NOT EXISTS ix_attendance_voided ON attendance(voided_by_correction_id)"
             ))
+            # Phase D — device health alert recipient
+            conn.execute(sa_text(
+                "ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS alerts_enabled BOOLEAN DEFAULT FALSE NOT NULL"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS alerts_recipient_email VARCHAR(255)"
+            ))
+            # Add suppression timestamps so we don't spam (one alert per device per hour)
+            conn.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS device_alert_state (
+                    device_id   VARCHAR PRIMARY KEY,
+                    last_offline_alert TIMESTAMP,
+                    last_state         VARCHAR(16)
+                )
+            """))
             # Phase B — anomalies inbox (table created by metadata.create_all,
             # but ensure unique constraint is in place even on existing schemas)
             conn.execute(sa_text("""

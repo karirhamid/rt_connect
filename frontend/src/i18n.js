@@ -553,6 +553,13 @@ const resources = {
       departmentName: "Nom du Département",
       positionName: "Nom du Poste",
       
+      // Device alerts
+      deviceAlerts: "Alertes appareils",
+      deviceAlertsDesc: "Email envoyé quand un appareil reste hors ligne plus de 30 minutes. Utilise la configuration SMTP ci-dessus.",
+      alertsRecipient: "Email destinataire des alertes",
+      alertsRecipientHint: "Distinct des destinataires des rapports planifiés.",
+      sendTestAlert: "Envoyer une alerte de test",
+
       // Corrections
       addManualPunch: "Pointage manuel",
       editPunch: "Modifier le pointage",
@@ -1679,6 +1686,13 @@ const resources = {
       noRolesFound: "No roles found",
       confirmDeleteRole: "Are you sure you want to delete this role?",
 
+      // Device alerts
+      deviceAlerts: "Device alerts",
+      deviceAlertsDesc: "Email sent when a device stays offline for more than 30 minutes. Uses the SMTP configuration above.",
+      alertsRecipient: "Alerts recipient email",
+      alertsRecipientHint: "Distinct from scheduled-report recipients.",
+      sendTestAlert: "Send test alert",
+
       // Corrections
       addManualPunch: "Manual punch",
       editPunch: "Edit punch",
@@ -2743,6 +2757,13 @@ const resources = {
       noPermissionsAvailable: "لا توجد صلاحيات متاحة",
       noRolesFound: "لم يتم العثور على أدوار",
       confirmDeleteRole: "هل أنت متأكد من حذف هذا الدور؟",
+
+      // Device alerts
+      deviceAlerts: "تنبيهات الأجهزة",
+      deviceAlertsDesc: "يتم إرسال بريد إلكتروني عندما يبقى الجهاز غير متصل لأكثر من 30 دقيقة. يستخدم إعدادات SMTP أعلاه.",
+      alertsRecipient: "البريد المستلم للتنبيهات",
+      alertsRecipientHint: "مختلف عن مستلمي التقارير المجدولة.",
+      sendTestAlert: "إرسال تنبيه تجريبي",
 
       // Corrections
       addManualPunch: "بصمة يدوية",
