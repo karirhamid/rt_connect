@@ -309,6 +309,7 @@ def resolve_daily_record(
             DBAttendance.employee_id == employee_id,
             DBAttendance.timestamp >= datetime.combine(punch_date, time.min),
             DBAttendance.timestamp <= datetime.combine(punch_date, time.max),
+            DBAttendance.voided_by_correction_id.is_(None),
         )
     ).count()
 
@@ -469,6 +470,7 @@ def get_employee_day_summary(
             DBAttendance.employee_id.in_(all_pks),
             DBAttendance.timestamp >= day_start,
             DBAttendance.timestamp <= day_end,
+            DBAttendance.voided_by_correction_id.is_(None),
         )
     ).order_by(DBAttendance.timestamp.asc()).all()
 

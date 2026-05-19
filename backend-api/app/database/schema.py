@@ -173,6 +173,10 @@ class Attendance(Base):
     synced_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     # Provenance: device | manual | imported | corrected
     source = Column(String(16), nullable=False, server_default="device", default="device", index=True)
+    # When set, this device row was voided by an HR correction (replacement
+    # row points back via AttendanceCorrection.original_attendance_id).
+    # Reports must filter out voided rows.
+    voided_by_correction_id = Column(BigInteger, ForeignKey('attendance_corrections.id', ondelete='SET NULL'), nullable=True, index=True)
 
     # Relationships
     device = relationship("Device", back_populates="attendance")
@@ -360,6 +364,27 @@ class Permission(Base):
     description = Column(Text, nullable=True)
 
     roles = relationship('Role', secondary=role_permissions, back_populates='permissions')
+
+
+class AttendanceCorrection(Base):
+    """HR-issued correction that shadows a device punch (or adds a new one).
+
+    `original_attendance_id` — non-null when editing/deleting an existing punch.
+    `op` — 'add' | 'edit' | 'delete'
+    `new_timestamp` / `new_punch_type` — payload for add/edit ops
+    Original `attendance` row is NEVER mutated; reports overlay corrections.
+    """
+    __tablename__ = 'attendance_corrections'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    employee_id = Column(Integer, ForeignKey('employees.id'), nullable=False, index=True)
+    op = Column(String(10), nullable=False)  # add | edit | delete
+    original_attendance_id = Column(Integer, ForeignKey('attendance.id'), nullable=True, index=True)
+    new_timestamp = Column(DateTime, nullable=True, index=True)
+    new_punch_type = Column(Integer, nullable=True)  # 0=in, 1=out
+    reason = Column(Text, nullable=False)
 
 
 class Anomaly(Base):

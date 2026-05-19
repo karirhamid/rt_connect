@@ -243,7 +243,7 @@ def parse_dates(single_date: Optional[str], start_date: Optional[str], end_date:
 
 def _base_filters(start_dt, end_dt, employee_name, employee_id, device_id):
     """Build common filter list used by all report endpoints."""
-    filters = []
+    filters = [DBAttendance.voided_by_correction_id.is_(None)]  # hide voided rows
     if start_dt:
         filters.append(DBAttendance.timestamp >= start_dt)
     if end_dt:

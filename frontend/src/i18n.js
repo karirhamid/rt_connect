@@ -553,6 +553,20 @@ const resources = {
       departmentName: "Nom du Département",
       positionName: "Nom du Poste",
       
+      // Corrections
+      addManualPunch: "Pointage manuel",
+      editPunch: "Modifier le pointage",
+      deletePunch: "Supprimer le pointage",
+      reason: "Motif",
+      reasonRequired: "Motif requis (3 caractères min.)",
+      reasonPlaceholder: "ex. Oubli de pointage, vérifié par téléphone.",
+      timestamp: "Horodatage",
+      timestampRequired: "Horodatage requis",
+      punchType: "Type",
+      selectEmployee: "Sélectionner un employé",
+      noEmployeeSelected: "Aucun employé sélectionné",
+      correctionAuditNote: "Cette action sera enregistrée dans le journal d'audit.",
+
       // Anomaly inbox
       anomalyInbox: "Anomalies",
       anomalyInboxDesc: "Pointages signalés par les contrôles d'intégrité — à examiner.",
@@ -1665,6 +1679,20 @@ const resources = {
       noRolesFound: "No roles found",
       confirmDeleteRole: "Are you sure you want to delete this role?",
 
+      // Corrections
+      addManualPunch: "Manual punch",
+      editPunch: "Edit punch",
+      deletePunch: "Delete punch",
+      reason: "Reason",
+      reasonRequired: "Reason required (min 3 characters).",
+      reasonPlaceholder: "e.g. Forgot to punch, verified by phone.",
+      timestamp: "Timestamp",
+      timestampRequired: "Timestamp required",
+      punchType: "Type",
+      selectEmployee: "Select an employee",
+      noEmployeeSelected: "No employee selected",
+      correctionAuditNote: "This action will be recorded in the audit log.",
+
       // Anomaly inbox
       anomalyInbox: "Anomalies",
       anomalyInboxDesc: "Punches flagged by integrity checks — review and act.",
@@ -2715,6 +2743,20 @@ const resources = {
       noPermissionsAvailable: "لا توجد صلاحيات متاحة",
       noRolesFound: "لم يتم العثور على أدوار",
       confirmDeleteRole: "هل أنت متأكد من حذف هذا الدور؟",
+
+      // Corrections
+      addManualPunch: "بصمة يدوية",
+      editPunch: "تعديل البصمة",
+      deletePunch: "حذف البصمة",
+      reason: "السبب",
+      reasonRequired: "السبب مطلوب (3 أحرف على الأقل).",
+      reasonPlaceholder: "مثال: نسيان البصمة، تم التحقق هاتفياً.",
+      timestamp: "الطابع الزمني",
+      timestampRequired: "الطابع الزمني مطلوب",
+      punchType: "النوع",
+      selectEmployee: "اختر موظفاً",
+      noEmployeeSelected: "لم يتم اختيار موظف",
+      correctionAuditNote: "سيتم تسجيل هذا الإجراء في سجل التدقيق.",
 
       // Anomaly inbox
       anomalyInbox: "الشذوذات",

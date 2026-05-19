@@ -20,6 +20,7 @@ from app.api.email_settings import router as email_settings_router
 from app.api.report_schedules import router as report_schedules_router
 from app.api.audit import router as audit_router
 from app.api.anomalies import router as anomalies_router
+from app.api.corrections import router as corrections_router
 from app.database import init_db
 from app.database.connection import get_db_session
 from app.database.schema import AppSettings
@@ -82,6 +83,13 @@ async def lifespan(app: FastAPI):
             ))
             conn.execute(sa_text(
                 "CREATE INDEX IF NOT EXISTS ix_attendance_source ON attendance(source)"
+            ))
+            # Phase C — corrections
+            conn.execute(sa_text(
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS voided_by_correction_id BIGINT"
+            ))
+            conn.execute(sa_text(
+                "CREATE INDEX IF NOT EXISTS ix_attendance_voided ON attendance(voided_by_correction_id)"
             ))
             # Phase B — anomalies inbox (table created by metadata.create_all,
             # but ensure unique constraint is in place even on existing schemas)
@@ -426,6 +434,7 @@ app.include_router(email_settings_router, prefix="/api", tags=["Email Settings"]
 app.include_router(report_schedules_router, prefix="/api", tags=["Report Schedules"])
 app.include_router(audit_router, prefix="/api", tags=["Audit"])
 app.include_router(anomalies_router, prefix="/api", tags=["Anomalies"])
+app.include_router(corrections_router, prefix="/api", tags=["Corrections"])
 
 
 @app.get("/")

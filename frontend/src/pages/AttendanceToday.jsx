@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, Users, TrendingUp, AlertCircle, CheckCircle, Loader2, RefreshCw, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Calendar, Clock, Users, TrendingUp, AlertCircle, CheckCircle, Loader2, RefreshCw, ToggleLeft, ToggleRight, Edit2, Trash2, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 import SyncOverlay from '../components/SyncOverlay';
+import CorrectionModal from '../components/CorrectionModal';
 
 const PUNCH_CATEGORY_STYLES = {
   entry:         { bg: 'bg-green-100', text: 'text-green-800', key: 'punchEntry' },
@@ -33,6 +34,7 @@ function AttendanceToday() {
   const [classifiedRecords, setClassifiedRecords] = useState([]);
   const [attendanceMode, setAttendanceMode] = useState('simple');
   const [employeeMode, setEmployeeMode] = useState('shared');
+  const [correction, setCorrection] = useState(null);  // { mode, employee, originalAttendanceId, defaultTimestamp, defaultPunchType }
   const [daySummaries, setDaySummaries] = useState({});
 
   useEffect(() => {
@@ -292,6 +294,14 @@ function AttendanceToday() {
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? t('syncing') : t('syncNow')}
           </button>
+          <button
+            onClick={() => setCorrection({ mode: 'add', employee: null, originalAttendanceId: null, defaultTimestamp: new Date().toISOString(), defaultPunchType: 0 })}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            title={t('addManualPunch') || 'Pointage manuel'}
+          >
+            <Plus className="w-4 h-4" />
+            {t('addManualPunch') || 'Manuel'}
+          </button>
         </div>
       </div>
 
@@ -428,6 +438,7 @@ function AttendanceToday() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{classifiedView ? (t('punchCategory') || 'Category') : t('type')}</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('status')}</th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('actions') || 'Actions'}</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -482,6 +493,32 @@ function AttendanceToday() {
                               )
                             )}
                           </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <div className="inline-flex gap-1">
+                              <button
+                                onClick={() => setCorrection({
+                                  mode: 'edit',
+                                  employee: { id: record.employee_id, name: record.employee_name },
+                                  originalAttendanceId: record.id,
+                                  defaultTimestamp: record.timestamp,
+                                  defaultPunchType: record.punch ?? 0,
+                                })}
+                                className="p-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
+                                title={t('editPunch') || 'Modifier'}
+                              ><Edit2 className="w-4 h-4" /></button>
+                              <button
+                                onClick={() => setCorrection({
+                                  mode: 'delete',
+                                  employee: { id: record.employee_id, name: record.employee_name },
+                                  originalAttendanceId: record.id,
+                                  defaultTimestamp: record.timestamp,
+                                  defaultPunchType: record.punch ?? 0,
+                                })}
+                                className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
+                                title={t('deletePunch') || 'Supprimer'}
+                              ><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          </td>
                         </tr>
                         );
                       })}
@@ -492,6 +529,17 @@ function AttendanceToday() {
             );
           })}
         </div>
+      )}
+      {correction && (
+        <CorrectionModal
+          mode={correction.mode}
+          employee={correction.employee}
+          originalAttendanceId={correction.originalAttendanceId}
+          defaultTimestamp={correction.defaultTimestamp}
+          defaultPunchType={correction.defaultPunchType}
+          onClose={() => setCorrection(null)}
+          onSaved={() => { setCorrection(null); fetchTodayAttendance(); }}
+        />
       )}
     </div>
   );
