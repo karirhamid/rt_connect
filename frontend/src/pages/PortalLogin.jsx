@@ -68,9 +68,6 @@ export default function PortalLogin() {
           </button>
         </form>
 
-        <div className="mt-5 text-center">
-          <a href="/login" className="text-xs text-gray-500 hover:text-primary-600">{t('adminLogin') || 'Accès administrateur'} →</a>
-        </div>
       </div>
     </div>
   );
