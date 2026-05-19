@@ -1084,25 +1084,57 @@ def export_attendance_pdf(
         story.append(Spacer(1, 3 * mm))
         story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_COLOR, spaceAfter=4 * mm))
 
-        # Wrap each cell in a Paragraph so the table picks up the same styling
-        # as the main attendance table via _make_table.
-        _abs_cell_style = ParagraphStyle(
-            "AbsCell", parent=cell_style, fontSize=9, alignment=TA_LEFT
+        # Build the absentees table with the SAME columns as the main table,
+        # so headers/widths/colours/font sizes all match exactly. For each
+        # absentee, entry/exit/total/overtime/device cells render as a grey
+        # em-dash (— via _time_cell("-") / _fmt_min(0) / etc).
+        _abs_headers, _abs_widths = _build_headers(
+            include_employee=True, include_date=True, include_department=True
         )
-        _abs_headers = [L["employee"], "ID", L["department"]]
-        _abs_rows = [
-            [
-                Paragraph(d["name"], _abs_cell_style),
-                Paragraph(d["user_id"], _abs_cell_style),
-                Paragraph(d["department"], _abs_cell_style),
-            ]
-            for d in _absent_data
-        ]
-        # Mirror the column widths used by _make_table so the look matches
-        story.append(_make_table(
-            _abs_headers, _abs_rows,
-            col_widths=[80 * mm, 25 * mm, 65 * mm],
-        ))
+
+        # Date column value: the single date if the report is for one day,
+        # otherwise the period range.
+        if date:
+            _abs_date_label = date
+        elif start_date and end_date and start_date != end_date:
+            _abs_date_label = f"{start_date} → {end_date}"
+        elif start_date or end_date:
+            _abs_date_label = start_date or end_date
+        else:
+            _abs_date_label = "—"
+
+        _abs_rows = []
+        for d in _absent_data:
+            row_cells = _build_row(
+                {
+                    "emp_id":                  d["user_id"],
+                    "employee":                d["name"],
+                    "department":              d["department"],
+                    "date":                    _abs_date_label,
+                    "entry":                   "-",   # _time_cell renders as grey —
+                    "exit":                    "-",
+                    "incomplete":              False,
+                    "swipes":                  0,
+                    "device_names":            "-",   # also rendered as a dash
+                    "total_minutes":           0,
+                    "overtime_minutes":        0,
+                    "late_minutes":            0,
+                    "early_departure_minutes": 0,
+                },
+                include_employee=True,
+                include_date=True,
+                include_department=True,
+            )
+            # In strict mode, _build_row's status column would say "À l'heure"
+            # ("On Time") which is wrong for absentees — override it to "Absent".
+            if attendance_mode == "strict" and len(row_cells) >= 2:
+                row_cells[-2] = Paragraph(
+                    f'<font color="#9ca3af"><i>{L["absent_status"]}</i></font>',
+                    cell_center,
+                )
+            _abs_rows.append(row_cells)
+
+        story.append(_make_table(_abs_headers, _abs_rows, col_widths=_abs_widths))
 
     # ── Footer ─────────────────────────────────────────────────────────
     story.append(Spacer(1, 6 * mm))
