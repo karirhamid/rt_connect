@@ -553,6 +553,21 @@ const resources = {
       departmentName: "Nom du Département",
       positionName: "Nom du Poste",
       
+      // Payroll export
+      payrollExport: "Export Paie",
+      payrollExportDesc: "Exports prêts pour l'intégration paie. Les corrections HR sont incluses, les pointages annulés sont exclus.",
+      exportCSV: "CSV générique",
+      exportCSVDesc: "Une ligne par employé par jour. UTF-8 + BOM (ouvre directement dans Excel).",
+      exportXLSX: "Excel (XLSX) avec totaux",
+      exportXLSXDesc: "Classeur formaté avec en-tête couleur et ligne de totaux.",
+      exportSage: "Sage Paie Maroc",
+      exportSageDesc: "Format MATRICULE;RUBRIQUE;QUANTITE;DATE_DEBUT;DATE_FIN. HEUR, HSUP, RTRD.",
+      monthlyPDF: "Récapitulatif PDF mensuel",
+      monthlyPDFDesc: "Un PDF par mois avec une ligne par employé : jours, heures, sup., retards, départs anticipés.",
+      year: "Année",
+      month: "Mois",
+      download: "Télécharger",
+
       // Device alerts
       deviceAlerts: "Alertes appareils",
       deviceAlertsDesc: "Email envoyé quand un appareil reste hors ligne plus de 30 minutes. Utilise la configuration SMTP ci-dessus.",
@@ -1686,6 +1701,21 @@ const resources = {
       noRolesFound: "No roles found",
       confirmDeleteRole: "Are you sure you want to delete this role?",
 
+      // Payroll export
+      payrollExport: "Payroll export",
+      payrollExportDesc: "Export-ready files for payroll. Includes HR corrections, excludes voided punches.",
+      exportCSV: "Generic CSV",
+      exportCSVDesc: "One row per employee per day. UTF-8 + BOM (opens cleanly in Excel).",
+      exportXLSX: "Excel (XLSX) with totals",
+      exportXLSXDesc: "Formatted workbook with colored header and totals row.",
+      exportSage: "Sage Paie Maroc",
+      exportSageDesc: "MATRICULE;RUBRIQUE;QUANTITE;DATE_DEBUT;DATE_FIN. HEUR, HSUP, RTRD.",
+      monthlyPDF: "Monthly PDF summary",
+      monthlyPDFDesc: "One PDF per month with one row per employee: days, hours, overtime, lateness.",
+      year: "Year",
+      month: "Month",
+      download: "Download",
+
       // Device alerts
       deviceAlerts: "Device alerts",
       deviceAlertsDesc: "Email sent when a device stays offline for more than 30 minutes. Uses the SMTP configuration above.",
@@ -2757,6 +2787,21 @@ const resources = {
       noPermissionsAvailable: "لا توجد صلاحيات متاحة",
       noRolesFound: "لم يتم العثور على أدوار",
       confirmDeleteRole: "هل أنت متأكد من حذف هذا الدور؟",
+
+      // Payroll export
+      payrollExport: "تصدير الرواتب",
+      payrollExportDesc: "ملفات جاهزة للتكامل مع نظام الرواتب. تشمل التصحيحات وتستثني البصمات الملغاة.",
+      exportCSV: "CSV عام",
+      exportCSVDesc: "سطر لكل موظف لكل يوم. UTF-8 مع BOM.",
+      exportXLSX: "Excel (XLSX) مع المجاميع",
+      exportXLSXDesc: "ملف منسق مع رأس ملون وسطر مجاميع.",
+      exportSage: "Sage Paie المغرب",
+      exportSageDesc: "MATRICULE;RUBRIQUE;QUANTITE;DATE_DEBUT;DATE_FIN.",
+      monthlyPDF: "ملخص شهري PDF",
+      monthlyPDFDesc: "PDF شهري مع سطر لكل موظف: أيام، ساعات، إضافي، تأخير.",
+      year: "السنة",
+      month: "الشهر",
+      download: "تحميل",
 
       // Device alerts
       deviceAlerts: "تنبيهات الأجهزة",

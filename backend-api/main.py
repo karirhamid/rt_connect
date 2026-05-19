@@ -21,6 +21,7 @@ from app.api.report_schedules import router as report_schedules_router
 from app.api.audit import router as audit_router
 from app.api.anomalies import router as anomalies_router
 from app.api.corrections import router as corrections_router
+from app.api.payroll_export import router as payroll_export_router
 from app.database import init_db
 from app.database.connection import get_db_session
 from app.database.schema import AppSettings
@@ -450,6 +451,7 @@ app.include_router(report_schedules_router, prefix="/api", tags=["Report Schedul
 app.include_router(audit_router, prefix="/api", tags=["Audit"])
 app.include_router(anomalies_router, prefix="/api", tags=["Anomalies"])
 app.include_router(corrections_router, prefix="/api", tags=["Corrections"])
+app.include_router(payroll_export_router, prefix="/api", tags=["Payroll Export"])
 
 
 @app.get("/")

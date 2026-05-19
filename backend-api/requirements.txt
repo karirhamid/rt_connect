@@ -19,3 +19,6 @@ requests==2.31.0
 
 # External backup storage — SMB / network shares (Windows, Samba on Linux)
 smbprotocol==1.13.0
+
+# Payroll exports (XLSX)
+openpyxl==3.1.2
