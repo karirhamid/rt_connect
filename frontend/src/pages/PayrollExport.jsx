@@ -60,10 +60,7 @@ export default function PayrollExport() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <Download className="w-6 h-6 text-primary-600" />
-          {t('payrollExport') || 'Export Paie'}
-        </h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('payrollExport') || 'Export Paie'}</h1>
         <p className="text-sm text-gray-500 mt-1">
           {t('payrollExportDesc') || "Exports prêts pour l'intégration paie. Les corrections HR sont incluses, les pointages annulés sont exclus."}
         </p>
@@ -103,10 +100,7 @@ export default function PayrollExport() {
       </div>
 
       <div className="bg-white border rounded-lg p-4 mt-6">
-        <h3 className="font-semibold mb-3 flex items-center gap-2">
-          <Calendar className="w-5 h-5 text-primary-600" />
-          {t('monthlyPDF') || 'Récapitulatif PDF mensuel'}
-        </h3>
+        <h3 className="font-semibold mb-3">{t('monthlyPDF') || 'Récapitulatif PDF mensuel'}</h3>
         <p className="text-sm text-gray-600 mb-3">
           {t('monthlyPDFDesc') || "Un PDF par mois avec une ligne par employé : jours travaillés, total heures, sup., retards, départs anticipés."}
         </p>

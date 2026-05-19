@@ -1,4 +1,9 @@
-"""Employee self-service portal — matricule + PIN login, read-only views."""
+"""Employee self-service portal — matricule + password login, read-only views.
+
+Initial password = employee first name (case-insensitive).
+On first login, employee MUST change the password. After that, only the
+bcrypt-hashed password is valid.
+"""
 from __future__ import annotations
 import re
 from datetime import datetime, date, timedelta, time, timezone
@@ -12,75 +17,112 @@ from app.database.connection import get_db_session
 from app.database.schema import Employee, Attendance, Department, AppSettings
 from app.core.security import (
     verify_password, get_password_hash,
-    create_access_token, decode_token, get_current_user, user_has_permission
+    decode_token, get_current_user, user_has_permission,
+    SECRET_KEY, ALGORITHM,
 )
+from jose import jwt
 from app.services.punch_classifier import get_employee_day_summary
 
 router = APIRouter()
 
 
-# ─── Admin: set / reset an employee PIN ────────────────────────────────────
-class SetPinBody(BaseModel):
-    pin: str = Field(..., min_length=4, max_length=6, pattern=r"^\d{4,6}$")
+def _first_name(full_name: str) -> str:
+    """Return the first word of the full name, normalized for compare."""
+    if not full_name:
+        return ""
+    return full_name.strip().split()[0]
 
 
-@router.put("/employees/{employee_id}/portal-pin")
-def set_pin(employee_id: int, body: SetPinBody, current=Depends(get_current_user)):
+# ─── Admin: reset an employee's portal password ───────────────────────────
+@router.post("/employees/{employee_id}/portal-reset")
+def reset_portal_password(employee_id: int, current=Depends(get_current_user)):
+    """Force the employee back to the 'first-name + must-change' state."""
     if not (user_has_permission(current, "users.write") or user_has_permission(current, "roles.manage")):
         raise HTTPException(403, "Not authorized")
     with get_db_session() as db:
         emp = db.query(Employee).filter(Employee.id == employee_id).first()
         if not emp:
             raise HTTPException(404, "employee not found")
-        emp.portal_pin_hash = get_password_hash(body.pin)
+        # Reset every Employee row that shares this matricule (shared mode = multiple rows).
+        rows = db.query(Employee).filter(Employee.user_id == emp.user_id).all()
+        for e in rows:
+            e.portal_pin_hash = None
+            e.portal_must_change_password = True
         db.commit()
-        return {"ok": True, "employee_id": employee_id}
-
-
-@router.delete("/employees/{employee_id}/portal-pin")
-def clear_pin(employee_id: int, current=Depends(get_current_user)):
-    if not (user_has_permission(current, "users.write") or user_has_permission(current, "roles.manage")):
-        raise HTTPException(403, "Not authorized")
-    with get_db_session() as db:
-        emp = db.query(Employee).filter(Employee.id == employee_id).first()
-        if not emp:
-            raise HTTPException(404, "employee not found")
-        emp.portal_pin_hash = None
-        db.commit()
-        return {"ok": True}
+        return {"ok": True, "employee_id": employee_id, "initial_password_hint": _first_name(emp.name)}
 
 
 # ─── Portal login ─────────────────────────────────────────────────────────
 class PortalLoginBody(BaseModel):
     matricule: str
-    pin: str
+    password: str = Field(..., alias="password")
+
+    class Config:
+        populate_by_name = True
 
 
 @router.post("/portal/login")
-def portal_login(body: PortalLoginBody):
-    """Login with matricule (Employee.user_id) + PIN. Returns short-lived JWT."""
-    if not re.fullmatch(r"\d{4,6}", body.pin):
+def portal_login(body: dict):
+    """Login with matricule (Employee.user_id) + password.
+
+    Accepts JSON keys `password` OR legacy `pin`.
+    Initial password = first name (case-insensitive) when portal_pin_hash is null.
+    """
+    matricule = (body.get("matricule") or "").strip()
+    password = (body.get("password") or body.get("pin") or "").strip()
+    if not matricule or not password:
         raise HTTPException(401, "Invalid credentials")
+
     with get_db_session() as db:
-        # In shared mode there can be multiple Employee rows per user_id
-        # (one per device). Any of them with a PIN that matches is fine.
-        cands = db.query(Employee).filter(Employee.user_id == body.matricule).all()
-        matched = next((e for e in cands if e.portal_pin_hash and verify_password(body.pin, e.portal_pin_hash)), None)
+        cands = db.query(Employee).filter(Employee.user_id == matricule).all()
+        if not cands:
+            raise HTTPException(401, "Invalid credentials")
+
+        matched = None
+        is_initial = False
+        for e in cands:
+            if e.portal_pin_hash:
+                if verify_password(password, e.portal_pin_hash):
+                    matched = e
+                    break
+            else:
+                # No password set yet — accept first name (case-insensitive)
+                fn = _first_name(e.name)
+                if fn and password.lower() == fn.lower():
+                    matched = e
+                    is_initial = True
+                    break
+
         if not matched:
             raise HTTPException(401, "Invalid credentials")
-        token = create_access_token(
-            data={"sub": f"emp:{matched.id}", "type": "portal", "matricule": matched.user_id},
-            expires_delta=timedelta(hours=12),
+
+        must_change = bool(getattr(matched, 'portal_must_change_password', True)) or is_initial
+
+        token = jwt.encode(
+            {
+                "sub": f"emp:{matched.id}",
+                "type": "portal",
+                "matricule": matched.user_id,
+                "exp": datetime.utcnow() + timedelta(hours=12),
+            },
+            SECRET_KEY, algorithm=ALGORITHM,
         )
         return {
             "access_token": token,
             "token_type": "bearer",
+            "must_change_password": must_change,
             "employee": {
                 "id": matched.id,
                 "matricule": matched.user_id,
                 "name": matched.name,
             },
         }
+
+
+# ─── Change password (portal token) ───────────────────────────────────────
+class ChangePasswordBody(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=6, max_length=64)
 
 
 # ─── Portal endpoints (token in Authorization header) ─────────────────────
@@ -106,6 +148,38 @@ def _require_portal(authorization: Optional[str] = Header(None)) -> Employee:
             "id": e.id, "name": e.name, "matricule": e.user_id,
             "department_id": e.department_id, "user_id": e.user_id,
         }
+
+
+@router.post("/portal/change-password")
+def portal_change_password(body: ChangePasswordBody, me=Depends(_require_portal)):
+    if body.new_password == body.current_password:
+        raise HTTPException(400, "Le nouveau mot de passe doit être différent du mot de passe actuel")
+    with get_db_session() as db:
+        # Shared employee mode: there can be several rows with the same matricule
+        # (one per device). Update all of them so the old password stops working.
+        rows = db.query(Employee).filter(Employee.user_id == me["matricule"]).all()
+        if not rows:
+            raise HTTPException(404, "Employee not found")
+
+        # Verify current password against any of the rows
+        verified = False
+        for emp in rows:
+            if emp.portal_pin_hash:
+                if verify_password(body.current_password, emp.portal_pin_hash):
+                    verified = True; break
+            else:
+                fn = _first_name(emp.name)
+                if fn and body.current_password.lower() == fn.lower():
+                    verified = True; break
+        if not verified:
+            raise HTTPException(401, "Mot de passe actuel incorrect")
+
+        new_hash = get_password_hash(body.new_password)
+        for emp in rows:
+            emp.portal_pin_hash = new_hash
+            emp.portal_must_change_password = False
+        db.commit()
+        return {"ok": True}
 
 
 @router.get("/portal/me")

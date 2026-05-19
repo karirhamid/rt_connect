@@ -20,6 +20,7 @@ import AnomalyInbox from './pages/AnomalyInbox';
 import PayrollExport from './pages/PayrollExport';
 import PortalLogin from './pages/PortalLogin';
 import PortalHome from './pages/PortalHome';
+import PortalChangePassword from './pages/PortalChangePassword';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
 import DeviceSync from './pages/DeviceSync';
@@ -302,6 +303,7 @@ function AppContent() {
     return (
       <Routes>
         <Route path="/portal-login" element={<PortalLogin />} />
+        <Route path="/portal-change-password" element={<PortalChangePassword />} />
         <Route path="/portal" element={<PortalHome />} />
         <Route path="/portal/*" element={<PortalHome />} />
       </Routes>
@@ -316,6 +318,7 @@ function AppContent() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/portal-login" element={<PortalLogin />} />
+          <Route path="/portal-change-password" element={<PortalChangePassword />} />
           <Route path="*" element={<Login />} />
         </Routes>
       </div>

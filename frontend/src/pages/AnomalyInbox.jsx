@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, CheckCircle, EyeOff, RefreshCw, ScanSearch } from 'lucide-react';
+import { CheckCircle, EyeOff, RefreshCw, ScanSearch } from 'lucide-react';
 import api from '../services/api';
 
 const KIND_LABELS = {
@@ -72,10 +72,7 @@ export default function AnomalyInbox() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <AlertTriangle className="w-6 h-6 text-amber-600" />
-            {t('anomalyInbox') || "Anomalies"}
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('anomalyInbox') || "Anomalies"}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {t('anomalyInboxDesc') || "Pointages signalés par les contrôles d'intégrité — à examiner."}
           </p>

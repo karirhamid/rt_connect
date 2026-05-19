@@ -93,9 +93,12 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "CREATE INDEX IF NOT EXISTS ix_attendance_voided ON attendance(voided_by_correction_id)"
             ))
-            # Phase F — employee portal PIN
+            # Phase F — employee portal credentials
             conn.execute(sa_text(
                 "ALTER TABLE employees ADD COLUMN IF NOT EXISTS portal_pin_hash VARCHAR(255)"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS portal_must_change_password BOOLEAN NOT NULL DEFAULT TRUE"
             ))
             # Phase D — device health alert recipient
             conn.execute(sa_text(

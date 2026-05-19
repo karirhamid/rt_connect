@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { LogIn, Lock, User } from 'lucide-react';
+import { LogIn } from 'lucide-react';
 
 export default function PortalLogin() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [matricule, setMatricule] = useState('');
-  const [pin, setPin] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -18,7 +18,7 @@ export default function PortalLogin() {
       const res = await fetch('/api/portal/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matricule: matricule.trim(), pin: pin.trim() }),
+        body: JSON.stringify({ matricule: matricule.trim(), password: password.trim() }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -27,7 +27,13 @@ export default function PortalLogin() {
       const data = await res.json();
       localStorage.setItem('portal_token', data.access_token);
       localStorage.setItem('portal_employee', JSON.stringify(data.employee));
-      navigate('/portal');
+      if (data.must_change_password) {
+        // Remember the current password so the change form can verify it
+        sessionStorage.setItem('portal_current_password', password.trim());
+        navigate('/portal-change-password');
+      } else {
+        navigate('/portal');
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -39,11 +45,8 @@ export default function PortalLogin() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-gray-100 px-4">
       <div className="bg-white rounded-xl shadow-lg p-8 w-full max-w-sm">
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-primary-100 text-primary-700 mb-3">
-            <User className="w-7 h-7" />
-          </div>
           <h1 className="text-xl font-bold text-gray-900">{t('portalTitle') || 'Espace employé'}</h1>
-          <p className="text-sm text-gray-500 mt-1">{t('portalLoginHint') || 'Connectez-vous avec votre matricule et votre code PIN.'}</p>
+          <p className="text-sm text-gray-500 mt-1">{t('portalLoginHint') || 'Connectez-vous avec votre matricule et votre mot de passe.'}</p>
         </div>
 
         <form onSubmit={submit} className="space-y-3">
@@ -53,9 +56,10 @@ export default function PortalLogin() {
                    className="w-full px-3 py-2 border rounded text-sm" placeholder="ex. 1024" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">{t('pin') || 'Code PIN'}</label>
-            <input type="password" inputMode="numeric" pattern="[0-9]*" required value={pin} onChange={(e) => setPin(e.target.value)}
-                   className="w-full px-3 py-2 border rounded text-sm" placeholder="••••" maxLength={6} />
+            <label className="block text-xs font-medium text-gray-600 mb-1">{t('password') || 'Mot de passe'}</label>
+            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
+                   className="w-full px-3 py-2 border rounded text-sm" placeholder="••••••" />
+            <p className="text-xs text-gray-400 mt-1">{t('portalInitialPasswordHint') || "Première connexion : votre prénom."}</p>
           </div>
           {error && <div className="text-sm text-red-600">{error}</div>}
           <button type="submit" disabled={busy}

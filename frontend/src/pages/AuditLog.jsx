@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileText, RefreshCw, Search } from 'lucide-react';
+import { RefreshCw, Search } from 'lucide-react';
 import api from '../services/api';
 
 const methodColor = {
@@ -52,10 +52,7 @@ export default function AuditLog() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <FileText className="w-6 h-6 text-primary-600" />
-            {t('auditLog') || "Journal d'audit"}
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('auditLog') || "Journal d'audit"}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {t('auditLogDesc') || "Toutes les actions d'administration (création, modification, suppression)."}
           </p>

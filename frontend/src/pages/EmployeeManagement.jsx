@@ -518,25 +518,18 @@ function EmployeeManagement() {
           </button>
           <button
             onClick={async () => {
-              const pin = window.prompt(t('setPinPrompt') || 'Code PIN (4-6 chiffres). Vide = supprimer le PIN.');
-              if (pin === null) return;
+              const firstName = (employee.name || '').trim().split(' ')[0] || '?';
+              if (!window.confirm((t('resetPortalConfirm') || 'Réinitialiser le mot de passe portail ?') + `\n${t('initialPasswordWillBe') || 'Mot de passe initial'}: "${firstName}"`)) return;
               try {
-                if (!pin.trim()) {
-                  await api.delete(`/api/employees/${employee.id}/portal-pin`);
-                  showToast(t('pinCleared') || 'PIN supprimé', 'success');
-                } else if (/^\d{4,6}$/.test(pin.trim())) {
-                  await api.put(`/api/employees/${employee.id}/portal-pin`, { pin: pin.trim() });
-                  showToast(t('pinSet') || 'PIN défini', 'success');
-                } else {
-                  showToast(t('invalidPin') || 'PIN invalide (4-6 chiffres)', 'error');
-                }
+                await api.post(`/api/employees/${employee.id}/portal-reset`);
+                showToast((t('portalPasswordReset') || 'Mot de passe réinitialisé') + `: "${firstName}"`, 'success');
               } catch (e) {
                 showToast(e?.response?.data?.detail || e.message, 'error');
               }
             }}
             disabled={saving}
             className="text-amber-500 hover:text-amber-700 mr-3 disabled:opacity-40 transition-colors"
-            title={t('setPortalPin') || 'Définir le code PIN portail'}
+            title={t('resetPortalPassword') || 'Réinitialiser le mot de passe portail'}
           >
             <Lock className="w-4 h-4" />
           </button>
