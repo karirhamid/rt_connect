@@ -18,10 +18,11 @@ so all subsequent punches that day are classified against the same schedule.
 """
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional, Tuple
+import hashlib
 import random
 import time as _time
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 import logging
@@ -35,20 +36,25 @@ from app.database.shift_schema import (
 logger = logging.getLogger(__name__)
 
 
-_DEADLOCK_PGCODE = '40P01'
-_UPSERT_MAX_RETRIES = 5
+# All daily_shift_records upserts take this transaction-scoped advisory lock
+# before INSERTing, which fully serializes concurrent writers and makes
+# index-level deadlocks structurally impossible. The lock is released at
+# COMMIT/ROLLBACK of the calling transaction.
+#
+# Why the previous savepoint+retry didn't work: PostgreSQL aborts the WHOLE
+# transaction on deadlock detection (not just the savepoint). After
+# savepoint.rollback() the outer transaction is still in 'aborted' state,
+# so the retry of db.execute() throws 'InFailedSqlTransaction' anyway.
+_DSR_LOCK_KEY = int.from_bytes(hashlib.md5(b'daily_shift_records').digest()[:4], 'big', signed=True)
 
 
 def _upsert_daily_shift(db: Session, employee_id: int, punch_date, **kwargs) -> DailyShiftRecord:
-    """Insert a DailyShiftRecord atomically using ON CONFLICT DO NOTHING.
+    """Insert a DailyShiftRecord atomically using ON CONFLICT DO NOTHING,
+    serialized via a PostgreSQL transaction-level advisory lock.
 
-    ON CONFLICT eliminates row-level contention but PostgreSQL can still
-    raise an index-level deadlock (SQLSTATE 40P01) when two concurrent
-    transactions try to insert overlapping rows in different orders.
-
-    We do each upsert inside its own SAVEPOINT and retry with jitter on
-    deadlock — the surrounding transaction is preserved, so partial work
-    in the caller isn't lost.
+    The lock is acquired before the INSERT so concurrent transactions
+    queue rather than deadlock on adjacent index buckets. Operations are
+    fast (a single INSERT), so queueing has no perceptible impact.
     """
     # Core INSERT requires enum values as strings; ORM defaults don't apply.
     values = dict(kwargs)
@@ -56,40 +62,20 @@ def _upsert_daily_shift(db: Session, employee_id: int, punch_date, **kwargs) -> 
         values["detection_method"] = values["detection_method"].value
     values.setdefault("created_at", datetime.now(timezone.utc))
 
+    # Serialize ALL writers to daily_shift_records.
+    # If the lock is held by another transaction, this BLOCKS (with the
+    # postgres default lock_timeout) until released. No deadlock possible
+    # because everyone takes the SAME lock first, in the same order.
+    db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _DSR_LOCK_KEY})
+
     stmt = (
         pg_insert(DailyShiftRecord)
         .values(employee_id=employee_id, date=punch_date, **values)
         .on_conflict_do_nothing(constraint="uq_employee_day")
     )
-
-    last_err = None
-    for attempt in range(_UPSERT_MAX_RETRIES):
-        savepoint = db.begin_nested()
-        try:
-            db.execute(stmt)
-            savepoint.commit()
-            last_err = None
-            break
-        except OperationalError as e:
-            savepoint.rollback()
-            last_err = e
-            pgcode = getattr(getattr(e, 'orig', None), 'pgcode', None)
-            if pgcode != _DEADLOCK_PGCODE:
-                # Not a deadlock — surface immediately
-                raise
-            # Random backoff so the two losers don't keep colliding
-            wait = 0.05 + random.random() * 0.20 * (attempt + 1)
-            logger.warning(
-                "DailyShiftRecord upsert deadlock for employee=%s date=%s "
-                "(attempt %d/%d), retrying in %.0fms",
-                employee_id, punch_date, attempt + 1, _UPSERT_MAX_RETRIES, wait * 1000,
-            )
-            _time.sleep(wait)
-    else:
-        if last_err is not None:
-            raise last_err
-
+    db.execute(stmt)
     db.flush()
+
     return db.query(DailyShiftRecord).filter(
         and_(
             DailyShiftRecord.employee_id == employee_id,
