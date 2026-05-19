@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Plus, Edit, Trash2, X, Save, Loader2, CheckCircle, AlertCircle, Search, Building2, Briefcase, Mail, Phone, Calendar, Clock, FileText, Coffee, Copy, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, X, Save, Loader2, CheckCircle, AlertCircle, Search, Building2, Briefcase, Mail, Phone, Calendar, Clock, FileText, Coffee, Copy, ChevronUp, ChevronDown, ChevronsUpDown, Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 
@@ -515,6 +515,30 @@ function EmployeeManagement() {
             title={t('edit')}
           >
             <Edit className="w-4 h-4" />
+          </button>
+          <button
+            onClick={async () => {
+              const pin = window.prompt(t('setPinPrompt') || 'Code PIN (4-6 chiffres). Vide = supprimer le PIN.');
+              if (pin === null) return;
+              try {
+                if (!pin.trim()) {
+                  await api.delete(`/api/employees/${employee.id}/portal-pin`);
+                  showToast(t('pinCleared') || 'PIN supprimé', 'success');
+                } else if (/^\d{4,6}$/.test(pin.trim())) {
+                  await api.put(`/api/employees/${employee.id}/portal-pin`, { pin: pin.trim() });
+                  showToast(t('pinSet') || 'PIN défini', 'success');
+                } else {
+                  showToast(t('invalidPin') || 'PIN invalide (4-6 chiffres)', 'error');
+                }
+              } catch (e) {
+                showToast(e?.response?.data?.detail || e.message, 'error');
+              }
+            }}
+            disabled={saving}
+            className="text-amber-500 hover:text-amber-700 mr-3 disabled:opacity-40 transition-colors"
+            title={t('setPortalPin') || 'Définir le code PIN portail'}
+          >
+            <Lock className="w-4 h-4" />
           </button>
           <button
             onClick={() => handleDelete(employee)}

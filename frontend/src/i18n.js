@@ -553,6 +553,25 @@ const resources = {
       departmentName: "Nom du Département",
       positionName: "Nom du Poste",
       
+      // Employee portal
+      portalTitle: "Espace employé",
+      portalLoginHint: "Connectez-vous avec votre matricule et votre code PIN.",
+      matricule: "Matricule",
+      pin: "Code PIN",
+      adminLogin: "Accès administrateur",
+      myPunches: "Mes pointages",
+      daysWorked: "Jours",
+      worked: "Travail",
+      overtime: "Sup.",
+      lateMin: "Retard",
+      earlyMin: "Dép. ant.",
+      source: "Source",
+      setPortalPin: "Définir le code PIN portail",
+      setPinPrompt: "Code PIN (4-6 chiffres). Vide = supprimer le PIN.",
+      pinSet: "PIN défini",
+      pinCleared: "PIN supprimé",
+      invalidPin: "PIN invalide (4-6 chiffres)",
+
       // Payroll export
       payrollExport: "Export Paie",
       payrollExportDesc: "Exports prêts pour l'intégration paie. Les corrections HR sont incluses, les pointages annulés sont exclus.",
@@ -1701,6 +1720,25 @@ const resources = {
       noRolesFound: "No roles found",
       confirmDeleteRole: "Are you sure you want to delete this role?",
 
+      // Employee portal
+      portalTitle: "Employee portal",
+      portalLoginHint: "Sign in with your matricule and PIN.",
+      matricule: "Matricule",
+      pin: "PIN",
+      adminLogin: "Admin login",
+      myPunches: "My punches",
+      daysWorked: "Days",
+      worked: "Worked",
+      overtime: "Overtime",
+      lateMin: "Late",
+      earlyMin: "Early leave",
+      source: "Source",
+      setPortalPin: "Set portal PIN",
+      setPinPrompt: "PIN (4-6 digits). Empty = clear PIN.",
+      pinSet: "PIN set",
+      pinCleared: "PIN cleared",
+      invalidPin: "Invalid PIN (4-6 digits)",
+
       // Payroll export
       payrollExport: "Payroll export",
       payrollExportDesc: "Export-ready files for payroll. Includes HR corrections, excludes voided punches.",
@@ -2787,6 +2825,25 @@ const resources = {
       noPermissionsAvailable: "لا توجد صلاحيات متاحة",
       noRolesFound: "لم يتم العثور على أدوار",
       confirmDeleteRole: "هل أنت متأكد من حذف هذا الدور؟",
+
+      // Employee portal
+      portalTitle: "بوابة الموظف",
+      portalLoginHint: "سجّل الدخول برقمك الوظيفي ورمز PIN.",
+      matricule: "الرقم الوظيفي",
+      pin: "رمز PIN",
+      adminLogin: "دخول المسؤول",
+      myPunches: "بصماتي",
+      daysWorked: "أيام",
+      worked: "عمل",
+      overtime: "إضافي",
+      lateMin: "تأخير",
+      earlyMin: "مغادرة مبكرة",
+      source: "المصدر",
+      setPortalPin: "ضبط رمز PIN للبوابة",
+      setPinPrompt: "رمز PIN (4-6 أرقام). فارغ = حذف الرمز.",
+      pinSet: "تم ضبط الرمز",
+      pinCleared: "تم حذف الرمز",
+      invalidPin: "رمز غير صالح (4-6 أرقام)",
 
       // Payroll export
       payrollExport: "تصدير الرواتب",

@@ -97,6 +97,8 @@ class Employee(Base):
     # Additional employee information
     email = Column(String(100), nullable=True)
     phone = Column(String(50), nullable=True)
+    # Self-service portal: bcrypt hash of a 4-6 digit PIN set by HR.
+    portal_pin_hash = Column(String(255), nullable=True)
     hire_date = Column(DateTime, nullable=True)
     birth_date = Column(DateTime, nullable=True)
     gender = Column(String(10), nullable=True)

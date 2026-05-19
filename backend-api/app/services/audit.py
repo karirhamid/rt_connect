@@ -19,6 +19,7 @@ SKIP_PATHS = (
     "/api/auth/refresh",
     "/api/health",
     "/api/public/branding",
+    "/api/portal/",  # employee self-service portal — has its own audit semantics
     "/docs", "/redoc", "/openapi.json",
 )
 

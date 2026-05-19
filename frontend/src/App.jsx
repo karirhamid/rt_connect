@@ -18,6 +18,8 @@ import Maintenance from './pages/Maintenance';
 import AuditLog from './pages/AuditLog';
 import AnomalyInbox from './pages/AnomalyInbox';
 import PayrollExport from './pages/PayrollExport';
+import PortalLogin from './pages/PortalLogin';
+import PortalHome from './pages/PortalHome';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
 import DeviceSync from './pages/DeviceSync';
@@ -294,6 +296,18 @@ function AppContent() {
     ? (sidebarCollapsed ? 'lg:mr-16' : 'lg:mr-64')
     : (sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64');
 
+  // Employee self-service portal — independent of admin auth
+  const isPortalPath = location.pathname.startsWith('/portal');
+  if (isPortalPath) {
+    return (
+      <Routes>
+        <Route path="/portal-login" element={<PortalLogin />} />
+        <Route path="/portal" element={<PortalHome />} />
+        <Route path="/portal/*" element={<PortalHome />} />
+      </Routes>
+    );
+  }
+
   // If user is not authenticated, render only the login route and hide the app UI.
   // Placed after all hooks to preserve hook call order across renders.
   if (!token) {
@@ -301,6 +315,7 @@ function AppContent() {
       <div className="min-h-screen bg-gray-100">
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/portal-login" element={<PortalLogin />} />
           <Route path="*" element={<Login />} />
         </Routes>
       </div>
