@@ -5,6 +5,9 @@ from app.database.schema import Base
 from typing import Generator
 from urllib.parse import quote_plus
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # PostgreSQL connection parameters
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -23,6 +26,34 @@ engine = create_engine(
     max_overflow=20,
     echo=False
 )
+
+# ── Portal (least-privilege) engine ────────────────────────────────────────
+# Used by the employee self-service portal. Connected as a Postgres role that
+# only has SELECT on a handful of tables and column-level UPDATE on
+# employees.portal_pin_hash / portal_must_change_password.
+#
+# Operator config (recommended for production):
+#   PORTAL_DB_USER=portal_user
+#   PORTAL_DB_PASSWORD=<long random>
+# Dev convenience: if PORTAL_DB_USER is unset, falls back to the admin DSN.
+PORTAL_DB_USER = os.getenv("PORTAL_DB_USER")
+PORTAL_DB_PASSWORD = os.getenv("PORTAL_DB_PASSWORD", "")
+
+if PORTAL_DB_USER:
+    PORTAL_DATABASE_URL = (
+        f"postgresql://{PORTAL_DB_USER}:{quote_plus(PORTAL_DB_PASSWORD)}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    )
+    portal_engine = create_engine(PORTAL_DATABASE_URL, pool_size=5, max_overflow=10, echo=False)
+    logger.info("Portal engine using dedicated role: %s", PORTAL_DB_USER)
+else:
+    PORTAL_DATABASE_URL = DATABASE_URL
+    portal_engine = engine
+    logger.warning(
+        "PORTAL_DB_USER not set — portal API is using the ADMIN DB role. "
+        "This is fine for development; for production set PORTAL_DB_USER + PORTAL_DB_PASSWORD."
+    )
+
+PortalSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=portal_engine, expire_on_commit=False)
 
 # Create session factory
 # Set expire_on_commit=False so ORM instances keep their loaded attribute
@@ -50,6 +81,20 @@ def get_db() -> Generator[Session, None, None]:
 def get_db_session():
     """Get database session as context manager for background tasks"""
     db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@contextmanager
+def get_portal_db_session():
+    """Portal (employee self-service) session — runs as a least-privilege role."""
+    db = PortalSessionLocal()
     try:
         yield db
         db.commit()

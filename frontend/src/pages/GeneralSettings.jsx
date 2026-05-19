@@ -73,6 +73,7 @@ function GeneralSettings() {
   const [heartbeatIntervalMin, setHeartbeatIntervalMin] = useState(5);
   const [punchMergeWindowMin, setPunchMergeWindowMin] = useState(5);
   const [validateTimestamps, setValidateTimestamps] = useState(true);
+  const [portalEnabled, setPortalEnabled] = useState(false);
   const [loadingSync, setLoadingSync] = useState(false);
 
   // Timing settings state
@@ -131,6 +132,7 @@ function GeneralSettings() {
       setHeartbeatEnabled(settings.device_heartbeat_enabled !== false);
       setHeartbeatIntervalMin(Math.max(1, Math.round((settings.device_heartbeat_interval_sec || 300) / 60)));
       setPunchMergeWindowMin(Math.max(0, Math.min(30, parseInt(settings.punch_merge_window_min ?? 5, 10) || 0)));
+      setPortalEnabled(!!settings.portal_enabled);
     } catch (err) {
       console.error('Failed to load settings:', err);
       showNotification('error', t('failedToLoadData'));
@@ -152,6 +154,7 @@ function GeneralSettings() {
         device_heartbeat_enabled: !!heartbeatEnabled,
         device_heartbeat_interval_sec: Math.max(60, Math.min(3600, (parseInt(heartbeatIntervalMin, 10) || 5) * 60)),
         punch_merge_window_min: Math.max(0, Math.min(30, parseInt(punchMergeWindowMin, 10) || 0)),
+        portal_enabled: !!portalEnabled,
       };
       await api.updateGeneralSettings(payload);
       showNotification('success', t('settingsSaved'));
@@ -708,6 +711,27 @@ function GeneralSettings() {
                 <span className="text-sm text-gray-600">{t('minutes') || 'minutes'}</span>
                 <span className="text-xs text-gray-400 ml-2">{t('punchMergeHint') || '(0 = désactivé · défaut: 5)'}</span>
               </div>
+            </div>
+
+            {/* Employee portal — super admin only */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="text-md font-semibold text-gray-900">{t('portalFeature') || 'Espace employé (portail)'}</h3>
+                  <p className="text-sm text-gray-600 mt-0.5">
+                    {t('portalFeatureDesc') || "Permet aux employés de consulter leurs pointages sur /portal-login. Réservé au super administrateur."}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setPortalEnabled(v => !v)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${portalEnabled ? 'bg-primary-600' : 'bg-gray-300'}`}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${portalEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+              {portalEnabled && (
+                <div className="mt-2 text-xs text-amber-800">
+                  {t('portalEnabledHint') || "Quand activé, le portail est joignable à /portal-login. Mot de passe initial = prénom de l'employé."}
+                </div>
+              )}
             </div>
 
             <div className="mb-2">

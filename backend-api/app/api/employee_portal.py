@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func
 
-from app.database.connection import get_db_session
+from app.database.connection import get_db_session, get_portal_db_session
 from app.database.schema import Employee, Attendance, Department, AppSettings
 from app.core.security import (
     verify_password, get_password_hash,
@@ -31,6 +31,25 @@ def _first_name(full_name: str) -> str:
     if not full_name:
         return ""
     return full_name.strip().split()[0]
+
+
+def _require_portal_enabled():
+    """Raise 503 if the portal feature flag is off. Checked on every portal request."""
+    with get_portal_db_session() as db:
+        s = db.query(AppSettings).first()
+        if not s or not bool(getattr(s, 'portal_enabled', False)):
+            raise HTTPException(status_code=503, detail="L'espace employé est désactivé par l'administrateur.")
+
+
+@router.get("/portal/enabled")
+def portal_enabled_flag():
+    """Public probe — lets the portal-login page show a friendly disabled message."""
+    try:
+        with get_portal_db_session() as db:
+            s = db.query(AppSettings).first()
+            return {"enabled": bool(getattr(s, 'portal_enabled', False)) if s else False}
+    except Exception:
+        return {"enabled": False}
 
 
 # ─── Admin: reset an employee's portal password ───────────────────────────
@@ -68,19 +87,26 @@ def portal_login(body: dict):
     Accepts JSON keys `password` OR legacy `pin`.
     Initial password = first name (case-insensitive) when portal_pin_hash is null.
     """
+    _require_portal_enabled()
     matricule = (body.get("matricule") or "").strip()
     password = (body.get("password") or body.get("pin") or "").strip()
     if not matricule or not password:
         raise HTTPException(401, "Invalid credentials")
 
-    with get_db_session() as db:
+    with get_portal_db_session() as db:
         cands = db.query(Employee).filter(Employee.user_id == matricule).all()
         if not cands:
             raise HTTPException(401, "Invalid credentials")
 
+        # Reject if every alias is disabled
+        if all(bool(getattr(e, 'portal_disabled', False)) for e in cands):
+            raise HTTPException(403, "Portal access disabled for this employee.")
+
         matched = None
         is_initial = False
         for e in cands:
+            if getattr(e, 'portal_disabled', False):
+                continue
             if e.portal_pin_hash:
                 if verify_password(password, e.portal_pin_hash):
                     matched = e
@@ -139,10 +165,12 @@ def _require_portal(authorization: Optional[str] = Header(None)) -> Employee:
         emp_id = int(sub.split(":", 1)[1])
     except ValueError:
         raise HTTPException(401, "Invalid token")
-    with get_db_session() as db:
+    with get_portal_db_session() as db:
         e = db.query(Employee).filter(Employee.id == emp_id).first()
         if not e:
             raise HTTPException(401, "Employee not found")
+        if getattr(e, 'portal_disabled', False):
+            raise HTTPException(403, "Portal access disabled for this employee.")
         # snapshot needed fields outside the session
         return {
             "id": e.id, "name": e.name, "matricule": e.user_id,
@@ -152,9 +180,10 @@ def _require_portal(authorization: Optional[str] = Header(None)) -> Employee:
 
 @router.post("/portal/change-password")
 def portal_change_password(body: ChangePasswordBody, me=Depends(_require_portal)):
+    _require_portal_enabled()
     if body.new_password == body.current_password:
         raise HTTPException(400, "Le nouveau mot de passe doit être différent du mot de passe actuel")
-    with get_db_session() as db:
+    with get_portal_db_session() as db:
         # Shared employee mode: there can be several rows with the same matricule
         # (one per device). Update all of them so the old password stops working.
         rows = db.query(Employee).filter(Employee.user_id == me["matricule"]).all()
@@ -184,7 +213,8 @@ def portal_change_password(body: ChangePasswordBody, me=Depends(_require_portal)
 
 @router.get("/portal/me")
 def portal_me(me=Depends(_require_portal)):
-    with get_db_session() as db:
+    _require_portal_enabled()
+    with get_portal_db_session() as db:
         dep = db.query(Department).filter(Department.id == me["department_id"]).first() if me["department_id"] else None
         return {
             "id": me["id"], "name": me["name"], "matricule": me["matricule"],
@@ -194,13 +224,14 @@ def portal_me(me=Depends(_require_portal)):
 
 @router.get("/portal/punches")
 def portal_punches(start_date: str, end_date: str, me=Depends(_require_portal)):
+    _require_portal_enabled()
     try:
         s = datetime.strptime(start_date, "%Y-%m-%d")
         e = datetime.combine(datetime.strptime(end_date, "%Y-%m-%d").date(), time.max)
     except ValueError:
         raise HTTPException(400, "Invalid date")
 
-    with get_db_session() as db:
+    with get_portal_db_session() as db:
         # Shared employee mode: pull punches from all Employee rows with same user_id
         settings = db.query(AppSettings).first()
         shared = (getattr(settings, 'employee_mode', None) or 'shared') == 'shared'
@@ -226,12 +257,13 @@ def portal_punches(start_date: str, end_date: str, me=Depends(_require_portal)):
 
 @router.get("/portal/month-summary")
 def portal_month(year: int, month: int, me=Depends(_require_portal)):
+    _require_portal_enabled()
     if not (1 <= month <= 12):
         raise HTTPException(400, "Invalid month")
     start_d = date(year, month, 1)
     end_d = (date(year + (month == 12), (month % 12) + 1, 1) - timedelta(days=1))
 
-    with get_db_session() as db:
+    with get_portal_db_session() as db:
         settings = db.query(AppSettings).first()
         shared = (getattr(settings, 'employee_mode', None) or 'shared') == 'shared'
         if shared:

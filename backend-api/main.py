@@ -23,6 +23,7 @@ from app.api.anomalies import router as anomalies_router
 from app.api.corrections import router as corrections_router
 from app.api.payroll_export import router as payroll_export_router
 from app.api.employee_portal import router as employee_portal_router
+from app.services.portal_db_setup import ensure_portal_role
 from app.database import init_db
 from app.database.connection import get_db_session
 from app.database.schema import AppSettings
@@ -100,6 +101,12 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "ALTER TABLE employees ADD COLUMN IF NOT EXISTS portal_must_change_password BOOLEAN NOT NULL DEFAULT TRUE"
             ))
+            conn.execute(sa_text(
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS portal_disabled BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS portal_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
             # Phase D — device health alert recipient
             conn.execute(sa_text(
                 "ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS alerts_enabled BOOLEAN DEFAULT FALSE NOT NULL"
@@ -131,6 +138,13 @@ async def lifespan(app: FastAPI):
                 END $$;
             """))
             conn.commit()
+
+        # Provision the portal Postgres role (least-privilege isolation).
+        # Best-effort: silently logs a warning if the admin role can't CREATE ROLE.
+        try:
+            ensure_portal_role()
+        except Exception as e:
+            logger.warning(f"portal role setup skipped: {e}")
 
         # Dedupe attendance + add unique constraint (idempotent).
         # Earlier versions had a check-then-insert race condition: two

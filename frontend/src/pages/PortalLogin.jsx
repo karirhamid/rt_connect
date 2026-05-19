@@ -10,6 +10,16 @@ export default function PortalLogin() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  const [probing, setProbing] = useState(true);
+
+  React.useEffect(() => {
+    fetch('/api/portal/enabled')
+      .then((r) => r.json())
+      .then((d) => setEnabled(!!d.enabled))
+      .catch(() => setEnabled(false))
+      .finally(() => setProbing(false));
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -40,6 +50,22 @@ export default function PortalLogin() {
       setBusy(false);
     }
   };
+
+  if (probing) {
+    return <div className="min-h-screen flex items-center justify-center text-gray-400">…</div>;
+  }
+  if (!enabled) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-gray-100 px-4">
+        <div className="bg-white rounded-xl shadow-lg p-8 w-full max-w-sm text-center">
+          <h1 className="text-xl font-bold text-gray-900 mb-2">{t('portalTitle') || 'Espace employé'}</h1>
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3">
+            {t('portalDisabled') || "L'espace employé est désactivé par l'administrateur."}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-gray-100 px-4">

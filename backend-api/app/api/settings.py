@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
 from app.database.connection import get_db_session
 from app.database.schema import AppSettings
+from app.core.security import get_current_user, user_has_permission
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class GeneralSettings(BaseModel):
     device_heartbeat_enabled: bool = Field(default=True, description="Periodically ping devices to track online status")
     device_heartbeat_interval_sec: int = Field(default=300, ge=60, le=3600, description="Seconds between device heartbeats (60–3600)")
     punch_merge_window_min: int = Field(default=5, ge=0, le=30, description="Merge punches within N minutes (0 disables)")
+    portal_enabled: bool = Field(default=False, description="Enable the employee self-service portal (super admin only)")
 
 
 class PublicBranding(BaseModel):
@@ -75,16 +77,24 @@ async def get_general_settings():
             device_heartbeat_enabled=bool(getattr(row, 'device_heartbeat_enabled', True)),
             device_heartbeat_interval_sec=int(getattr(row, 'device_heartbeat_interval_sec', 300) or 300),
             punch_merge_window_min=int(getattr(row, 'punch_merge_window_min', 5) or 0),
+            portal_enabled=bool(getattr(row, 'portal_enabled', False)),
         )
 
 
 @router.put("/settings/general", response_model=GeneralSettings)
-async def update_general_settings(payload: GeneralSettings):
+async def update_general_settings(payload: GeneralSettings, current=Depends(get_current_user)):
     with get_db_session() as db:
         row = db.query(AppSettings).first()
         if not row:
             row = AppSettings()
             db.add(row)
+        # Gate: only roles.manage (super admin) can toggle the portal feature flag.
+        prev_portal_enabled = bool(getattr(row, 'portal_enabled', False))
+        if bool(payload.portal_enabled) != prev_portal_enabled:
+            if not user_has_permission(current, "roles.manage"):
+                raise HTTPException(status_code=403,
+                                    detail="Only a super administrator can enable or disable the employee portal.")
+            row.portal_enabled = bool(payload.portal_enabled)
         row.require_sync_confirmation = payload.require_sync_confirmation
         row.validate_timestamps = payload.validate_timestamps
         # timing_mode is the source of truth; sync timing_enabled from it
@@ -121,4 +131,5 @@ async def update_general_settings(payload: GeneralSettings):
         device_heartbeat_enabled=bool(getattr(row, 'device_heartbeat_enabled', True)),
         device_heartbeat_interval_sec=int(getattr(row, 'device_heartbeat_interval_sec', 300) or 300),
         punch_merge_window_min=int(getattr(row, 'punch_merge_window_min', 5) or 0),
+        portal_enabled=bool(getattr(row, 'portal_enabled', False)),
     )

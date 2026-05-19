@@ -101,6 +101,9 @@ class Employee(Base):
     # When NULL, employee logs in with their first name (must change on first login).
     portal_pin_hash = Column(String(255), nullable=True)
     portal_must_change_password = Column(Boolean, default=True, nullable=False, server_default='true')
+
+    # Per-employee opt-out of the portal (admin can disable for a single user).
+    portal_disabled = Column(Boolean, default=False, nullable=False, server_default='false')
     hire_date = Column(DateTime, nullable=True)
     birth_date = Column(DateTime, nullable=True)
     gender = Column(String(10), nullable=True)
@@ -221,6 +224,10 @@ class AppSettings(Base):
     pdf_show_overtime = Column(Boolean, default=True, nullable=False)  # Show overtime column in PDF
     pdf_show_total_worked = Column(Boolean, default=True, nullable=False)  # Show total worked column in PDF
     punch_merge_window_min = Column(Integer, default=5, nullable=False)    # Merge punches within N min (0 = disabled)
+
+    # Employee self-service portal — global on/off (super admin only).
+    # When disabled: login + all /api/portal/* endpoints return 503.
+    portal_enabled = Column(Boolean, default=False, nullable=False, server_default='false')
 
     # Branding (shown on login + sidebar)
     app_name    = Column(String(100), nullable=True, default='RTPointage')
