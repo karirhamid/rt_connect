@@ -258,6 +258,13 @@ class DeviceSyncService:
                 db.commit()
                 
                 logger.info(f"\u2713 Successfully synced device {device_config.name}: {records_synced} users, {attendance_added} attendance records")
+
+                # Integrity guards \u2014 flag-only, never blocks
+                try:
+                    from app.services.integrity_guards import scan_recent
+                    scan_recent(hours=48)
+                except Exception as guard_err:
+                    logger.warning(f"integrity scan after sync failed: {guard_err}")
         
         except Exception as e:
             logger.error(f"Error syncing device {device_config.name}: {e}", exc_info=True)

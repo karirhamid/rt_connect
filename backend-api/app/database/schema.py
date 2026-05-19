@@ -362,6 +362,31 @@ class Permission(Base):
     roles = relationship('Role', secondary=role_permissions, back_populates='permissions')
 
 
+class Anomaly(Base):
+    """Flagged punch / day with integrity issue, surfaces in anomaly inbox."""
+    __tablename__ = 'anomalies'
+    __table_args__ = (
+        UniqueConstraint('kind', 'attendance_id', 'employee_id', 'day', name='uq_anomaly_dedupe'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    kind = Column(String(40), nullable=False, index=True)
+    # kind ∈ future_timestamp | before_hire | inactive_employee | unmatched_user
+    #        | orphan_in | orphan_out | odd_hours | duplicate_minute
+    #        | huge_gap | merged_cluster_large | multi_device_same_minute
+    severity = Column(String(10), nullable=False, default='warn')  # info|warn|critical
+    attendance_id = Column(Integer, ForeignKey('attendance.id', ondelete='SET NULL'), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey('employees.id', ondelete='SET NULL'), nullable=True, index=True)
+    device_id = Column(String, ForeignKey('devices.id', ondelete='SET NULL'), nullable=True)
+    day = Column(DateTime, nullable=True, index=True)
+    detail = Column(Text, nullable=True)  # short human description
+    status = Column(String(16), nullable=False, default='open', index=True)  # open|ack|ignored|resolved
+    resolved_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+    resolution_note = Column(Text, nullable=True)
+
+
 class AdminAuditLog(Base):
     """One row per non-GET admin action — append-only, read via UI."""
     __tablename__ = 'admin_audit_log'

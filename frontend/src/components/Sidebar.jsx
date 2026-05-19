@@ -33,6 +33,23 @@ export default function Sidebar({
     return () => { cancelled = true; };
   }, []);
 
+  // Anomaly inbox unread badge — poll every 60s
+  const [anomalyCount, setAnomalyCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCount = async () => {
+      try {
+        const res = await api.get('/api/anomalies/summary');
+        if (!cancelled) setAnomalyCount(res.data?.open_total || 0);
+      } catch (e) { /* ignore */ }
+    };
+    fetchCount();
+    const id = setInterval(fetchCount, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const badgeValueFor = (key) => (key === 'anomalies' ? anomalyCount : 0);
+
 
   /* ───────── Collapsed: icon per section + hover flyout ───────── */
   const renderCollapsedSection = (section) => {
@@ -287,6 +304,11 @@ export default function Sidebar({
                               >
                                 <Icon className="w-4 h-4 shrink-0" />
                                 <span className="truncate">{item.name}</span>
+                                {item.badgeKey && badgeValueFor(item.badgeKey) > 0 && (
+                                  <span className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-amber-500 text-white">
+                                    {badgeValueFor(item.badgeKey)}
+                                  </span>
+                                )}
                               </Link>
                             </div>
                           );

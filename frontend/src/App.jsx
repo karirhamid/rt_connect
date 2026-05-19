@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Settings, Menu, HardDrive, Building2, Clock, Users, Calendar, UserCog, ChevronLeft, ChevronRight, Wrench, BarChart3, ArrowLeftRight, CalendarDays, ShieldCheck, FileText } from 'lucide-react';
+import { LayoutDashboard, Settings, Menu, HardDrive, Building2, Clock, Users, Calendar, UserCog, ChevronLeft, ChevronRight, Wrench, BarChart3, ArrowLeftRight, CalendarDays, ShieldCheck, FileText, AlertTriangle } from 'lucide-react';
 import { useState, useEffect, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
@@ -16,6 +16,7 @@ import UsersManagement from './pages/UsersManagement';
 import RolesManagement from './pages/RolesManagement';
 import Maintenance from './pages/Maintenance';
 import AuditLog from './pages/AuditLog';
+import AnomalyInbox from './pages/AnomalyInbox';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
 import DeviceSync from './pages/DeviceSync';
@@ -84,6 +85,7 @@ function AppContent() {
         { name: t('employees'), href: '/employees', icon: Users },
         { name: t('todaysAttendance'), href: '/attendance/today', icon: Clock },
         { name: t('reports') || 'Reports', href: '/reports', icon: BarChart3 },
+        { name: t('anomalyInbox') || 'Anomalies', href: '/anomalies', icon: AlertTriangle, badgeKey: 'anomalies' },
       ],
     },
     {
@@ -389,6 +391,7 @@ function AppContent() {
             <Route path="/settings/bulk-assign" element={<ProtectedRoute perm="shifts.manage"><BulkShiftAssignment /></ProtectedRoute>} />
             <Route path="/settings/maintenance" element={<ProtectedRoute perm="roles.manage"><Maintenance /></ProtectedRoute>} />
             <Route path="/settings/audit-log" element={<ProtectedRoute perm="roles.manage"><AuditLog /></ProtectedRoute>} />
+            <Route path="/anomalies" element={<ProtectedRoute perm="attendance.read"><AnomalyInbox /></ProtectedRoute>} />
           </Routes>
         </main>
       </div>

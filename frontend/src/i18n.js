@@ -553,6 +553,22 @@ const resources = {
       departmentName: "Nom du Département",
       positionName: "Nom du Poste",
       
+      // Anomaly inbox
+      anomalyInbox: "Anomalies",
+      anomalyInboxDesc: "Pointages signalés par les contrôles d'intégrité — à examiner.",
+      rescan: "Re-scanner 7j",
+      kind: "Type",
+      severity: "Gravité",
+      detail: "Détail",
+      acknowledge: "Accuser réception",
+      ignore: "Ignorer",
+      noAnomalies: "Aucune anomalie",
+      anomalyStatus_open: "Ouvertes",
+      anomalyStatus_ack: "Accusées",
+      anomalyStatus_ignored: "Ignorées",
+      anomalyStatus_resolved: "Résolues",
+      anomalyStatus_all: "Toutes",
+
       // Audit log
       auditLog: "Journal d'audit",
       auditLogDesc: "Toutes les actions d'administration (création, modification, suppression) — qui, quand, depuis quelle IP.",
@@ -1649,6 +1665,22 @@ const resources = {
       noRolesFound: "No roles found",
       confirmDeleteRole: "Are you sure you want to delete this role?",
 
+      // Anomaly inbox
+      anomalyInbox: "Anomalies",
+      anomalyInboxDesc: "Punches flagged by integrity checks — review and act.",
+      rescan: "Rescan 7d",
+      kind: "Type",
+      severity: "Severity",
+      detail: "Detail",
+      acknowledge: "Acknowledge",
+      ignore: "Ignore",
+      noAnomalies: "No anomalies",
+      anomalyStatus_open: "Open",
+      anomalyStatus_ack: "Acknowledged",
+      anomalyStatus_ignored: "Ignored",
+      anomalyStatus_resolved: "Resolved",
+      anomalyStatus_all: "All",
+
       // Audit log
       auditLog: "Audit log",
       auditLogDesc: "All admin actions (create, update, delete) — who, when, from which IP.",
@@ -2683,6 +2715,22 @@ const resources = {
       noPermissionsAvailable: "لا توجد صلاحيات متاحة",
       noRolesFound: "لم يتم العثور على أدوار",
       confirmDeleteRole: "هل أنت متأكد من حذف هذا الدور؟",
+
+      // Anomaly inbox
+      anomalyInbox: "الشذوذات",
+      anomalyInboxDesc: "بصمات تم وضع علامة عليها من قبل فحوصات السلامة - للمراجعة.",
+      rescan: "إعادة فحص 7 أيام",
+      kind: "النوع",
+      severity: "الخطورة",
+      detail: "التفاصيل",
+      acknowledge: "إقرار بالاستلام",
+      ignore: "تجاهل",
+      noAnomalies: "لا توجد شذوذات",
+      anomalyStatus_open: "مفتوحة",
+      anomalyStatus_ack: "مُقرّ بها",
+      anomalyStatus_ignored: "مُتجاهَلة",
+      anomalyStatus_resolved: "محلولة",
+      anomalyStatus_all: "الكل",
 
       // Audit log
       auditLog: "سجل التدقيق",

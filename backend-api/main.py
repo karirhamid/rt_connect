@@ -19,6 +19,7 @@ from app.api.employee_schedules import router as employee_schedules_router
 from app.api.email_settings import router as email_settings_router
 from app.api.report_schedules import router as report_schedules_router
 from app.api.audit import router as audit_router
+from app.api.anomalies import router as anomalies_router
 from app.database import init_db
 from app.database.connection import get_db_session
 from app.database.schema import AppSettings
@@ -82,6 +83,21 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "CREATE INDEX IF NOT EXISTS ix_attendance_source ON attendance(source)"
             ))
+            # Phase B — anomalies inbox (table created by metadata.create_all,
+            # but ensure unique constraint is in place even on existing schemas)
+            conn.execute(sa_text("""
+                DO $$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='uq_anomaly_dedupe') THEN
+                        BEGIN
+                            ALTER TABLE anomalies
+                            ADD CONSTRAINT uq_anomaly_dedupe UNIQUE (kind, attendance_id, employee_id, day);
+                        EXCEPTION WHEN undefined_table THEN
+                            -- table does not exist yet; create_all will handle it
+                            NULL;
+                        END;
+                    END IF;
+                END $$;
+            """))
             conn.commit()
 
         # Dedupe attendance + add unique constraint (idempotent).
@@ -409,6 +425,7 @@ app.include_router(employee_schedules_router, prefix="/api", tags=["Employee Sch
 app.include_router(email_settings_router, prefix="/api", tags=["Email Settings"])
 app.include_router(report_schedules_router, prefix="/api", tags=["Report Schedules"])
 app.include_router(audit_router, prefix="/api", tags=["Audit"])
+app.include_router(anomalies_router, prefix="/api", tags=["Anomalies"])
 
 
 @app.get("/")
