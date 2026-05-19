@@ -18,6 +18,7 @@ from app.api.maintenance import router as maintenance_router
 from app.api.employee_schedules import router as employee_schedules_router
 from app.api.email_settings import router as email_settings_router
 from app.api.report_schedules import router as report_schedules_router
+from app.api.audit import router as audit_router
 from app.database import init_db
 from app.database.connection import get_db_session
 from app.database.schema import AppSettings
@@ -73,6 +74,13 @@ async def lifespan(app: FastAPI):
             ))
             conn.execute(sa_text(
                 "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS punch_merge_window_min INTEGER DEFAULT 5"
+            ))
+            # Phase A — punch source tracking
+            conn.execute(sa_text(
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS source VARCHAR(16) NOT NULL DEFAULT 'device'"
+            ))
+            conn.execute(sa_text(
+                "CREATE INDEX IF NOT EXISTS ix_attendance_source ON attendance(source)"
             ))
             conn.commit()
 
@@ -346,6 +354,10 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# Admin audit log — records every non-GET admin action
+from app.services.audit import AdminAuditMiddleware  # noqa: E402
+app.add_middleware(AdminAuditMiddleware)
+
 
 # Ensure CORS headers are present even on unexpected exceptions/errors by
 # adding a lightweight middleware that reflects the request Origin when it
@@ -396,6 +408,7 @@ app.include_router(maintenance_router, prefix="/api", tags=["Maintenance"])
 app.include_router(employee_schedules_router, prefix="/api", tags=["Employee Schedules"])
 app.include_router(email_settings_router, prefix="/api", tags=["Email Settings"])
 app.include_router(report_schedules_router, prefix="/api", tags=["Report Schedules"])
+app.include_router(audit_router, prefix="/api", tags=["Audit"])
 
 
 @app.get("/")

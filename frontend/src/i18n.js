@@ -553,6 +553,16 @@ const resources = {
       departmentName: "Nom du Département",
       positionName: "Nom du Poste",
       
+      // Audit log
+      auditLog: "Journal d'audit",
+      auditLogDesc: "Toutes les actions d'administration (création, modification, suppression) — qui, quand, depuis quelle IP.",
+      method: "Méthode",
+      path: "Chemin",
+      status: "Statut",
+      sourceManual: "Saisie manuelle",
+      sourceCorrected: "Corrigé",
+      sourceImported: "Importé",
+
       // Maintenance
       maintenance: "Maintenance",
       maintenanceDesc: "Sauvegarde et restauration de la base de données (toutes les données + configuration). Compatible PostgreSQL 16+.",
@@ -1639,6 +1649,16 @@ const resources = {
       noRolesFound: "No roles found",
       confirmDeleteRole: "Are you sure you want to delete this role?",
 
+      // Audit log
+      auditLog: "Audit log",
+      auditLogDesc: "All admin actions (create, update, delete) — who, when, from which IP.",
+      method: "Method",
+      path: "Path",
+      status: "Status",
+      sourceManual: "Manual entry",
+      sourceCorrected: "Corrected",
+      sourceImported: "Imported",
+
       // Maintenance
       maintenance: "Maintenance",
       maintenanceDesc: "Database backup and restore (all data + configuration). PostgreSQL 16+ compatible.",
@@ -2663,6 +2683,16 @@ const resources = {
       noPermissionsAvailable: "لا توجد صلاحيات متاحة",
       noRolesFound: "لم يتم العثور على أدوار",
       confirmDeleteRole: "هل أنت متأكد من حذف هذا الدور؟",
+
+      // Audit log
+      auditLog: "سجل التدقيق",
+      auditLogDesc: "جميع إجراءات المسؤولين (إنشاء، تعديل، حذف) — من، متى، ومن أي عنوان IP.",
+      method: "الطريقة",
+      path: "المسار",
+      status: "الحالة",
+      sourceManual: "إدخال يدوي",
+      sourceCorrected: "مصحح",
+      sourceImported: "مستورد",
 
       // Maintenance
       maintenance: "الصيانة",

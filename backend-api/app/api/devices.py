@@ -1140,6 +1140,7 @@ async def _sync_attendance_locked(
                 'timestamp':   r.timestamp,
                 'punch':       r.punch,
                 'status':      r.status,
+                'source':      'device',
             } for r in new_records]
             stmt = pg_insert(DBAttendance).values(values).on_conflict_do_nothing(
                 constraint='uq_attendance_device_uid_ts'

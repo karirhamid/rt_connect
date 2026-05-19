@@ -177,6 +177,28 @@ export default function Reports() {
     return h > 0 ? `${h}h${r > 0 ? String(r).padStart(2, '0') + 'm' : ''}` : `${r}m`;
   };
 
+  // Punch source badge — shows when any punch in the row is non-device
+  const SourceBadge = ({ sources }) => {
+    if (!sources || sources.length === 0) return null;
+    const nonDevice = sources.filter((s) => s && s !== 'device');
+    if (nonDevice.length === 0) return null;
+    const map = { manual: ['M', 'bg-blue-100 text-blue-700', t('sourceManual') || 'Manual entry'],
+                  corrected: ['C', 'bg-amber-100 text-amber-700', t('sourceCorrected') || 'Corrected'],
+                  imported: ['I', 'bg-purple-100 text-purple-700', t('sourceImported') || 'Imported'] };
+    return (
+      <span className="inline-flex gap-0.5 ml-1">
+        {nonDevice.map((s) => {
+          const cfg = map[s] || ['?', 'bg-gray-200 text-gray-700', s];
+          return (
+            <span key={s} className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold ${cfg[1]}`} title={cfg[2]}>
+              {cfg[0]}
+            </span>
+          );
+        })}
+      </span>
+    );
+  };
+
   const colCount = attendanceMode === 'strict' ? 10 : 8;
 
   return (
@@ -525,6 +547,7 @@ export default function Reports() {
                               <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-xs font-semibold text-gray-700">
                                 {r.swipes}
                               </span>
+                              <SourceBadge sources={r.sources} />
                             </td>
                           </tr>
                         ))}
@@ -580,6 +603,7 @@ export default function Reports() {
                           <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-xs font-semibold text-gray-700">
                             {r.swipes}
                           </span>
+                          <SourceBadge sources={r.sources} />
                         </td>
                       </tr>
                     ))

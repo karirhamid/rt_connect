@@ -231,6 +231,7 @@ class DeviceSyncService:
                         timestamp=timestamp,
                         status=record_data['status'],
                         punch=record_data['punch'],
+                        source='device',
                     ).on_conflict_do_nothing(
                         constraint='uq_attendance_device_uid_ts'
                     )

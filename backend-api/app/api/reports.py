@@ -345,6 +345,7 @@ def attendance_summary(
                 func.min(DBAttendance.timestamp).label("first_ts"),
                 func.max(DBAttendance.timestamp).label("last_ts"),
                 func.count(DBAttendance.id).label("swipes"),
+                func.array_agg(func.distinct(DBAttendance.source)).label("sources"),
             )
             .select_from(DBAttendance)
             .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
@@ -384,6 +385,7 @@ def attendance_summary(
                 "first_check_in": r.first_ts.isoformat() if r.first_ts else None,
                 "last_check_out": r.last_ts.isoformat() if r.last_ts else None,
                 "swipes": int(r.swipes or 0),
+                "sources": list(r.sources) if getattr(r, "sources", None) else ["device"],
             }
             # Single punch: prevent showing the same timestamp in both entry and exit
             if int(r.swipes or 0) == 1 and r.first_ts:

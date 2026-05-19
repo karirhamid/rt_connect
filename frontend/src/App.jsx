@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Settings, Menu, HardDrive, Building2, Clock, Users, Calendar, UserCog, ChevronLeft, ChevronRight, Wrench, BarChart3, ArrowLeftRight, CalendarDays, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Settings, Menu, HardDrive, Building2, Clock, Users, Calendar, UserCog, ChevronLeft, ChevronRight, Wrench, BarChart3, ArrowLeftRight, CalendarDays, ShieldCheck, FileText } from 'lucide-react';
 import { useState, useEffect, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
@@ -15,6 +15,7 @@ import BulkShiftAssignment from './pages/BulkShiftAssignment';
 import UsersManagement from './pages/UsersManagement';
 import RolesManagement from './pages/RolesManagement';
 import Maintenance from './pages/Maintenance';
+import AuditLog from './pages/AuditLog';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
 import DeviceSync from './pages/DeviceSync';
@@ -117,6 +118,7 @@ function AppContent() {
         { name: t('roles') || 'Rôles',        href: '/settings/roles', icon: UserCog },
         { type: 'divider', label: t('groupTools') || 'Outils' },
         { name: t('maintenance') || 'Maintenance', href: '/settings/maintenance', icon: Wrench },
+        { name: t('auditLog') || "Journal d'audit", href: '/settings/audit-log', icon: FileText },
       ],
     },
   ];
@@ -386,6 +388,7 @@ function AppContent() {
             <Route path="/settings/holidays" element={<ProtectedRoute perm="shifts.manage"><HolidayCalendar /></ProtectedRoute>} />
             <Route path="/settings/bulk-assign" element={<ProtectedRoute perm="shifts.manage"><BulkShiftAssignment /></ProtectedRoute>} />
             <Route path="/settings/maintenance" element={<ProtectedRoute perm="roles.manage"><Maintenance /></ProtectedRoute>} />
+            <Route path="/settings/audit-log" element={<ProtectedRoute perm="roles.manage"><AuditLog /></ProtectedRoute>} />
           </Routes>
         </main>
       </div>

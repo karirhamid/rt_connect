@@ -171,7 +171,9 @@ class Attendance(Base):
     status = Column(Integer, nullable=False)
     punch = Column(Integer, nullable=False)
     synced_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    
+    # Provenance: device | manual | imported | corrected
+    source = Column(String(16), nullable=False, server_default="device", default="device", index=True)
+
     # Relationships
     device = relationship("Device", back_populates="attendance")
     employee = relationship("Employee", back_populates="attendance")
@@ -358,3 +360,20 @@ class Permission(Base):
     description = Column(Text, nullable=True)
 
     roles = relationship('Role', secondary=role_permissions, back_populates='permissions')
+
+
+class AdminAuditLog(Base):
+    """One row per non-GET admin action — append-only, read via UI."""
+    __tablename__ = 'admin_audit_log'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    username = Column(String(150), nullable=True)
+    ip = Column(String(64), nullable=True)
+    method = Column(String(10), nullable=False)
+    path = Column(String(500), nullable=False, index=True)
+    status_code = Column(Integer, nullable=True)
+    action = Column(String(120), nullable=True)  # human label, optional
+    payload = Column(Text, nullable=True)        # JSON-encoded request body (truncated)
+    extra = Column(Text, nullable=True)          # JSON-encoded notes (before/after, etc.)
