@@ -71,6 +71,9 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_storage_config TEXT"
             ))
+            conn.execute(sa_text(
+                "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS punch_merge_window_min INTEGER DEFAULT 5"
+            ))
             conn.commit()
 
         # Dedupe attendance + add unique constraint (idempotent).

@@ -48,6 +48,48 @@ logger = logging.getLogger(__name__)
 _DSR_LOCK_KEY = int.from_bytes(hashlib.md5(b'daily_shift_records').digest()[:4], 'big', signed=True)
 
 
+def merge_close_punches(timestamps, window_seconds: int):
+    """Collapse near-duplicate punches into one (keeps the earliest).
+
+    Walks a chronologically-sorted list of datetimes; any timestamp whose
+    delta from the previously KEPT one is <= window_seconds is absorbed
+    into that cluster. The earliest punch in each cluster is the one we
+    keep (matches user intuition — first attempt is the 'real' punch).
+
+    Parameters
+    ----------
+    timestamps : iterable of datetime
+        Punch timestamps for ONE employee on ONE day (any iterable; will
+        be sorted defensively).
+    window_seconds : int
+        Cluster window in seconds. Pass 0 to disable merging entirely.
+
+    Returns
+    -------
+    list of (datetime, int)
+        Tuples of (kept_timestamp, original_count_in_cluster). For most
+        punches original_count is 1; for merged clusters it's >=2.
+    """
+    pts = sorted(t for t in timestamps if t is not None)
+    if not pts:
+        return []
+    if window_seconds <= 0:
+        return [(t, 1) for t in pts]
+
+    out = []
+    cluster_start = pts[0]
+    cluster_size = 1
+    for t in pts[1:]:
+        if (t - cluster_start).total_seconds() <= window_seconds:
+            cluster_size += 1
+            continue
+        out.append((cluster_start, cluster_size))
+        cluster_start = t
+        cluster_size = 1
+    out.append((cluster_start, cluster_size))
+    return out
+
+
 def _upsert_daily_shift(db: Session, employee_id: int, punch_date, **kwargs) -> DailyShiftRecord:
     """Insert a DailyShiftRecord atomically using ON CONFLICT DO NOTHING,
     serialized via a PostgreSQL transaction-level advisory lock.

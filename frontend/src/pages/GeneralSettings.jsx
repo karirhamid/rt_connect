@@ -70,6 +70,7 @@ function GeneralSettings() {
   const [clientName, setClientName] = useState('');
   const [heartbeatEnabled, setHeartbeatEnabled] = useState(true);
   const [heartbeatIntervalMin, setHeartbeatIntervalMin] = useState(5);
+  const [punchMergeWindowMin, setPunchMergeWindowMin] = useState(5);
   const [validateTimestamps, setValidateTimestamps] = useState(true);
   const [loadingSync, setLoadingSync] = useState(false);
 
@@ -128,6 +129,7 @@ function GeneralSettings() {
       setClientName(settings.client_name || '');
       setHeartbeatEnabled(settings.device_heartbeat_enabled !== false);
       setHeartbeatIntervalMin(Math.max(1, Math.round((settings.device_heartbeat_interval_sec || 300) / 60)));
+      setPunchMergeWindowMin(Math.max(0, Math.min(30, parseInt(settings.punch_merge_window_min ?? 5, 10) || 0)));
     } catch (err) {
       console.error('Failed to load settings:', err);
       showNotification('error', t('failedToLoadData'));
@@ -148,6 +150,7 @@ function GeneralSettings() {
         client_name: (clientName || '').trim() || null,
         device_heartbeat_enabled: !!heartbeatEnabled,
         device_heartbeat_interval_sec: Math.max(60, Math.min(3600, (parseInt(heartbeatIntervalMin, 10) || 5) * 60)),
+        punch_merge_window_min: Math.max(0, Math.min(30, parseInt(punchMergeWindowMin, 10) || 0)),
       };
       await api.updateGeneralSettings(payload);
       showNotification('success', t('settingsSaved'));
@@ -677,6 +680,32 @@ function GeneralSettings() {
                 />
                 <span className="text-sm text-gray-600">{t('minutes') || 'minutes'}</span>
                 <span className="text-xs text-gray-400 ml-2">{t('defaultFive') || '(défaut: 5)'}</span>
+              </div>
+            </div>
+
+            {/* ── Punch merge window (close-together swipes) ── */}
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <h3 className="text-md font-semibold text-gray-900 mb-1">{t('punchMerge') || 'Fusionner les pointages rapprochés'}</h3>
+                  <p className="text-sm text-gray-600">
+                    {t('punchMergeDesc') ||
+                      "Si un employé pointe plusieurs fois dans cet intervalle (oubli, doute), seul le premier est conservé dans les rapports."}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-3">
+                <label className="text-sm font-medium text-gray-700">{t('punchMergeWindow') || 'Fenêtre'}</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="30"
+                  value={punchMergeWindowMin}
+                  onChange={e => setPunchMergeWindowMin(e.target.value)}
+                  className="w-20 px-3 py-2 border border-gray-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-slate-300 focus:border-slate-400"
+                />
+                <span className="text-sm text-gray-600">{t('minutes') || 'minutes'}</span>
+                <span className="text-xs text-gray-400 ml-2">{t('punchMergeHint') || '(0 = désactivé · défaut: 5)'}</span>
               </div>
             </div>
 

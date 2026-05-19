@@ -24,6 +24,7 @@ class GeneralSettings(BaseModel):
     client_name: Optional[str] = Field(default=None, description="Client / customer organization name shown on login")
     device_heartbeat_enabled: bool = Field(default=True, description="Periodically ping devices to track online status")
     device_heartbeat_interval_sec: int = Field(default=300, ge=60, le=3600, description="Seconds between device heartbeats (60–3600)")
+    punch_merge_window_min: int = Field(default=5, ge=0, le=30, description="Merge punches within N minutes (0 disables)")
 
 
 class PublicBranding(BaseModel):
@@ -73,6 +74,7 @@ async def get_general_settings():
             client_name=getattr(row, 'client_name', None),
             device_heartbeat_enabled=bool(getattr(row, 'device_heartbeat_enabled', True)),
             device_heartbeat_interval_sec=int(getattr(row, 'device_heartbeat_interval_sec', 300) or 300),
+            punch_merge_window_min=int(getattr(row, 'punch_merge_window_min', 5) or 0),
         )
 
 
@@ -99,6 +101,7 @@ async def update_general_settings(payload: GeneralSettings):
             row.client_name = payload.client_name.strip() or None
         row.device_heartbeat_enabled = bool(payload.device_heartbeat_enabled)
         row.device_heartbeat_interval_sec = max(60, min(3600, int(payload.device_heartbeat_interval_sec or 300)))
+        row.punch_merge_window_min = max(0, min(30, int(payload.punch_merge_window_min if payload.punch_merge_window_min is not None else 5)))
         db.commit()
         db.refresh(row)
 
@@ -117,4 +120,5 @@ async def update_general_settings(payload: GeneralSettings):
         client_name=getattr(row, 'client_name', None),
         device_heartbeat_enabled=bool(getattr(row, 'device_heartbeat_enabled', True)),
         device_heartbeat_interval_sec=int(getattr(row, 'device_heartbeat_interval_sec', 300) or 300),
+        punch_merge_window_min=int(getattr(row, 'punch_merge_window_min', 5) or 0),
     )

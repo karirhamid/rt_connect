@@ -13,7 +13,7 @@ from app.database.schema import (
     Company as DBCompany,
     Device as DBDevice,
 )
-from app.services.punch_classifier import classify_attendance_records, get_employee_day_summary
+from app.services.punch_classifier import classify_attendance_records, get_employee_day_summary, merge_close_punches
 
 router = APIRouter()
 
@@ -531,6 +531,9 @@ def export_attendance_pdf(
                 func.min(DBAttendance.timestamp).label("first_ts"),
                 func.max(DBAttendance.timestamp).label("last_ts"),
                 func.count(DBAttendance.id).label("swipes"),
+                # Full timestamp list so we can merge near-duplicate punches in
+                # Python (5-min window by default — see punch_merge_window_min).
+                func.array_agg(DBAttendance.timestamp).label("all_ts"),
             )
             .select_from(DBAttendance)
             .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
@@ -546,6 +549,10 @@ def export_attendance_pdf(
             q = q.group_by(DBEmployee.id, DBEmployee.name, DBDepartment.name, DBCompany.name, cast(DBAttendance.timestamp, Date))
         q = q.order_by(id_col.asc(), cast(DBAttendance.timestamp, Date).asc())
         rows = q.all()
+
+        # Read merge window from settings (0 disables merging)
+        _merge_window_min = int(getattr(_settings, 'punch_merge_window_min', 5) or 0)
+        _merge_window_sec = max(0, _merge_window_min) * 60
 
         company_row = db.query(DBCompany.name).order_by(DBCompany.id).first()
         company_name = company_row[0] if company_row else ""
@@ -600,8 +607,25 @@ def export_attendance_pdf(
                     db, all_pks[0], day_date,
                     employee_ids=all_pks if shared else None,
                 )
-            _swipes = int(r.swipes or 0)
-            _entry, _exit = _resolve_entry_exit(r.first_ts, r.last_ts, _swipes, summary_data)
+            # ── Merge near-duplicate punches ──
+            # all_ts is the full timestamp list for this employee/day. Collapse
+            # any cluster whose punches are within _merge_window_sec apart so
+            # the report shows the user's intent (one punch per "attempt"),
+            # not raw device noise. window_seconds=0 keeps the existing
+            # behaviour (no merging).
+            _raw_count = int(r.swipes or 0)
+            _all_ts = list(r.all_ts or [])
+            _merged = merge_close_punches(_all_ts, _merge_window_sec) if _all_ts else []
+            if _merged:
+                _swipes = len(_merged)
+                _first_ts = _merged[0][0]
+                _last_ts  = _merged[-1][0]
+            else:
+                _swipes = _raw_count
+                _first_ts = r.first_ts
+                _last_ts  = r.last_ts
+            _merged_count = _raw_count - _swipes if _raw_count > _swipes else 0
+            _entry, _exit = _resolve_entry_exit(_first_ts, _last_ts, _swipes, summary_data)
             flat_rows.append({
                 "employee": emp_name,
                 "emp_id": r.employee_id or "-",
@@ -611,6 +635,8 @@ def export_attendance_pdf(
                 "exit": _exit or "-",
                 "incomplete": _entry is None or _exit is None,
                 "swipes": _swipes,
+                "swipes_original": _raw_count,
+                "swipes_merged": _merged_count,
                 "device_names": ", ".join(sorted(device_names_map.get(
                     (r.employee_id, r.day.isoformat() if hasattr(r.day, "isoformat") else str(r.day)),
                     set()
@@ -884,9 +910,18 @@ def export_attendance_pdf(
             cells.append(_late_para(r["late_minutes"]))
             cells.append(_early_para(r["early_departure_minutes"]))
             cells.append(_status_para(r))
-        # Passages (swipe count) — always shown so the PDF matches the GUI table
+        # Passages (swipe count) — always shown so the PDF matches the GUI table.
+        # When the punch merger collapsed near-duplicates, also show the raw
+        # original count in grey: "1 (2 fusionnés)".
         _sw = int(r.get("swipes") or 0)
-        cells.append(Paragraph(str(_sw) if _sw else "-", cell_center))
+        _merged_n = int(r.get("swipes_merged") or 0)
+        if _sw and _merged_n > 0:
+            _sw_label = f'{_sw}  <font size=7 color="#94a3b8">(+{_merged_n} fus.)</font>'
+        elif _sw:
+            _sw_label = str(_sw)
+        else:
+            _sw_label = "-"
+        cells.append(Paragraph(_sw_label, cell_center))
         cells.append(Paragraph(r.get("device_names", "-"), cell_center))
         return cells
 
@@ -1121,6 +1156,8 @@ def export_attendance_pdf(
                     "exit":                    "-",
                     "incomplete":              False,
                     "swipes":                  0,
+                    "swipes_original":         0,
+                    "swipes_merged":           0,
                     "device_names":            "-",   # also rendered as a dash
                     "total_minutes":           0,
                     "overtime_minutes":        0,

@@ -210,6 +210,7 @@ class AppSettings(Base):
     pdf_style = Column(String(20), default='style1', nullable=False)  # style1 | style2
     pdf_show_overtime = Column(Boolean, default=True, nullable=False)  # Show overtime column in PDF
     pdf_show_total_worked = Column(Boolean, default=True, nullable=False)  # Show total worked column in PDF
+    punch_merge_window_min = Column(Integer, default=5, nullable=False)    # Merge punches within N min (0 = disabled)
 
     # Branding (shown on login + sidebar)
     app_name    = Column(String(100), nullable=True, default='RTPointage')
