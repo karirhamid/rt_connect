@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { LogIn } from 'lucide-react';
+import { Portal } from '../services/portalApi';
 
 export default function PortalLogin() {
   const { t } = useTranslation();
@@ -14,8 +15,7 @@ export default function PortalLogin() {
   const [probing, setProbing] = useState(true);
 
   React.useEffect(() => {
-    fetch('/api/portal/enabled')
-      .then((r) => r.json())
+    Portal.isEnabled()
       .then((d) => setEnabled(!!d.enabled))
       .catch(() => setEnabled(false))
       .finally(() => setProbing(false));
@@ -25,26 +25,20 @@ export default function PortalLogin() {
     e.preventDefault();
     setError(''); setBusy(true);
     try {
-      const res = await fetch('/api/portal/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matricule: matricule.trim(), password: password.trim() }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || 'Identifiants invalides');
+      const data = await Portal.login(matricule.trim(), password.trim());
+      if (!data || !data.access_token) {
+        throw new Error(t('loginFailed') || 'Échec de la connexion');
       }
-      const data = await res.json();
       localStorage.setItem('portal_token', data.access_token);
-      localStorage.setItem('portal_employee', JSON.stringify(data.employee));
+      localStorage.setItem('portal_employee', JSON.stringify(data.employee || {}));
       if (data.must_change_password) {
-        // Remember the current password so the change form can verify it
         sessionStorage.setItem('portal_current_password', password.trim());
         navigate('/portal-change-password');
       } else {
         navigate('/portal');
       }
     } catch (err) {
+      if (err.status === 503) setEnabled(false);
       setError(err.message);
     } finally {
       setBusy(false);

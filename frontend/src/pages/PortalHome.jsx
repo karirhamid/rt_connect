@@ -2,8 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { LogOut, Clock, Calendar, CheckCircle, AlertCircle, LogIn as LogInIcon, ArrowRight } from 'lucide-react';
-
-const auth = () => ({ Authorization: `Bearer ${localStorage.getItem('portal_token') || ''}` });
+import { Portal } from '../services/portalApi';
 
 const fmtMin = (m) => {
   if (!m || m < 1) return '0h00';
@@ -68,11 +67,17 @@ export default function PortalHome() {
 
   const loadMe = useCallback(async () => {
     try {
-      const r = await fetch('/api/portal/me', { headers: auth() });
-      if (r.status === 401) { navigate('/portal-login'); return; }
-      if (r.status === 503) { setError(t('portalDisabled') || "L'espace employé est désactivé."); return; }
-      setMe(await r.json());
-    } catch (e) { setError(e.message); }
+      const data = await Portal.me();
+      setMe(data);
+      setError('');
+    } catch (e) {
+      if (e.status === 401) { navigate('/portal-login'); return; }
+      if (e.status === 503 || e.status === 403) {
+        setError(e.message || (t('portalDisabled') || "L'espace employé est désactivé."));
+        return;
+      }
+      setError(e.message);
+    }
   }, [navigate, t]);
 
   const loadData = useCallback(async () => {
@@ -87,17 +92,18 @@ export default function PortalHome() {
         start = fmtDate(new Date(year, month - 1, 1));
         end   = fmtDate(new Date(year, month, 0));
       }
-      const pRes = await fetch(`/api/portal/punches?start_date=${start}&end_date=${end}`, { headers: auth() });
-      if (pRes.status === 401) { navigate('/portal-login'); return; }
-      setPunches(await pRes.json());
+      const punchesData = await Portal.punches(start, end);
+      setPunches(Array.isArray(punchesData) ? punchesData : []);
 
       if (tab === 'month') {
-        const mRes = await fetch(`/api/portal/month-summary?year=${year}&month=${month}`, { headers: auth() });
-        setMonthly(await mRes.json());
+        const monthData = await Portal.monthSummary(year, month);
+        setMonthly(monthData || null);
       } else {
         setMonthly(null);
       }
+      setError('');
     } catch (e) {
+      if (e.status === 401) { navigate('/portal-login'); return; }
       setError(e.message);
     } finally {
       setLoading(false);

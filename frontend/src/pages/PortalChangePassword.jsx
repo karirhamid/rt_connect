@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Portal } from '../services/portalApi';
 
 export default function PortalChangePassword() {
   const { t } = useTranslation();
@@ -24,19 +25,12 @@ export default function PortalChangePassword() {
     if (next1 === current) { setError(t('pwSame') || 'Le nouveau mot de passe doit être différent de l\'ancien'); return; }
     setBusy(true);
     try {
-      const res = await fetch('/api/portal/change-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ current_password: current, new_password: next1 }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || 'Erreur');
-      }
+      await Portal.changePassword(current, next1);
       sessionStorage.removeItem('portal_current_password');
       navigate('/portal');
     } catch (err) {
-      setError(err.message);
+      if (err.status === 401) navigate('/portal-login');
+      else setError(err.message);
     } finally {
       setBusy(false);
     }
