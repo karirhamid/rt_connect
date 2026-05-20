@@ -1104,25 +1104,30 @@ export default function DeviceSettings() {
 
       {/* Logs Sync Modal — date range selector */}
       {showLogsModal && selectedDeviceForLogs && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden">
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-[fadeIn_0.15s_ease-out]">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/60 max-w-md w-full overflow-hidden animate-[popIn_0.18s_ease-out]">
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">{t('syncAttendanceLogs')}</h2>
-                <p className="text-sm text-gray-500">{selectedDeviceForLogs.name}</p>
+            <div className="flex items-center justify-between px-6 pt-5 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-primary-50 flex items-center justify-center">
+                  <Download className="w-[18px] h-[18px] text-primary-600" />
+                </div>
+                <div>
+                  <h2 className="text-[15px] font-semibold text-slate-900">{t('syncAttendanceLogs')}</h2>
+                  <p className="text-xs font-mono text-slate-400">{selectedDeviceForLogs.name}</p>
+                </div>
               </div>
               <button
                 onClick={() => { setShowLogsModal(false); setSelectedDeviceForLogs(null); }}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-slate-400 hover:text-slate-600 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Preset grid */}
-            <div className="px-5 py-4">
-              <label className="block text-xs font-medium text-gray-500 mb-2">{t('selectPeriod')}</label>
+            <div className="px-6 pb-2">
+              <label className="block text-xs font-medium text-slate-500 mb-2">{t('selectPeriod')}</label>
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { key: 'today',     icon: Clock,        label: t('today') },
@@ -1136,10 +1141,10 @@ export default function DeviceSettings() {
                     key={key}
                     type="button"
                     onClick={() => setLogsSyncRange(key)}
-                    className={`flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border text-sm font-medium transition-all
+                    className={`flex flex-col items-center gap-1.5 px-3 py-3 rounded-xl border text-[13px] font-medium transition-all duration-150
                       ${logsSyncRange === key
-                        ? 'border-primary-600 bg-primary-50 text-primary-700 ring-1 ring-primary-600'
-                        : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                        ? 'border-primary-500 bg-primary-50 text-primary-700 shadow-sm'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                       }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -1150,43 +1155,51 @@ export default function DeviceSettings() {
 
               {/* Custom date range — shown only when 'specific' */}
               {logsSyncRange === 'specific' && (
-                <div className="mt-4 flex items-center gap-2">
+                <div className="mt-4 flex items-center gap-2 animate-[fadeIn_0.15s_ease-out]">
                   <div className="flex-1">
-                    <label className="block text-xs text-gray-500 mb-1">{t('from')}</label>
+                    <label className="block text-xs text-slate-500 mb-1">{t('from')}</label>
                     <input
                       type="date"
                       value={logsCustomFrom}
                       onChange={e => setLogsCustomFrom(e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm text-gray-900"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none"
                     />
                   </div>
-                  <ArrowRight className="w-4 h-4 text-gray-400 mt-5" />
+                  <ArrowRight className="w-4 h-4 text-slate-400 mt-5" />
                   <div className="flex-1">
-                    <label className="block text-xs text-gray-500 mb-1">{t('to')}</label>
+                    <label className="block text-xs text-slate-500 mb-1">{t('to')}</label>
                     <input
                       type="date"
                       value={logsCustomTo}
                       onChange={e => setLogsCustomTo(e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm text-gray-900"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 focus:ring-2 focus:ring-primary-200 focus:border-primary-400 outline-none"
                     />
                   </div>
                 </div>
               )}
             </div>
 
+            {/* Reassurance: incremental, no duplicates */}
+            <div className="px-6 pt-3 pb-1">
+              <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                <span>{t('logsIncrementalNote') || "Seuls les nouveaux pointages sont importés. Les pointages déjà enregistrés sont ignorés automatiquement — aucun doublon."}</span>
+              </div>
+            </div>
+
             {/* Actions */}
-            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t bg-gray-50">
+            <div className="flex items-center justify-end gap-2 px-6 py-4">
               <button
                 onClick={() => { setShowLogsModal(false); setSelectedDeviceForLogs(null); }}
                 disabled={loadingStates[`${selectedDeviceForLogs.id}-logs`]}
-                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 {t('cancel')}
               </button>
               <button
                 onClick={handleFetchLogsPreview}
                 disabled={loadingStates[`${selectedDeviceForLogs.id}-logs`] || (logsSyncRange === 'specific' && !logsCustomFrom && !logsCustomTo)}
-                className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
               >
                 {loadingStates[`${selectedDeviceForLogs.id}-logs`] ? (
                   <Loader className="w-4 h-4 animate-spin" />
@@ -1197,6 +1210,10 @@ export default function DeviceSettings() {
               </button>
             </div>
           </div>
+          <style>{`
+            @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+            @keyframes popIn { 0% { opacity: 0; transform: scale(0.96) } 70% { transform: scale(1.01) } 100% { opacity: 1; transform: scale(1) } }
+          `}</style>
         </div>
       )}
 
