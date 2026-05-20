@@ -208,10 +208,20 @@ class DeviceSyncService:
                         'punch': record.punch
                     }
                     
+                    # Match by uid AND the device this punch came from. In shared
+                    # mode a matricule has one Employee row per device; matching by
+                    # uid alone would attribute the punch to an arbitrary device's
+                    # row (.first()), splitting one person's day across two PKs.
                     db_employee = db.query(DBEmployee).filter(
-                        DBEmployee.device_user_id == record_data['uid']
+                        DBEmployee.device_user_id == record_data['uid'],
+                        DBEmployee.source_device_id == device_id
                     ).first()
-                    
+                    if not db_employee:
+                        # Fallback for legacy rows without a per-device match
+                        db_employee = db.query(DBEmployee).filter(
+                            DBEmployee.device_user_id == record_data['uid']
+                        ).first()
+
                     if not db_employee:
                         logger.warning(f"Employee with device_user_id {record_data['uid']} not found for attendance record")
                         continue
