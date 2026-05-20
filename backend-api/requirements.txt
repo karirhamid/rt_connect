@@ -22,3 +22,6 @@ smbprotocol==1.13.0
 
 # Payroll exports (XLSX)
 openpyxl==3.1.2
+
+# Timezone database (needed by zoneinfo on Windows / slim images)
+tzdata==2024.1

@@ -6,6 +6,7 @@ Runs after a sync (or on-demand) over a window and inserts rows into the
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone, date
 from typing import Optional
+import os
 import logging
 
 from sqlalchemy import func, and_
@@ -20,6 +21,21 @@ ODD_HOURS_START = 0   # midnight
 ODD_HOURS_END = 5     # 5 AM — punches between 00:00–05:00 are flagged "odd"
 HUGE_GAP_HOURS = 14   # >14h between first IN and last OUT is suspicious
 MERGED_CLUSTER_LARGE = 4  # 4+ punches within the merge window
+FUTURE_TOLERANCE_MIN = 10  # allow small clock skew before flagging a future punch
+
+# Device timestamps are stored naive in DEVICE-LOCAL time. To compare against
+# "now" we must use the same wall-clock zone, regardless of the server's TZ.
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Africa/Casablanca")
+
+
+def _local_now_naive() -> datetime:
+    """Current wall-clock time in the configured app timezone, as a naive datetime."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(APP_TIMEZONE)).replace(tzinfo=None)
+    except Exception:
+        # Fall back to server local time if the tz database is unavailable.
+        return datetime.now()
 
 
 def _insert_anomaly(db, **kw):
@@ -37,7 +53,7 @@ def scan_attendance_window(start: datetime, end: datetime, device_id: Optional[s
     def bump(k):
         counts[k] = counts.get(k, 0) + 1
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = _local_now_naive()
 
     with get_db_session() as db:
         q = db.query(Attendance).filter(
@@ -53,7 +69,7 @@ def scan_attendance_window(start: datetime, end: datetime, device_id: Optional[s
             day = datetime.combine(ts.date(), datetime.min.time())
 
             # ---- future timestamp ----
-            if ts > now + timedelta(minutes=2):
+            if ts > now + timedelta(minutes=FUTURE_TOLERANCE_MIN):
                 _insert_anomaly(db, kind='future_timestamp', severity='warn',
                                 attendance_id=a.id, employee_id=a.employee_id,
                                 device_id=a.device_id, day=day,
@@ -142,6 +158,6 @@ def scan_attendance_window(start: datetime, end: datetime, device_id: Optional[s
 
 
 def scan_recent(hours: int = 48) -> dict:
-    end = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=5)
+    end = _local_now_naive() + timedelta(hours=2)
     start = end - timedelta(hours=hours)
     return scan_attendance_window(start, end)
