@@ -2,7 +2,7 @@ import logging
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 # Small delay between heavy device operations to let older firmware recover
 INTER_OP_DELAY = 0.8  # seconds
+
+# Incremental-sync safety overlap: re-scan this far before the stored watermark
+# so out-of-order / late-written punches are never missed. ON CONFLICT dedupes
+# anything in the overlap that's already stored.
+_SYNC_OVERLAP = timedelta(hours=6)
 
 # Default organizational IDs (created by create_defaults.py)
 DEFAULT_COMPANY_ID = 1
@@ -180,19 +185,37 @@ class DeviceSyncService:
                     time.sleep(INTER_OP_DELAY)
                     
                     last_attendance_sync = db_device.last_attendance_sync
-                    
+
                     attendance_records = mgr.get_attendance() or []
                     logger.info(f"Fetched {len(attendance_records)} total attendance records from {device_config.name}")
-                    
+
+                    # Incremental high-watermark filter.
+                    # The watermark is the newest punch we've already stored, in the
+                    # SAME (device-local, naive) frame as the records. We re-scan a
+                    # small OVERLAP window before it so punches written slightly out
+                    # of order are never missed; the unique constraint + ON CONFLICT
+                    # dedupe anything in the overlap that's already stored.
                     if last_attendance_sync:
+                        cutoff = last_attendance_sync - _SYNC_OVERLAP
                         original_count = len(attendance_records)
                         attendance_records = [
                             rec for rec in attendance_records
-                            if self._get_record_timestamp(rec) > last_attendance_sync
+                            if self._get_record_timestamp(rec) > cutoff
                         ]
-                        logger.info(f"Incremental sync: {len(attendance_records)} new records out of {original_count} total (since {last_attendance_sync})")
+                        logger.info(
+                            f"Incremental sync: {len(attendance_records)} candidate records "
+                            f"out of {original_count} (watermark={last_attendance_sync}, "
+                            f"overlap={_SYNC_OVERLAP})"
+                        )
                     else:
                         logger.info(f"Initial sync: Processing all {len(attendance_records)} attendance records")
+
+                    # Track the newest punch we actually see, to advance the watermark.
+                    max_seen_ts = last_attendance_sync
+                    for rec in attendance_records:
+                        ts = self._get_record_timestamp(rec)
+                        if ts and (max_seen_ts is None or ts > max_seen_ts):
+                            max_seen_ts = ts
                 
                 # Connection is now closed (exited the 'with' block)
                 # Process attendance records
@@ -255,9 +278,13 @@ class DeviceSyncService:
                 
                 logger.info(f"Attendance sync complete: {attendance_added} added, {attendance_duplicates} duplicates skipped")
                 
-                # Update device last sync time
+                # Update device sync timestamps.
+                # last_sync = when we ran (UTC, for "last contacted" display).
+                # last_attendance_sync = the WATERMARK: newest punch stored, in
+                # device-local frame, so the next incremental filter is exact.
                 db_device.last_sync = datetime.now(timezone.utc)
-                db_device.last_attendance_sync = datetime.now(timezone.utc)
+                if max_seen_ts is not None:
+                    db_device.last_attendance_sync = max_seen_ts
                 db.commit()
                 
                 # Log successful sync
