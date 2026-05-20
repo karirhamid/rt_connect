@@ -1550,44 +1550,42 @@ def _attendance_pdf_bytes(
 def _attendance_counts(start_date: str, end_date: str,
                        company_id: int | None, department_id: int | None,
                        device_ids: list | None) -> tuple[int, int]:
-    """Return (total_employees, total_records) for the given period/filters.
+    """Return (total_employees, total_records) consistent with the PDF report.
 
-    Attendance joins Employee via Attendance.employee_id == Employee.id
-    (not user_id — that field does not exist on the Attendance model).
+    Both numbers are computed exactly like the PDF header:
+      • total_employees = distinct employees with punches, grouped by matricule
+        (user_id) in shared mode or by PK in separate mode. This avoids
+        double-counting a person who has one Employee row per device.
+      • total_records   = number of employee-day summary rows (what the PDF
+        table lists), NOT raw punch count.
+    Voided (corrected/deleted) punches are excluded.
     """
-    from app.database.schema import Attendance as _Att, Employee as _Emp
+    from app.database.schema import (
+        Attendance as _Att, Employee as _Emp, AppSettings as _AS,
+    )
     from datetime import datetime as _dt
     start_dt = _dt.fromisoformat(start_date)
     end_dt   = _dt.fromisoformat(end_date).replace(hour=23, minute=59, second=59)
     with get_db_session() as db:
-        # ── total records ────────────────────────────────────────────────────
-        q = db.query(_Att)
-        q = q.filter(_Att.timestamp >= start_dt, _Att.timestamp <= end_dt)
-        if company_id or department_id:
-            q = q.join(_Emp, _Att.employee_id == _Emp.id, isouter=True)
-            if company_id:
-                q = q.filter(_Emp.company_id == company_id)
-            if department_id:
-                q = q.filter(_Emp.department_id == department_id)
+        settings = db.query(_AS).first()
+        shared = (getattr(settings, 'employee_mode', None) or 'shared') == 'shared'
+        group_col = _Emp.user_id if shared else _Emp.id
+
+        q = (
+            db.query(group_col.label('gid'), cast(_Att.timestamp, Date).label('day'))
+              .join(_Emp, _Att.employee_id == _Emp.id)
+              .filter(_Att.timestamp >= start_dt, _Att.timestamp <= end_dt)
+              .filter(_Att.voided_by_correction_id.is_(None))
+        )
+        if company_id:
+            q = q.filter(_Emp.company_id == company_id)
+        if department_id:
+            q = q.filter(_Emp.department_id == department_id)
         if device_ids:
             q = q.filter(_Att.device_id.in_(device_ids))
-        total_records = q.count()
 
-        # ── distinct employees ───────────────────────────────────────────────
-        emp_q = db.query(func.count(func.distinct(_Att.employee_id)))
-        emp_q = emp_q.filter(
-            _Att.timestamp >= start_dt,
-            _Att.timestamp <= end_dt,
-            _Att.employee_id.isnot(None),
-        )
-        if company_id or department_id:
-            emp_q = emp_q.join(_Emp, _Att.employee_id == _Emp.id, isouter=True)
-            if company_id:
-                emp_q = emp_q.filter(_Emp.company_id == company_id)
-            if department_id:
-                emp_q = emp_q.filter(_Emp.department_id == department_id)
-        if device_ids:
-            emp_q = emp_q.filter(_Att.device_id.in_(device_ids))
-        total_employees = emp_q.scalar() or 0
+        groups = q.group_by(group_col, cast(_Att.timestamp, Date)).all()
+        total_records = len(groups)                    # employee-day rows (matches PDF)
+        total_employees = len({g.gid for g in groups})  # distinct matricules
 
     return total_employees, total_records
