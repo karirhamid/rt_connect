@@ -20,7 +20,8 @@ export default function PayrollExport() {
     setBusy(filename);
     setError('');
     try {
-      const res = await api.get(path, { params, responseType: 'blob' });
+      const qs = new URLSearchParams(params).toString();
+      const res = await api.get(`${path}${qs ? `?${qs}` : ''}`, { responseType: 'blob' });
       const url = window.URL.createObjectURL(res.data);
       const a = document.createElement('a');
       a.href = url; a.download = filename;
@@ -39,21 +40,21 @@ export default function PayrollExport() {
       title: t('exportCSV') || 'CSV générique',
       desc: t('exportCSVDesc') || 'Une ligne par employé par jour. UTF-8 + BOM (ouvre directement dans Excel).',
       icon: FileText,
-      action: () => download('/api/payroll-export/csv', { start_date: start, end_date: end }, `payroll_${start}_${end}.csv`),
+      action: () => download('/payroll-export/csv', { start_date: start, end_date: end }, `payroll_${start}_${end}.csv`),
     },
     {
       key: 'xlsx',
       title: t('exportXLSX') || 'Excel (XLSX) avec totaux',
       desc: t('exportXLSXDesc') || 'Classeur formaté avec en-tête couleur et ligne de totaux.',
       icon: FileSpreadsheet,
-      action: () => download('/api/payroll-export/xlsx', { start_date: start, end_date: end }, `payroll_${start}_${end}.xlsx`),
+      action: () => download('/payroll-export/xlsx', { start_date: start, end_date: end }, `payroll_${start}_${end}.xlsx`),
     },
     {
       key: 'sage',
       title: t('exportSage') || 'Sage Paie Maroc',
       desc: t('exportSageDesc') || 'Format MATRICULE;RUBRIQUE;QUANTITE;DATE_DEBUT;DATE_FIN. Rubriques HEUR (heures normales), HSUP (sup.), RTRD (retard, min).',
       icon: FileText,
-      action: () => download('/api/payroll-export/sage-paie', { start_date: start, end_date: end }, `sage_paie_${start}_${end}.csv`),
+      action: () => download('/payroll-export/sage-paie', { start_date: start, end_date: end }, `sage_paie_${start}_${end}.csv`),
     },
   ];
 
@@ -117,7 +118,7 @@ export default function PayrollExport() {
               {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
             </select>
           </div>
-          <button onClick={() => download('/api/payroll-export/monthly-pdf', { year, month }, `monthly_${year}_${String(month).padStart(2, '0')}.pdf`)}
+          <button onClick={() => download('/payroll-export/monthly-pdf', { year, month }, `monthly_${year}_${String(month).padStart(2, '0')}.pdf`)}
                   disabled={!!busy}
                   className="inline-flex items-center gap-2 px-3 py-2 bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 text-sm">
             <Download className="w-4 h-4" /> {t('download') || 'Télécharger'}

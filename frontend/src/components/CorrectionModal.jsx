@@ -35,7 +35,7 @@ export default function CorrectionModal({ mode, employee, originalAttendanceId, 
 
   useEffect(() => {
     if (mode === 'add' && !employee) {
-      api.get('/api/employees').then((r) => setEmployees(r.data?.items || r.data || [])).catch(() => {});
+      api.get('/employees').then((r) => setEmployees(r.data?.items || r.data || [])).catch(() => {});
     }
   }, [mode, employee]);
 
@@ -55,7 +55,7 @@ export default function CorrectionModal({ mode, employee, originalAttendanceId, 
         new_timestamp: isDelete ? null : new Date(timestamp).toISOString(),
         new_punch_type: isDelete ? null : Number(punchType),
       };
-      await api.post('/api/corrections', body);
+      await api.post('/corrections', body);
       onSaved && onSaved();
       onClose && onClose();
     } catch (err) {

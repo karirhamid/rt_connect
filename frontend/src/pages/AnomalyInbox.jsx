@@ -35,11 +35,11 @@ export default function AnomalyInbox() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { status: statusFilter, limit, offset: page * limit };
-      if (kindFilter) params.kind = kindFilter;
+      const qs = new URLSearchParams({ status: statusFilter, limit: String(limit), offset: String(page * limit) });
+      if (kindFilter) qs.set('kind', kindFilter);
       const [res, sumRes] = await Promise.all([
-        api.get('/api/anomalies', { params }),
-        api.get('/api/anomalies/summary'),
+        api.get(`/anomalies?${qs.toString()}`),
+        api.get('/anomalies/summary'),
       ]);
       setItems(res.data?.items || []);
       setTotal(res.data?.total || 0);
@@ -55,7 +55,7 @@ export default function AnomalyInbox() {
 
   const resolve = async (id, status) => {
     try {
-      await api.put(`/api/anomalies/${id}`, { status });
+      await api.put(`/anomalies/${id}`, { status });
       load();
     } catch (e) { console.error(e); }
   };
@@ -63,7 +63,7 @@ export default function AnomalyInbox() {
   const rescan = async () => {
     setLoading(true);
     try {
-      await api.post('/api/anomalies/scan', null, { params: { hours: 168 } });
+      await api.post('/anomalies/scan?hours=168', null);
       load();
     } finally { setLoading(false); }
   };

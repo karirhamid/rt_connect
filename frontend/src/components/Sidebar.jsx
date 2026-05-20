@@ -39,7 +39,7 @@ export default function Sidebar({
     let cancelled = false;
     const fetchCount = async () => {
       try {
-        const res = await api.get('/api/anomalies/summary');
+        const res = await api.get('/anomalies/summary');
         if (!cancelled) setAnomalyCount(res.data?.open_total || 0);
       } catch (e) { /* ignore */ }
     };

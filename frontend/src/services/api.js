@@ -57,6 +57,38 @@ class ApiService {
     return { data, status: resp.status };
   }
 
+  async put(path, payload, options = {}) {
+    const fetchOpts = { method: 'PUT', ...options };
+    if (payload !== undefined) {
+      fetchOpts.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      fetchOpts.body = JSON.stringify(payload);
+    }
+    const resp = await this.authFetch(`/api${path}`, fetchOpts);
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      const err = new Error(data?.detail || resp.statusText);
+      err.response = { data, status: resp.status };
+      throw err;
+    }
+    return { data, status: resp.status };
+  }
+
+  async patch(path, payload, options = {}) {
+    const fetchOpts = { method: 'PATCH', ...options };
+    if (payload !== undefined) {
+      fetchOpts.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      fetchOpts.body = JSON.stringify(payload);
+    }
+    const resp = await this.authFetch(`/api${path}`, fetchOpts);
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      const err = new Error(data?.detail || resp.statusText);
+      err.response = { data, status: resp.status };
+      throw err;
+    }
+    return { data, status: resp.status };
+  }
+
   async delete(path, options = {}) {
     const resp = await this.authFetch(`/api${path}`, { method: 'DELETE', ...options });
     const data = await resp.json().catch(() => null);

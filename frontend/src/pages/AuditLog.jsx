@@ -31,11 +31,11 @@ export default function AuditLog() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { limit, offset: page * limit };
-      if (filters.method) params.method = filters.method;
-      if (filters.username) params.username = filters.username;
-      if (filters.path_contains) params.path_contains = filters.path_contains;
-      const res = await api.get('/api/audit-log', { params });
+      const qs = new URLSearchParams({ limit: String(limit), offset: String(page * limit) });
+      if (filters.method) qs.set('method', filters.method);
+      if (filters.username) qs.set('username', filters.username);
+      if (filters.path_contains) qs.set('path_contains', filters.path_contains);
+      const res = await api.get(`/audit-log?${qs.toString()}`);
       setRows(res.data?.items || []);
       setTotal(res.data?.total || 0);
     } catch (e) {

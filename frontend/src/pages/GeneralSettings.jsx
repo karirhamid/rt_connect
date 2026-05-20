@@ -1376,7 +1376,7 @@ function GeneralSettings() {
                       type="button"
                       onClick={async () => {
                         try {
-                          const res = await api.post('/api/email-settings/test-alert');
+                          const res = await api.post('/email-settings/test-alert');
                           showNotification('success', res.data?.detail || 'Test alert envoyé');
                         } catch (e) {
                           showNotification('error', e?.response?.data?.detail || e.message);

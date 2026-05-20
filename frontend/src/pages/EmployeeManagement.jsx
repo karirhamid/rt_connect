@@ -521,7 +521,7 @@ function EmployeeManagement() {
               const firstName = (employee.name || '').trim().split(' ')[0] || '?';
               if (!window.confirm((t('resetPortalConfirm') || 'Réinitialiser le mot de passe portail ?') + `\n${t('initialPasswordWillBe') || 'Mot de passe initial'}: "${firstName}"`)) return;
               try {
-                await api.post(`/api/employees/${employee.id}/portal-reset`);
+                await api.post(`/employees/${employee.id}/portal-reset`);
                 showToast((t('portalPasswordReset') || 'Mot de passe réinitialisé') + `: "${firstName}"`, 'success');
               } catch (e) {
                 showToast(e?.response?.data?.detail || e.message, 'error');
