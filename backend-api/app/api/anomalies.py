@@ -6,9 +6,12 @@ from sqlalchemy import desc
 
 from app.database.connection import get_db_session
 from app.database.schema import Anomaly, Employee, Device
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_any_permission, MANAGER_PERMS
 
 router = APIRouter()
+
+# Anomaly inbox is a management feature — not for plain reporting users.
+_require_manager = require_any_permission(*MANAGER_PERMS)
 
 
 class ResolveBody(BaseModel):
@@ -22,7 +25,7 @@ def list_anomalies(
     kind: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    current=Depends(get_current_user),
+    current=Depends(_require_manager),
 ):
     with get_db_session() as db:
         q = db.query(Anomaly)
@@ -58,7 +61,7 @@ def list_anomalies(
 
 
 @router.get("/anomalies/summary")
-def summary(current=Depends(get_current_user)):
+def summary(current=Depends(_require_manager)):
     """Counts per kind for the open anomalies — used for sidebar badge."""
     from sqlalchemy import func
     with get_db_session() as db:
@@ -68,7 +71,7 @@ def summary(current=Depends(get_current_user)):
 
 
 @router.put("/anomalies/{aid}")
-def resolve(aid: int, body: ResolveBody, current=Depends(get_current_user)):
+def resolve(aid: int, body: ResolveBody, current=Depends(_require_manager)):
     if body.status not in ("ack", "ignored", "resolved", "open"):
         raise HTTPException(400, "invalid status")
     with get_db_session() as db:
@@ -84,7 +87,7 @@ def resolve(aid: int, body: ResolveBody, current=Depends(get_current_user)):
 
 
 @router.post("/anomalies/scan")
-def trigger_scan(hours: int = Query(48, ge=1, le=720), current=Depends(get_current_user)):
+def trigger_scan(hours: int = Query(48, ge=1, le=720), current=Depends(_require_manager)):
     from app.services.integrity_guards import scan_recent
     counts = scan_recent(hours=hours)
     return {"scanned_hours": hours, "counts": counts}

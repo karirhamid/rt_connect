@@ -145,3 +145,18 @@ def require_permission(permission_code: str):
             return True
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient permissions')
     return dependency
+
+
+def require_any_permission(*permission_codes: str):
+    """Allow the request if the user has ANY of the given permission codes."""
+    def dependency(user: User = Depends(get_current_user)):
+        if any(user_has_permission(user, code) for code in permission_codes):
+            return user
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Insufficient permissions')
+    return dependency
+
+
+# "Manager" capability — held by admin-type roles, NOT by a plain reporting
+# user (who only has attendance.read + devices.sync). Used to gate the
+# anomaly inbox and payroll exports.
+MANAGER_PERMS = ('roles.manage', 'users.read', 'settings.manage', 'devices.manage')

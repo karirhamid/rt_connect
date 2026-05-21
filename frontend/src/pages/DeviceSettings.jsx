@@ -960,7 +960,8 @@ export default function DeviceSettings() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <div className="flex items-center gap-2">
-                        {/* Sync Users — always visible */}
+                        {/* Sync Users — managers only (reporting users sync logs only) */}
+                        {canManageDevices() && (
                         <button
                           onClick={() => handleFetchEmployeesPreview(device)}
                           disabled={loadingStates[`${device.id}-employees`]}
@@ -977,7 +978,8 @@ export default function DeviceSettings() {
                           )}
                           <span className="hidden lg:inline">{t('syncUsers')}</span>
                         </button>
-                        {/* Sync Logs — always visible */}
+                        )}
+                        {/* Sync Logs — visible to anyone who can sync (incl. reporting users) */}
                         <button
                           onClick={() => handleOpenLogsModal(device)}
                           disabled={loadingStates[`${device.id}-logs`]}
@@ -995,7 +997,8 @@ export default function DeviceSettings() {
                           <span className="hidden lg:inline">{t('syncLogs')}</span>
                         </button>
 
-                        {/* ··· more actions dropdown */}
+                        {/* ··· more actions dropdown — managers only (edit/backup/restore/delete) */}
+                        {canManageDevices() && (
                         <div>
                           <button
                             onClick={(e) => {
@@ -1009,6 +1012,7 @@ export default function DeviceSettings() {
                             <MoreVertical className="w-4 h-4" />
                           </button>
                         </div>
+                        )}
 
                         {openMenu?.id === device.id && (
                           <div

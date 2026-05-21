@@ -15,7 +15,10 @@ from app.database.schema import (
     Attendance as DBAttendance, Employee as DBEmployee,
     Department as DBDepartment, AppSettings,
 )
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_any_permission, MANAGER_PERMS
+
+# Payroll exports are a management feature — not for plain reporting users.
+_require_manager = require_any_permission(*MANAGER_PERMS)
 from app.services.punch_classifier import get_employee_day_summary
 
 router = APIRouter()
@@ -121,7 +124,7 @@ def _fmt_hm(m: int) -> str:
 
 # ── CSV ───────────────────────────────────────────────────────────────────────
 @router.get("/payroll-export/csv")
-def export_csv(start_date: str, end_date: str, current=Depends(get_current_user)):
+def export_csv(start_date: str, end_date: str, current=Depends(_require_manager)):
     rows = _gather_rows(_parse_date(start_date), _parse_date(end_date))
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=';')
@@ -139,7 +142,7 @@ def export_csv(start_date: str, end_date: str, current=Depends(get_current_user)
 
 # ── XLSX ──────────────────────────────────────────────────────────────────────
 @router.get("/payroll-export/xlsx")
-def export_xlsx(start_date: str, end_date: str, current=Depends(get_current_user)):
+def export_xlsx(start_date: str, end_date: str, current=Depends(_require_manager)):
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -195,7 +198,7 @@ def export_xlsx(start_date: str, end_date: str, current=Depends(get_current_user
 
 # ── Sage Paie Maroc ───────────────────────────────────────────────────────────
 @router.get("/payroll-export/sage-paie")
-def export_sage(start_date: str, end_date: str, current=Depends(get_current_user)):
+def export_sage(start_date: str, end_date: str, current=Depends(_require_manager)):
     """Best-effort Sage Paie Maroc-compatible CSV.
     Layout (per row): MATRICULE;CODE_RUBRIQUE;NB_HEURES;DATE_DEBUT;DATE_FIN
     Rubriques used (configurable in Sage — adjust on import if needed):
@@ -230,7 +233,7 @@ def export_sage(start_date: str, end_date: str, current=Depends(get_current_user
 
 # ── Monthly PDF summary ───────────────────────────────────────────────────────
 @router.get("/payroll-export/monthly-pdf")
-def export_monthly_pdf(year: int, month: int, current=Depends(get_current_user)):
+def export_monthly_pdf(year: int, month: int, current=Depends(_require_manager)):
     from reportlab.lib.pagesizes import A4
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

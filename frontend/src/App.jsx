@@ -29,13 +29,21 @@ import ProfileMenu from './components/ProfileMenu';
 import Sidebar from './components/Sidebar';
 
 // Redirects to '/' if the user doesn't have the required permission
-function ProtectedRoute({ perm, children }) {
+function ProtectedRoute({ perm, anyOf, children }) {
   const perms = (() => {
     try { return new Set(JSON.parse(localStorage.getItem('_userPerms') || '[]')); } catch { return new Set(); }
   })();
-  if (!perms.has(perm)) return <Navigate to="/" replace />;
+  // anyOf: allow if the user has at least one of the listed permissions
+  if (anyOf && anyOf.length) {
+    if (!anyOf.some(p => perms.has(p))) return <Navigate to="/" replace />;
+    return children;
+  }
+  if (perm && !perms.has(perm)) return <Navigate to="/" replace />;
   return children;
 }
+
+// Admin/manager capability — NOT a plain reporting user (attendance.read + devices.sync only)
+const MANAGER_PERMS = ['roles.manage', 'users.read', 'settings.manage', 'devices.manage'];
 
 function App() {
   return (
@@ -141,8 +149,13 @@ function AppContent() {
       if (s.key === 'admin')       return has('users.read') || has('settings.manage');
       return true;
     });
-    // Item-level: Super Admin only items
+    // Item-level: manager-only items
+    const isManager = has('roles.manage') || has('users.read') || has('settings.manage') || has('devices.manage');
     sidebarSections = sidebarSections.map(s => {
+      if (s.key === 'hr' && !isManager) {
+        // Reporting users see Reports but not the Anomaly inbox / Payroll export
+        return { ...s, items: s.items.filter(i => i.href !== '/anomalies' && i.href !== '/payroll-export') };
+      }
       if (s.key === 'devices' && !has('devices.manage')) {
         return { ...s, items: s.items.filter(i => i.href !== '/employees/device-sync') };
       }
@@ -411,8 +424,8 @@ function AppContent() {
             <Route path="/settings/bulk-assign" element={<ProtectedRoute perm="shifts.manage"><BulkShiftAssignment /></ProtectedRoute>} />
             <Route path="/settings/maintenance" element={<ProtectedRoute perm="roles.manage"><Maintenance /></ProtectedRoute>} />
             <Route path="/settings/audit-log" element={<ProtectedRoute perm="roles.manage"><AuditLog /></ProtectedRoute>} />
-            <Route path="/anomalies" element={<ProtectedRoute perm="attendance.read"><AnomalyInbox /></ProtectedRoute>} />
-            <Route path="/payroll-export" element={<ProtectedRoute perm="attendance.read"><PayrollExport /></ProtectedRoute>} />
+            <Route path="/anomalies" element={<ProtectedRoute anyOf={MANAGER_PERMS}><AnomalyInbox /></ProtectedRoute>} />
+            <Route path="/payroll-export" element={<ProtectedRoute anyOf={MANAGER_PERMS}><PayrollExport /></ProtectedRoute>} />
           </Routes>
         </main>
       </div>
