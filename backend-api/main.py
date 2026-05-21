@@ -91,6 +91,19 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS voided_by_correction_id BIGINT"
             ))
+            # Manual-punch approval workflow
+            conn.execute(sa_text(
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT TRUE"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS approved_by INTEGER"
+            ))
+            conn.execute(sa_text(
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP"
+            ))
+            conn.execute(sa_text(
+                "CREATE INDEX IF NOT EXISTS ix_attendance_approved ON attendance(approved)"
+            ))
             conn.execute(sa_text(
                 "CREATE INDEX IF NOT EXISTS ix_attendance_voided ON attendance(voided_by_correction_id)"
             ))

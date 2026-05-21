@@ -61,6 +61,7 @@ def _gather_rows(start: date, end: date, employee_ids: Optional[list[int]] = Non
         .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
         .outerjoin(DBDepartment, DBEmployee.department_id == DBDepartment.id)
         .filter(DBAttendance.voided_by_correction_id.is_(None))
+        .filter(DBAttendance.approved.isnot(False))
         .filter(DBAttendance.timestamp >= start_dt)
         .filter(DBAttendance.timestamp <= end_dt))
 

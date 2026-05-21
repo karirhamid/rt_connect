@@ -14,9 +14,19 @@ from app.database.connection import get_db_session
 from app.database.schema import (
     Attendance, AttendanceCorrection, Employee, User,
 )
-from app.core.security import get_current_user, user_has_permission
+from app.core.security import (
+    get_current_user, user_has_permission, require_any_permission, MANAGER_PERMS,
+)
+from datetime import timezone
 
 router = APIRouter()
+
+# Who may approve manual punches: admins/managers OR the RH-reporting role.
+_require_approver = require_any_permission(*MANAGER_PERMS, "reports.hours")
+
+
+def _can_approve(user) -> bool:
+    return any(user_has_permission(user, c) for c in (*MANAGER_PERMS, "reports.hours"))
 
 
 class CorrectionCreate(BaseModel):
@@ -108,6 +118,7 @@ def create_correction(body: CorrectionCreate, current: User = Depends(get_curren
                 status=0,
                 punch=body.new_punch_type,
                 source='manual',
+                approved=False,  # awaits admin / RH-reporting approval
             )
             db.add(new_row)
 
@@ -154,3 +165,57 @@ def list_corrections(
                 "reason": r.reason,
             } for r in rows],
         }
+
+
+# ─── Approval workflow for manual punches ──────────────────────────────────
+@router.get("/corrections/pending")
+def list_pending(current: User = Depends(get_current_user)):
+    """Manual punches awaiting approval. Everyone may view (to see status);
+    only approvers get an enabled Approve button (see can_approve flag)."""
+    with get_db_session() as db:
+        rows = (db.query(Attendance)
+                  .filter(Attendance.source == 'manual',
+                          Attendance.approved == False,  # noqa: E712
+                          Attendance.voided_by_correction_id.is_(None))
+                  .order_by(desc(Attendance.id)).limit(500).all())
+        emp_ids = list({r.employee_id for r in rows if r.employee_id})
+        emp_map = {e.id: (e.name, e.user_id) for e in
+                   db.query(Employee).filter(Employee.id.in_(emp_ids)).all()} if emp_ids else {}
+        return {
+            "can_approve": _can_approve(current),
+            "items": [{
+                "attendance_id": r.id,
+                "employee_id": r.employee_id,
+                "employee_name": emp_map.get(r.employee_id, (None, None))[0],
+                "matricule": emp_map.get(r.employee_id, (None, None))[1],
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+                "punch": r.punch,  # 0=in, 1=out
+            } for r in rows],
+        }
+
+
+@router.post("/attendance/{attendance_id}/approve")
+def approve_punch(attendance_id: int, current: User = Depends(_require_approver)):
+    with get_db_session() as db:
+        a = db.query(Attendance).filter(Attendance.id == attendance_id).first()
+        if not a:
+            raise HTTPException(404, "punch not found")
+        a.approved = True
+        a.approved_by = current.id
+        a.approved_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"ok": True, "attendance_id": attendance_id, "approved": True}
+
+
+@router.post("/attendance/{attendance_id}/reject")
+def reject_punch(attendance_id: int, current: User = Depends(_require_approver)):
+    """Reject a pending manual punch — removes it (it was never approved)."""
+    with get_db_session() as db:
+        a = db.query(Attendance).filter(Attendance.id == attendance_id).first()
+        if not a:
+            raise HTTPException(404, "punch not found")
+        if a.approved:
+            raise HTTPException(400, "punch already approved")
+        db.delete(a)
+        db.commit()
+        return {"ok": True, "attendance_id": attendance_id, "rejected": True}

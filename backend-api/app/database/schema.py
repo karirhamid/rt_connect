@@ -180,6 +180,11 @@ class Attendance(Base):
     synced_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     # Provenance: device | manual | imported | corrected
     source = Column(String(16), nullable=False, server_default="device", default="device", index=True)
+    # Manual punches start unapproved and stay out of reports/PDFs until an
+    # admin or RH-reporting role approves them. Device punches are always approved.
+    approved = Column(Boolean, nullable=False, server_default="true", default=True, index=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
     # When set, this device row was voided by an HR correction (replacement
     # row points back via AttendanceCorrection.original_attendance_id).
     # Reports must filter out voided rows.

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, AlertTriangle } from 'lucide-react';
+import { X } from 'lucide-react';
 import api from '../services/api';
 
 /**
@@ -82,11 +82,6 @@ export default function CorrectionModal({ mode, employee, originalAttendanceId, 
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
         </div>
         <form onSubmit={submit} className="p-5 space-y-4">
-          <div className="bg-amber-50 border border-amber-200 rounded p-3 flex gap-2 text-sm text-amber-800">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-            <span>{selectedEmployee?.name || (t('noEmployeeSelected') || 'Aucun employé sélectionné')} — {t('correctionAuditNote') || "Cette action sera enregistrée dans le journal d'audit."}</span>
-          </div>
-
           {mode === 'add' && !employee && (
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">{t('employee') || 'Employé'}</label>

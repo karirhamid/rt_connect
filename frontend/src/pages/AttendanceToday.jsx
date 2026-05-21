@@ -50,6 +50,34 @@ function AttendanceToday() {
   const [summaryByDevice, setSummaryByDevice] = useState({}); // { deviceId: rows[] }
   // "Sync since last logs" — fills the gap from the last stored punch up to now
   const [smartSync, setSmartSync] = useState(null); // { devices, startDate, endDate, newCount, dupCount, busy }
+  // Manual punches awaiting approval
+  const [pending, setPending] = useState({ items: [], canApprove: false });
+
+  const loadPending = async () => {
+    try {
+      const resp = await api.authFetch('/api/corrections/pending', { method: 'GET' });
+      if (resp.ok) {
+        const data = await resp.json();
+        setPending({ items: data.items || [], canApprove: !!data.can_approve });
+      }
+    } catch { /* ignore */ }
+  };
+
+  const approvePunch = async (id) => {
+    try {
+      await api.post(`/attendance/${id}/approve`);
+      await loadPending();
+      await fetchTodayAttendance();
+    } catch (e) { console.error(e); }
+  };
+
+  const rejectPunch = async (id) => {
+    try {
+      await api.post(`/attendance/${id}/reject`);
+      await loadPending();
+      await fetchTodayAttendance();
+    } catch (e) { console.error(e); }
+  };
 
   const fmtMin = (m) => {
     if (m == null) return '-';
@@ -65,6 +93,7 @@ function AttendanceToday() {
   useEffect(() => {
     if (devices.length > 0) {
       fetchTodayAttendance();
+      loadPending();
       // Auto-refresh every 2 minutes only if viewing today
       const isToday = selectedDate === new Date().toISOString().split('T')[0];
       if (isToday) {
@@ -389,17 +418,7 @@ function AttendanceToday() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {/* Classified / Raw view toggle */}
-          <button
-            onClick={() => setClassifiedView(v => !v)}
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              classifiedView ? 'bg-primary-100 text-primary-700 border border-primary-300' : 'bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200'
-            }`}
-            title={classifiedView ? t('rawView') : t('classifiedView')}
-          >
-            {classifiedView ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-            {classifiedView ? (t('classifiedView') || 'Classified') : (t('rawView') || 'Raw')}
-          </button>
+          {/* Classified / Raw view toggle — disabled for now */}
           {lastSync && (
             <span className="text-sm text-gray-500">
               {t('lastUpdated')}: {formatTime(lastSync)}
@@ -483,6 +502,45 @@ function AttendanceToday() {
           </div>
         </div>
       </div>
+
+      {/* Pending manual punches awaiting approval */}
+      {pending.items.length > 0 && (
+        <div className="bg-white rounded-lg shadow border border-amber-200 overflow-hidden">
+          <div className="px-5 py-3 border-b border-amber-100 bg-amber-50 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-600" />
+            <h2 className="text-sm font-semibold text-amber-800">
+              {t('pendingApprovalTitle') || 'Pointages manuels en attente d\'approbation'}
+            </h2>
+            <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{pending.items.length}</span>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {pending.items.map((p) => (
+              <div key={p.attendance_id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
+                <span className="font-medium text-gray-900">{p.employee_name || p.matricule}</span>
+                <span className="font-mono text-gray-600">{new Date(p.timestamp).toLocaleString()}</span>
+                <span className={`px-2 py-0.5 rounded text-xs font-semibold ${p.punch === 0 ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                  {p.punch === 0 ? (t('checkIn') || 'Entrée') : (t('checkOut') || 'Sortie')}
+                </span>
+                <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                  {t('notApproved') || 'Non approuvé'}
+                </span>
+                {pending.canApprove && (
+                  <div className="ml-auto flex gap-1">
+                    <button onClick={() => approvePunch(p.attendance_id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded">
+                      <CheckCircle className="w-3.5 h-3.5" /> {t('approve') || 'Approuver'}
+                    </button>
+                    <button onClick={() => rejectPunch(p.attendance_id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 rounded">
+                      <Trash2 className="w-3.5 h-3.5" /> {t('reject') || 'Rejeter'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Attendance by Device */}
       {loading ? (
@@ -624,7 +682,7 @@ function AttendanceToday() {
           defaultTimestamp={correction.defaultTimestamp}
           defaultPunchType={correction.defaultPunchType}
           onClose={() => setCorrection(null)}
-          onSaved={() => { setCorrection(null); fetchTodayAttendance(); }}
+          onSaved={() => { setCorrection(null); fetchTodayAttendance(); loadPending(); }}
         />
       )}
 
