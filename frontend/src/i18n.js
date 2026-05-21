@@ -118,6 +118,7 @@ const resources = {
       
       // Attendance
       todaysAttendance: "Pointage d'Aujourd'hui",
+      employeesPresent: "Employés ayant pointé",
       lastUpdated: "Dernière mise à jour",
       syncNow: "Synchroniser",
       syncing: "Synchronisation...",
@@ -1242,6 +1243,7 @@ const resources = {
       
       // Attendance
       todaysAttendance: "Today's Attendance",
+      employeesPresent: "Employees who punched",
       lastUpdated: "Last updated",
       syncNow: "Sync Now",
       syncing: "Syncing...",
@@ -2363,6 +2365,7 @@ const resources = {
       
       // Attendance
       todaysAttendance: "حضور اليوم",
+      employeesPresent: "الموظفون الذين سجلوا",
       lastUpdated: "آخر تحديث",
       syncNow: "مزامنة الآن",
       present: "حاضر",
