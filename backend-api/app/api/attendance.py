@@ -19,13 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/latest-log-date")
-async def latest_log_date(db: Session = Depends(get_db)):
+async def latest_log_date(
+    device_id: Optional[str] = Query(None, description="Limit to one device"),
+    db: Session = Depends(get_db),
+):
     """Return the date of the most recent stored punch (device-local).
 
-    Used by the 'sync since last logs' button: it syncs from this date
+    Used by the 'sync since last logs' feature: it syncs from this date
     (start of day) up to now, so the gap since the last sync is filled.
+    Pass device_id to get the last punch for a single device.
     """
-    max_ts = db.query(func.max(DBAttendance.timestamp)).scalar()
+    q = db.query(func.max(DBAttendance.timestamp))
+    if device_id:
+        q = q.filter(DBAttendance.device_id == device_id)
+    max_ts = q.scalar()
     return {
         "latest_timestamp": max_ts.isoformat() if max_ts else None,
         "latest_date": max_ts.date().isoformat() if max_ts else None,

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Trash2, Search, Loader, Edit, Users, FileText, Download, RefreshCw, MonitorSmartphone, Database, X, Calendar, CalendarDays, Clock, ArrowRight, Save, Upload, RotateCcw, ShieldCheck, AlertTriangle, MoreVertical } from 'lucide-react';
+import { Plus, Trash2, Search, Loader, Edit, Users, FileText, Download, RefreshCw, MonitorSmartphone, Database, X, Calendar, CalendarDays, Clock, ArrowRight, Save, Upload, RotateCcw, ShieldCheck, AlertTriangle, MoreVertical, History } from 'lucide-react';
 import api from '../services/api';
 import Dialog, { Toast } from '../components/Dialog';
 import SyncOverlay from '../components/SyncOverlay';
@@ -37,7 +37,7 @@ export default function DeviceSettings() {
   });
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [selectedDeviceForLogs, setSelectedDeviceForLogs] = useState(null);
-  const [logsSyncRange, setLogsSyncRange] = useState('month'); // today|yesterday|week|month|all|specific
+  const [logsSyncRange, setLogsSyncRange] = useState('since_last'); // since_last|today|yesterday|week|month|all|specific
   const [logsCustomFrom, setLogsCustomFrom] = useState('');
   const [logsCustomTo, setLogsCustomTo] = useState('');
   const [syncingEmployees, setSyncingEmployees] = useState({});
@@ -490,6 +490,9 @@ export default function DeviceSettings() {
         return { days: 30 };
       case 'all':
         return { days: 0 };
+      case 'since_last':
+        // start is resolved async from the device's last stored punch
+        return { days: 0, endDate: fmt(today) };
       case 'specific':
         return { days: 0, startDate: customFrom || undefined, endDate: customTo || undefined };
       default:
@@ -501,10 +504,22 @@ export default function DeviceSettings() {
     if (!selectedDeviceForLogs) return;
 
     const devName = selectedDeviceForLogs.name;
+    const devId = selectedDeviceForLogs.id;
     setShowLogsModal(false);
     setSyncOverlay({ visible: true, phase: 'syncing', deviceName: devName, direction: 'fromDevice' });
 
-    const { days, startDate, endDate } = getDateRangeParams(logsSyncRange, logsCustomFrom, logsCustomTo);
+    let { days, startDate, endDate } = getDateRangeParams(logsSyncRange, logsCustomFrom, logsCustomTo);
+
+    // "Since last sync": fill the gap from this device's last stored punch → now
+    if (logsSyncRange === 'since_last') {
+      try {
+        const resp = await api.authFetch(`/api/attendance/latest-log-date?device_id=${devId}`, { method: 'GET' });
+        const data = await resp.json().catch(() => ({}));
+        startDate = data.latest_date || new Date().toISOString().split('T')[0];
+      } catch {
+        startDate = new Date().toISOString().split('T')[0];
+      }
+    }
 
     try {
       const result = await api.syncAttendanceFromDevice(selectedDeviceForLogs.id, days, true, { startDate, endDate });
@@ -1134,6 +1149,7 @@ export default function DeviceSettings() {
               <label className="block text-xs font-medium text-slate-500 mb-2">{t('selectPeriod')}</label>
               <div className="grid grid-cols-3 gap-2">
                 {[
+                  { key: 'since_last', icon: History,      label: t('syncSinceLast') || 'Depuis la dernière synchro' },
                   { key: 'today',     icon: Clock,        label: t('today') },
                   { key: 'yesterday', icon: CalendarDays, label: t('yesterday') },
                   { key: 'week',      icon: Calendar,     label: t('thisWeek') },
@@ -1181,14 +1197,6 @@ export default function DeviceSettings() {
                   </div>
                 </div>
               )}
-            </div>
-
-            {/* Reassurance: incremental, no duplicates */}
-            <div className="px-6 pt-3 pb-1">
-              <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                <span>{t('logsIncrementalNote') || "Seuls les nouveaux pointages sont importés. Les pointages déjà enregistrés sont ignorés automatiquement — aucun doublon."}</span>
-              </div>
             </div>
 
             {/* Actions */}

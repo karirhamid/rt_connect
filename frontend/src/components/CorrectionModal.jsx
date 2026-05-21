@@ -35,7 +35,12 @@ export default function CorrectionModal({ mode, employee, originalAttendanceId, 
 
   useEffect(() => {
     if (mode === 'add' && !employee) {
-      api.get('/employees').then((r) => setEmployees(r.data?.items || r.data || [])).catch(() => {});
+      api.getEmployees()
+        .then((res) => {
+          const list = Array.isArray(res) ? res : (res.employees || res.items || res.data || []);
+          setEmployees(Array.isArray(list) ? list : []);
+        })
+        .catch(() => setEmployees([]));
     }
   }, [mode, employee]);
 
@@ -90,7 +95,7 @@ export default function CorrectionModal({ mode, employee, originalAttendanceId, 
                 setSelectedEmployee(emp || null);
               }} className="w-full px-3 py-2 border rounded text-sm">
                 <option value="">— {t('selectEmployee') || 'Sélectionner'} —</option>
-                {employees.map(emp => (
+                {(Array.isArray(employees) ? employees : []).map(emp => (
                   <option key={emp.id} value={emp.id}>{emp.name} {emp.user_id ? `(${emp.user_id})` : ''}</option>
                 ))}
               </select>

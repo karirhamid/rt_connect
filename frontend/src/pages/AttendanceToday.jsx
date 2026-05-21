@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, Users, TrendingUp, AlertCircle, CheckCircle, Loader2, RefreshCw, ToggleLeft, ToggleRight, Edit2, Trash2, Plus, History, ShieldCheck } from 'lucide-react';
+import { Calendar, Clock, Users, TrendingUp, AlertCircle, CheckCircle, Loader2, RefreshCw, ToggleLeft, ToggleRight, Edit2, Trash2, Plus, History } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 import SyncOverlay from '../components/SyncOverlay';
@@ -256,9 +256,10 @@ function AttendanceToday() {
       const startDate = data.latest_date || todayISO;  // from 01h of that day
       const endDate = todayISO;
 
-      // 2) Preview across all devices, aggregate counts
+      // 2) Preview across all devices, aggregate counts (show progress per device)
       let newCount = 0, dupCount = 0;
       for (const device of devices) {
+        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device.name, direction: 'fromDevice' });
         try {
           const r = await api.syncAttendanceFromDevice(device.id, 0, true, { startDate, endDate });
           newCount += r.new_count || 0;
@@ -288,6 +289,7 @@ function AttendanceToday() {
     setSyncOverlay({ visible: true, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
     try {
       for (const device of devices) {
+        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device.name, direction: 'fromDevice' });
         try {
           await api.syncAttendanceFromDevice(device.id, 0, false, { startDate, endDate });
         } catch (e) {
@@ -383,21 +385,13 @@ function AttendanceToday() {
             </span>
           )}
           <button
-            onClick={handleManualSync}
-            disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? t('syncing') : t('syncNow')}
-          </button>
-          <button
             onClick={startSmartSync}
             disabled={syncing}
-            className="flex items-center gap-2 px-3 py-2 border border-primary-300 text-primary-700 rounded-lg hover:bg-primary-50 transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
             title={t('syncSinceLastDesc') || 'Synchroniser depuis le dernier pointage enregistré jusqu\'à maintenant'}
           >
-            <History className="w-4 h-4" />
-            {t('syncSinceLast') || 'Combler les pointages manquants'}
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {syncing ? t('syncing') : (t('syncSinceLast') || 'Synchroniser')}
           </button>
           <button
             onClick={() => setCorrection({ mode: 'add', employee: null, originalAttendanceId: null, defaultTimestamp: new Date().toISOString(), defaultPunchType: 0 })}
@@ -628,10 +622,6 @@ function AttendanceToday() {
                 <span className="text-slate-500">
                   {t('existingRecords') || 'Déjà enregistrés'} : <strong>{smartSync.dupCount}</strong>
                 </span>
-              </div>
-              <div className="mt-3 flex items-start gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                <span>{t('logsIncrementalNote') || 'Seuls les nouveaux pointages sont importés. Les pointages déjà enregistrés sont ignorés automatiquement — aucun doublon.'}</span>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 px-6 py-4">
