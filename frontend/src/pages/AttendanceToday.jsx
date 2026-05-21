@@ -46,10 +46,10 @@ function AttendanceToday() {
   const [employeeMode, setEmployeeMode] = useState('shared');
   const [correction, setCorrection] = useState(null);  // { mode, employee, originalAttendanceId, defaultTimestamp, defaultPunchType }
   const [daySummaries, setDaySummaries] = useState({});
-  // Reports-style per-employee summary for the selected day (only employees who punched)
-  const [summaryRows, setSummaryRows] = useState([]);
+  // Reports-style per-employee summary for the selected day, grouped per device
+  const [summaryByDevice, setSummaryByDevice] = useState({}); // { deviceId: rows[] }
   // "Sync since last logs" — fills the gap from the last stored punch up to now
-  const [smartSync, setSmartSync] = useState(null); // { startDate, endDate, newCount, dupCount, busy }
+  const [smartSync, setSmartSync] = useState(null); // { devices, startDate, endDate, newCount, dupCount, busy }
 
   const fmtMin = (m) => {
     if (m == null) return '-';
@@ -203,18 +203,32 @@ function AttendanceToday() {
       
       setLastSync(new Date());
 
-      // Reports-style per-employee daily summary (only employees who punched)
+      // Reports-style per-employee daily summary, fetched PER DEVICE so each
+      // device shows only the punches that came from it.
       try {
-        const sumResp = await api.authFetch(`/api/reports/attendance/summary?date=${selectedDate}`, { method: 'GET' });
-        if (sumResp.ok) {
-          const sumData = await sumResp.json();
-          setSummaryRows(sumData.summary || []);
-          setAttendanceMode(sumData.attendance_mode || 'simple');
-        } else {
-          setSummaryRows([]);
-        }
+        const byDevice = {};
+        let mode = 'simple';
+        await Promise.all(devices.map(async (device) => {
+          try {
+            const sumResp = await api.authFetch(
+              `/api/reports/attendance/summary?date=${selectedDate}&device_id=${device.id}`,
+              { method: 'GET' }
+            );
+            if (sumResp.ok) {
+              const sumData = await sumResp.json();
+              byDevice[device.id] = sumData.summary || [];
+              mode = sumData.attendance_mode || mode;
+            } else {
+              byDevice[device.id] = [];
+            }
+          } catch {
+            byDevice[device.id] = [];
+          }
+        }));
+        setSummaryByDevice(byDevice);
+        setAttendanceMode(mode);
       } catch {
-        setSummaryRows([]);
+        setSummaryByDevice({});
       }
     } catch (error) {
       console.error('Failed to fetch attendance:', error);
@@ -243,34 +257,37 @@ function AttendanceToday() {
     }
   };
 
-  // ── "Sync since last logs" — preview the gap from the last stored punch → now ──
-  const startSmartSync = async () => {
-    if (!devices.length) return;
+  // ── "Sync pointages" — preview the gap from the last stored punch → now ──
+  // Pass a single device to sync just that one (per-device button); omit for all.
+  const startSmartSync = async (device = null) => {
+    const targets = device ? [device] : devices;
+    if (!targets.length) return;
     setSyncing(true);
-    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device ? device.name : '', direction: 'fromDevice' });
     try {
-      // 1) Find the last stored punch date
-      const resp = await api.authFetch('/api/attendance/latest-log-date', { method: 'GET' });
-      const data = await resp.json().catch(() => ({}));
       const todayISO = new Date().toISOString().split('T')[0];
-      const startDate = data.latest_date || todayISO;  // from 01h of that day
       const endDate = todayISO;
 
-      // 2) Preview across all devices, aggregate counts (show progress per device)
+      // Preview each target device (its own last-log date → now)
       let newCount = 0, dupCount = 0;
-      for (const device of devices) {
-        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device.name, direction: 'fromDevice' });
+      let startDate = todayISO;
+      for (const dev of targets) {
+        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: dev.name, direction: 'fromDevice' });
         try {
-          const r = await api.syncAttendanceFromDevice(device.id, 0, true, { startDate, endDate });
+          const resp = await api.authFetch(`/api/attendance/latest-log-date?device_id=${dev.id}`, { method: 'GET' });
+          const data = await resp.json().catch(() => ({}));
+          const devStart = data.latest_date || todayISO;
+          if (devStart < startDate) startDate = devStart;
+          const r = await api.syncAttendanceFromDevice(dev.id, 0, true, { startDate: devStart, endDate });
           newCount += r.new_count || 0;
           dupCount += r.duplicate_count || 0;
         } catch (e) {
-          console.error(`Preview failed for ${device.name}:`, e);
+          console.error(`Preview failed for ${dev.name}:`, e);
         }
       }
 
       setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
-      setSmartSync({ startDate, endDate, newCount, dupCount, busy: false });
+      setSmartSync({ devices: targets, endDate, newCount, dupCount, busy: false });
     } catch (error) {
       setSyncOverlay({ visible: true, phase: 'error', deviceName: '', direction: 'fromDevice' });
       await new Promise(r => setTimeout(r, 1200));
@@ -284,16 +301,20 @@ function AttendanceToday() {
   // Confirm → actually import, WITHOUT showing a result summary
   const confirmSmartSync = async () => {
     if (!smartSync) return;
-    const { startDate, endDate } = smartSync;
+    const { devices: targets, endDate } = smartSync;
     setSmartSync(s => ({ ...s, busy: true }));
     setSyncOverlay({ visible: true, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
     try {
-      for (const device of devices) {
-        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device.name, direction: 'fromDevice' });
+      const todayISO = new Date().toISOString().split('T')[0];
+      for (const dev of targets) {
+        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: dev.name, direction: 'fromDevice' });
         try {
-          await api.syncAttendanceFromDevice(device.id, 0, false, { startDate, endDate });
+          const resp = await api.authFetch(`/api/attendance/latest-log-date?device_id=${dev.id}`, { method: 'GET' });
+          const data = await resp.json().catch(() => ({}));
+          const devStart = data.latest_date || todayISO;
+          await api.syncAttendanceFromDevice(dev.id, 0, false, { startDate: devStart, endDate });
         } catch (e) {
-          console.error(`Sync failed for ${device.name}:`, e);
+          console.error(`Sync failed for ${dev.name}:`, e);
         }
       }
       setSyncOverlay({ visible: true, phase: 'done', deviceName: '', direction: 'fromDevice' });
@@ -384,15 +405,6 @@ function AttendanceToday() {
               {t('lastUpdated')}: {formatTime(lastSync)}
             </span>
           )}
-          <button
-            onClick={startSmartSync}
-            disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
-            title={t('syncSinceLastDesc') || 'Synchroniser depuis le dernier pointage enregistré jusqu\'à maintenant'}
-          >
-            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            {syncing ? t('syncing') : (t('syncSinceLast') || 'Synchroniser')}
-          </button>
           <button
             onClick={() => setCorrection({ mode: 'add', employee: null, originalAttendanceId: null, defaultTimestamp: new Date().toISOString(), defaultPunchType: 0 })}
             className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
@@ -494,96 +506,114 @@ function AttendanceToday() {
           <p className="text-gray-500 text-lg">{t('noAttendanceRecords')}</p>
           <p className="text-gray-400 text-sm mt-2">{t('checkInsAppear')}</p>
         </div>
-      ) : summaryRows.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
-          <Calendar className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-500 text-lg">{t('noAttendanceRecords')}</p>
-          <p className="text-gray-400 text-sm mt-2">{t('checkInsAppear')}</p>
-        </div>
       ) : (
-        <div className="bg-white rounded-lg shadow border border-gray-100 overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-700">
-              {t('employeesPresent') || 'Employés ayant pointé'}
-            </h2>
-            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-              {summaryRows.length} {summaryRows.length === 1 ? (t('employee') || 'employé') : (t('employees') || 'employés')}
-            </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('employee')}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkIn') || 'Entrée'}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkOut') || 'Sortie'}</th>
-                  {canSeeHours && (
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('totalWorked') || 'Total'}</th>
-                  )}
-                  {canSeeHours && (
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('overtime') || 'Sup.'}</th>
-                  )}
-                  {canSeeHours && attendanceMode === 'strict' && (
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('lateMin') || 'Retard'}</th>
-                  )}
-                  {canSeeHours && attendanceMode === 'strict' && (
-                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('earlyMin') || 'Dép. ant.'}</th>
-                  )}
-                  <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase">{t('punches') || 'Passages'}</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-100">
-                {summaryRows.map((r, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-2.5 font-medium text-gray-900">{r.employee_name}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{r.department || '-'}</td>
-                    <td className="px-4 py-2.5">
-                      {r.first_check_in ? (
-                        <span className="inline-flex items-center gap-1 text-green-700">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                          {new Date(r.first_check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      ) : <span className="text-gray-400">-</span>}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {r.last_check_out ? (
-                        <span className="inline-flex items-center gap-1 text-red-600">
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                          {new Date(r.last_check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      ) : <span className="text-gray-400">-</span>}
-                    </td>
-                    {canSeeHours && (
-                      <td className="px-4 py-2.5 text-gray-700">{fmtMin(r.total_minutes)}</td>
-                    )}
-                    {canSeeHours && (
-                      <td className="px-4 py-2.5">
-                        {r.overtime_minutes > 0 ? (
-                          <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
-                        ) : <span className="text-gray-400">-</span>}
-                      </td>
-                    )}
-                    {canSeeHours && attendanceMode === 'strict' && (
-                      <td className="px-4 py-2.5">
-                        {r.late_minutes > 0 ? <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span> : <span className="text-gray-400">-</span>}
-                      </td>
-                    )}
-                    {canSeeHours && attendanceMode === 'strict' && (
-                      <td className="px-4 py-2.5">
-                        {r.early_departure_minutes > 0 ? <span className="text-orange-700 font-medium">{fmtMin(r.early_departure_minutes)}</span> : <span className="text-gray-400">-</span>}
-                      </td>
-                    )}
-                    <td className="px-4 py-2.5 text-center">
-                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-xs font-semibold text-gray-700">
-                        {r.swipes}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="space-y-6">
+          {devices.map((device) => {
+            const rows = summaryByDevice[device.id] || [];
+            if (rows.length === 0) return null;
+            return (
+              <div key={device.id} className="bg-white rounded-lg shadow border border-gray-100 overflow-hidden">
+                <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-semibold text-gray-700">{device.name}</h2>
+                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                      {rows.length} {rows.length === 1 ? (t('employee') || 'employé') : (t('employees') || 'employés')}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => startSmartSync(device)}
+                    disabled={syncing}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 text-sm"
+                    title={t('syncSinceLastDesc') || 'Synchroniser les pointages de cet appareil'}
+                  >
+                    {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    {t('syncPointages') || 'Sync pointages'}
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('employee')}</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkIn') || 'Entrée'}</th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkOut') || 'Sortie'}</th>
+                        {canSeeHours && (
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('totalWorked') || 'Total'}</th>
+                        )}
+                        {canSeeHours && (
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('overtime') || 'Sup.'}</th>
+                        )}
+                        {canSeeHours && attendanceMode === 'strict' && (
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('lateMin') || 'Retard'}</th>
+                        )}
+                        {canSeeHours && attendanceMode === 'strict' && (
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('earlyMin') || 'Dép. ant.'}</th>
+                        )}
+                        <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase">{t('punches') || 'Passages'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-100">
+                      {rows.map((r, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-2.5 font-medium text-gray-900">{r.employee_name}</td>
+                          <td className="px-4 py-2.5 text-gray-600">{r.department || '-'}</td>
+                          <td className="px-4 py-2.5">
+                            {r.first_check_in ? (
+                              <span className="inline-flex items-center gap-1 text-green-700">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                {new Date(r.first_check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            ) : <span className="text-gray-400">-</span>}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            {r.last_check_out ? (
+                              <span className="inline-flex items-center gap-1 text-red-600">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                                {new Date(r.last_check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            ) : <span className="text-gray-400">-</span>}
+                          </td>
+                          {canSeeHours && (
+                            <td className="px-4 py-2.5 text-gray-700">{fmtMin(r.total_minutes)}</td>
+                          )}
+                          {canSeeHours && (
+                            <td className="px-4 py-2.5">
+                              {r.overtime_minutes > 0 ? (
+                                <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
+                              ) : <span className="text-gray-400">-</span>}
+                            </td>
+                          )}
+                          {canSeeHours && attendanceMode === 'strict' && (
+                            <td className="px-4 py-2.5">
+                              {r.late_minutes > 0 ? <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span> : <span className="text-gray-400">-</span>}
+                            </td>
+                          )}
+                          {canSeeHours && attendanceMode === 'strict' && (
+                            <td className="px-4 py-2.5">
+                              {r.early_departure_minutes > 0 ? <span className="text-orange-700 font-medium">{fmtMin(r.early_departure_minutes)}</span> : <span className="text-gray-400">-</span>}
+                            </td>
+                          )}
+                          <td className="px-4 py-2.5 text-center">
+                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-xs font-semibold text-gray-700">
+                              {r.swipes}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+          {devices.every((d) => (summaryByDevice[d.id] || []).length === 0) && (
+            <div className="bg-white rounded-lg shadow p-12 text-center">
+              <Calendar className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+              <p className="text-gray-500 text-lg">{t('noAttendanceRecords')}</p>
+              <p className="text-gray-400 text-sm mt-2">{t('checkInsAppear')}</p>
+            </div>
+          )}
         </div>
       )}
       {correction && (
@@ -607,13 +637,14 @@ function AttendanceToday() {
                 <History className="w-[18px] h-[18px] text-primary-600" />
               </div>
               <h2 className="text-[15px] font-semibold text-slate-900">
-                {t('syncSinceLast') || 'Combler les pointages manquants'}
+                {t('syncPointages') || 'Sync pointages'}
               </h2>
             </div>
             <div className="px-6 pb-2">
               <p className="text-sm text-slate-600">
-                {(t('syncSinceLastRange') || 'Période à synchroniser')} :{' '}
-                <span className="font-mono text-slate-900">{smartSync.startDate} → {smartSync.endDate}</span>
+                <span className="font-mono text-slate-900">
+                  {(smartSync.devices || []).map(d => d.name).join(', ')}
+                </span>
               </p>
               <div className="mt-3 flex items-center gap-6 text-sm">
                 <span className="text-emerald-700">

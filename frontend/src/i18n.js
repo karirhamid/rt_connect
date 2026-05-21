@@ -119,7 +119,8 @@ const resources = {
       // Attendance
       todaysAttendance: "Pointage d'Aujourd'hui",
       employeesPresent: "Employés ayant pointé",
-      syncSinceLast: "Combler les pointages manquants",
+      syncSinceLast: "Sync pointages",
+      syncPointages: "Sync pointages",
       syncSinceLastDesc: "Synchroniser depuis le dernier pointage enregistré jusqu'à maintenant",
       syncSinceLastRange: "Période à synchroniser",
       newRecords: "Nouveaux",
@@ -1249,7 +1250,8 @@ const resources = {
       // Attendance
       todaysAttendance: "Today's Attendance",
       employeesPresent: "Employees who punched",
-      syncSinceLast: "Fill missing punches",
+      syncSinceLast: "Sync punches",
+      syncPointages: "Sync punches",
       syncSinceLastDesc: "Sync from the last stored punch up to now",
       syncSinceLastRange: "Range to sync",
       newRecords: "New",
@@ -2376,7 +2378,8 @@ const resources = {
       // Attendance
       todaysAttendance: "حضور اليوم",
       employeesPresent: "الموظفون الذين سجلوا",
-      syncSinceLast: "سد البصمات الناقصة",
+      syncSinceLast: "مزامنة البصمات",
+      syncPointages: "مزامنة البصمات",
       syncSinceLastDesc: "المزامنة من آخر بصمة مسجلة حتى الآن",
       syncSinceLastRange: "الفترة المراد مزامنتها",
       newRecords: "جديدة",
