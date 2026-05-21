@@ -107,6 +107,15 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS portal_enabled BOOLEAN NOT NULL DEFAULT FALSE"
             ))
+            # Ensure the 'reports.hours' permission exists so admins can assign it
+            # to a role (e.g. "RH Reporting logs") that may view computed-hours
+            # columns (Total worked / Overtime / Late / Early). Plain reporting
+            # users without it see only in/out/passages.
+            conn.execute(sa_text("""
+                INSERT INTO permissions (code, description)
+                VALUES ('reports.hours', 'View computed hours columns (total worked, overtime, late, early)')
+                ON CONFLICT (code) DO NOTHING
+            """))
             # Phase D — device health alert recipient
             conn.execute(sa_text(
                 "ALTER TABLE email_settings ADD COLUMN IF NOT EXISTS alerts_enabled BOOLEAN DEFAULT FALSE NOT NULL"

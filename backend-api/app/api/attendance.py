@@ -18,6 +18,20 @@ logger = logging.getLogger(__name__)
 
 
 
+@router.get("/latest-log-date")
+async def latest_log_date(db: Session = Depends(get_db)):
+    """Return the date of the most recent stored punch (device-local).
+
+    Used by the 'sync since last logs' button: it syncs from this date
+    (start of day) up to now, so the gap since the last sync is filled.
+    """
+    max_ts = db.query(func.max(DBAttendance.timestamp)).scalar()
+    return {
+        "latest_timestamp": max_ts.isoformat() if max_ts else None,
+        "latest_date": max_ts.date().isoformat() if max_ts else None,
+    }
+
+
 @router.get("/today")
 async def get_today_attendance(
     target_date: Optional[str] = Query(None, description="Date to view (YYYY-MM-DD), defaults to today"),

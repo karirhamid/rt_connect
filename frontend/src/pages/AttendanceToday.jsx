@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, Users, TrendingUp, AlertCircle, CheckCircle, Loader2, RefreshCw, ToggleLeft, ToggleRight, Edit2, Trash2, Plus } from 'lucide-react';
+import { Calendar, Clock, Users, TrendingUp, AlertCircle, CheckCircle, Loader2, RefreshCw, ToggleLeft, ToggleRight, Edit2, Trash2, Plus, History, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import api from '../services/api';
 import SyncOverlay from '../components/SyncOverlay';
@@ -16,6 +16,16 @@ const PUNCH_CATEGORY_STYLES = {
 
 function AttendanceToday() {
   const { t } = useTranslation();
+  // Computed-hours columns (Total worked / Overtime / Late / Early) are hidden
+  // for a plain Reporting User. They show for managers and for the dedicated
+  // "RH Reporting logs" role (which holds the reports.hours permission).
+  const userPerms = (() => {
+    try { return new Set(JSON.parse(localStorage.getItem('_userPerms') || '[]')); } catch { return new Set(); }
+  })();
+  const canSeeHours =
+    userPerms.has('reports.hours') ||
+    userPerms.has('roles.manage') || userPerms.has('users.read') ||
+    userPerms.has('settings.manage') || userPerms.has('devices.manage');
   const [attendanceData, setAttendanceData] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [stats, setStats] = useState({
@@ -38,6 +48,8 @@ function AttendanceToday() {
   const [daySummaries, setDaySummaries] = useState({});
   // Reports-style per-employee summary for the selected day (only employees who punched)
   const [summaryRows, setSummaryRows] = useState([]);
+  // "Sync since last logs" — fills the gap from the last stored punch up to now
+  const [smartSync, setSmartSync] = useState(null); // { startDate, endDate, newCount, dupCount, busy }
 
   const fmtMin = (m) => {
     if (m == null) return '-';
@@ -231,6 +243,67 @@ function AttendanceToday() {
     }
   };
 
+  // ── "Sync since last logs" — preview the gap from the last stored punch → now ──
+  const startSmartSync = async () => {
+    if (!devices.length) return;
+    setSyncing(true);
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
+    try {
+      // 1) Find the last stored punch date
+      const resp = await api.authFetch('/api/attendance/latest-log-date', { method: 'GET' });
+      const data = await resp.json().catch(() => ({}));
+      const todayISO = new Date().toISOString().split('T')[0];
+      const startDate = data.latest_date || todayISO;  // from 01h of that day
+      const endDate = todayISO;
+
+      // 2) Preview across all devices, aggregate counts
+      let newCount = 0, dupCount = 0;
+      for (const device of devices) {
+        try {
+          const r = await api.syncAttendanceFromDevice(device.id, 0, true, { startDate, endDate });
+          newCount += r.new_count || 0;
+          dupCount += r.duplicate_count || 0;
+        } catch (e) {
+          console.error(`Preview failed for ${device.name}:`, e);
+        }
+      }
+
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
+      setSmartSync({ startDate, endDate, newCount, dupCount, busy: false });
+    } catch (error) {
+      setSyncOverlay({ visible: true, phase: 'error', deviceName: '', direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 1200));
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
+      console.error('Smart sync preview failed:', error);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Confirm → actually import, WITHOUT showing a result summary
+  const confirmSmartSync = async () => {
+    if (!smartSync) return;
+    const { startDate, endDate } = smartSync;
+    setSmartSync(s => ({ ...s, busy: true }));
+    setSyncOverlay({ visible: true, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
+    try {
+      for (const device of devices) {
+        try {
+          await api.syncAttendanceFromDevice(device.id, 0, false, { startDate, endDate });
+        } catch (e) {
+          console.error(`Sync failed for ${device.name}:`, e);
+        }
+      }
+      setSyncOverlay({ visible: true, phase: 'done', deviceName: '', direction: 'fromDevice' });
+      await new Promise(r => setTimeout(r, 800));
+    } finally {
+      setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
+      setSmartSync(null);
+      await fetchTodayAttendance();
+      if (classifiedView) await fetchClassified();
+    }
+  };
+
   const fetchClassified = async () => {
     try {
       const res = await api.getClassifiedAttendance(selectedDate);
@@ -316,6 +389,15 @@ function AttendanceToday() {
           >
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? t('syncing') : t('syncNow')}
+          </button>
+          <button
+            onClick={startSmartSync}
+            disabled={syncing}
+            className="flex items-center gap-2 px-3 py-2 border border-primary-300 text-primary-700 rounded-lg hover:bg-primary-50 transition-colors disabled:opacity-50"
+            title={t('syncSinceLastDesc') || 'Synchroniser depuis le dernier pointage enregistré jusqu\'à maintenant'}
+          >
+            <History className="w-4 h-4" />
+            {t('syncSinceLast') || 'Combler les pointages manquants'}
           </button>
           <button
             onClick={() => setCorrection({ mode: 'add', employee: null, originalAttendanceId: null, defaultTimestamp: new Date().toISOString(), defaultPunchType: 0 })}
@@ -442,12 +524,16 @@ function AttendanceToday() {
                   <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
                   <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkIn') || 'Entrée'}</th>
                   <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkOut') || 'Sortie'}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('totalWorked') || 'Total'}</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('overtime') || 'Sup.'}</th>
-                  {attendanceMode === 'strict' && (
+                  {canSeeHours && (
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('totalWorked') || 'Total'}</th>
+                  )}
+                  {canSeeHours && (
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('overtime') || 'Sup.'}</th>
+                  )}
+                  {canSeeHours && attendanceMode === 'strict' && (
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('lateMin') || 'Retard'}</th>
                   )}
-                  {attendanceMode === 'strict' && (
+                  {canSeeHours && attendanceMode === 'strict' && (
                     <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('earlyMin') || 'Dép. ant.'}</th>
                   )}
                   <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase">{t('punches') || 'Passages'}</th>
@@ -474,18 +560,22 @@ function AttendanceToday() {
                         </span>
                       ) : <span className="text-gray-400">-</span>}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-700">{fmtMin(r.total_minutes)}</td>
-                    <td className="px-4 py-2.5">
-                      {r.overtime_minutes > 0 ? (
-                        <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
-                      ) : <span className="text-gray-400">-</span>}
-                    </td>
-                    {attendanceMode === 'strict' && (
+                    {canSeeHours && (
+                      <td className="px-4 py-2.5 text-gray-700">{fmtMin(r.total_minutes)}</td>
+                    )}
+                    {canSeeHours && (
+                      <td className="px-4 py-2.5">
+                        {r.overtime_minutes > 0 ? (
+                          <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
+                        ) : <span className="text-gray-400">-</span>}
+                      </td>
+                    )}
+                    {canSeeHours && attendanceMode === 'strict' && (
                       <td className="px-4 py-2.5">
                         {r.late_minutes > 0 ? <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span> : <span className="text-gray-400">-</span>}
                       </td>
                     )}
-                    {attendanceMode === 'strict' && (
+                    {canSeeHours && attendanceMode === 'strict' && (
                       <td className="px-4 py-2.5">
                         {r.early_departure_minutes > 0 ? <span className="text-orange-700 font-medium">{fmtMin(r.early_departure_minutes)}</span> : <span className="text-gray-400">-</span>}
                       </td>
@@ -512,6 +602,61 @@ function AttendanceToday() {
           onClose={() => setCorrection(null)}
           onSaved={() => { setCorrection(null); fetchTodayAttendance(); }}
         />
+      )}
+
+      {/* Smart-sync confirmation (gap fill) — same look as the device sync modal */}
+      {smartSync && (
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-[fadeIn_0.15s_ease-out]">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/60 max-w-md w-full overflow-hidden animate-[popIn_0.18s_ease-out]">
+            <div className="flex items-center gap-3 px-6 pt-5 pb-3">
+              <div className="w-9 h-9 rounded-xl bg-primary-50 flex items-center justify-center">
+                <History className="w-[18px] h-[18px] text-primary-600" />
+              </div>
+              <h2 className="text-[15px] font-semibold text-slate-900">
+                {t('syncSinceLast') || 'Combler les pointages manquants'}
+              </h2>
+            </div>
+            <div className="px-6 pb-2">
+              <p className="text-sm text-slate-600">
+                {(t('syncSinceLastRange') || 'Période à synchroniser')} :{' '}
+                <span className="font-mono text-slate-900">{smartSync.startDate} → {smartSync.endDate}</span>
+              </p>
+              <div className="mt-3 flex items-center gap-6 text-sm">
+                <span className="text-emerald-700">
+                  {t('newRecords') || 'Nouveaux'} : <strong>{smartSync.newCount}</strong>
+                </span>
+                <span className="text-slate-500">
+                  {t('existingRecords') || 'Déjà enregistrés'} : <strong>{smartSync.dupCount}</strong>
+                </span>
+              </div>
+              <div className="mt-3 flex items-start gap-2 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                <span>{t('logsIncrementalNote') || 'Seuls les nouveaux pointages sont importés. Les pointages déjà enregistrés sont ignorés automatiquement — aucun doublon.'}</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-6 py-4">
+              <button
+                onClick={() => setSmartSync(null)}
+                disabled={smartSync.busy}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                {t('cancel') || 'Annuler'}
+              </button>
+              <button
+                onClick={confirmSmartSync}
+                disabled={smartSync.busy || smartSync.newCount === 0}
+                className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
+              >
+                {smartSync.busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {t('confirm') || 'Confirmer'}
+              </button>
+            </div>
+          </div>
+          <style>{`
+            @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+            @keyframes popIn { 0% { opacity: 0; transform: scale(0.96) } 70% { transform: scale(1.01) } 100% { opacity: 1; transform: scale(1) } }
+          `}</style>
+        </div>
       )}
     </div>
   );
