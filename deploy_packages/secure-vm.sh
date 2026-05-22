@@ -31,8 +31,13 @@
 set -euo pipefail
 
 # ── Config — edit these to change who can access the VM ────────────────────
+# Full access: SSH (22) + web (80/443)
 ALLOWED_IPS=(
-    "10.10.0.100"    # VPN only — single source of access
+    "10.10.0.100"    # VPN only — single source of admin access
+)
+# Web-only: can reach the app on 80/443 but NOT SSH
+WEB_ONLY_IPS=(
+    "10.185.1.60"    # workstation — app access only, no SSH
 )
 PROTECTED_PORTS=("80" "443")   # Docker-published — guarded by DOCKER-USER
 SSH_PORT="22"
@@ -133,8 +138,17 @@ iptables -F DOCKER-USER
 # 4a. Allow return traffic for existing connections (host or container)
 iptables -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
 
-# 4b. Allow allowlisted IPs arriving on the EXTERNAL interface only
+# 4b. Allow allowlisted IPs (full access) arriving on the EXTERNAL interface only
 for ip in "${ALLOWED_IPS[@]}"; do
+    for port in "${PROTECTED_PORTS[@]}"; do
+        iptables -A DOCKER-USER -i "$EXT_IF" -p tcp -s "$ip" --dport "$port" -j RETURN
+    done
+done
+
+# 4b-bis. Web-only IPs — reach 80/443 but never SSH (SSH is guarded by UFW,
+# and we deliberately do NOT add these IPs to the UFW SSH allowlist).
+for ip in "${WEB_ONLY_IPS[@]:-}"; do
+    [[ -z "$ip" ]] && continue
     for port in "${PROTECTED_PORTS[@]}"; do
         iptables -A DOCKER-USER -i "$EXT_IF" -p tcp -s "$ip" --dport "$port" -j RETURN
     done
