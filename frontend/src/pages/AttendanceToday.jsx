@@ -48,6 +48,12 @@ function AttendanceToday() {
   const [daySummaries, setDaySummaries] = useState({});
   // Reports-style per-employee summary for the selected day, grouped per device
   const [summaryByDevice, setSummaryByDevice] = useState({}); // { deviceId: rows[] }
+  // Merged view: one combined table (dedups by matricule in shared mode)
+  const [mergedRows, setMergedRows] = useState([]);
+  // Per-page display: 'separate' = one table per device, 'merged' = single table
+  const [deviceViewMode, setDeviceViewMode] = useState(() => {
+    try { return localStorage.getItem('todayDeviceView') || 'merged'; } catch { return 'merged'; }
+  });
   // "Sync since last logs" — fills the gap from the last stored punch up to now
   const [smartSync, setSmartSync] = useState(null); // { devices, startDate, endDate, newCount, dupCount, busy }
   // Manual punches awaiting approval
@@ -86,6 +92,84 @@ function AttendanceToday() {
     return h > 0 ? `${h}h${r > 0 ? String(r).padStart(2, '0') + 'm' : ''}` : `${r}m`;
   };
 
+  // Shared Reports-style summary table (used by both merged + per-device views)
+  const renderSummaryTable = (rows) => (
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-gray-200 text-sm">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('employee')}</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkIn') || 'Entrée'}</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkOut') || 'Sortie'}</th>
+            {canSeeHours && (
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('totalWorked') || 'Total'}</th>
+            )}
+            {canSeeHours && (
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('overtime') || 'Sup.'}</th>
+            )}
+            {canSeeHours && attendanceMode === 'strict' && (
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('lateMin') || 'Retard'}</th>
+            )}
+            {canSeeHours && attendanceMode === 'strict' && (
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('earlyMin') || 'Dép. ant.'}</th>
+            )}
+            <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase">{t('punches') || 'Passages'}</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-100">
+          {rows.map((r, idx) => (
+            <tr key={idx} className="hover:bg-gray-50 transition-colors">
+              <td className="px-4 py-2.5 font-medium text-gray-900">{r.employee_name}</td>
+              <td className="px-4 py-2.5 text-gray-600">{r.department || '-'}</td>
+              <td className="px-4 py-2.5">
+                {r.first_check_in ? (
+                  <span className="inline-flex items-center gap-1 text-green-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    {new Date(r.first_check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                ) : <span className="text-gray-400">-</span>}
+              </td>
+              <td className="px-4 py-2.5">
+                {r.last_check_out ? (
+                  <span className="inline-flex items-center gap-1 text-red-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    {new Date(r.last_check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                ) : <span className="text-gray-400">-</span>}
+              </td>
+              {canSeeHours && (
+                <td className="px-4 py-2.5 text-gray-700">{fmtMin(r.total_minutes)}</td>
+              )}
+              {canSeeHours && (
+                <td className="px-4 py-2.5">
+                  {r.overtime_minutes > 0 ? (
+                    <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
+                  ) : <span className="text-gray-400">-</span>}
+                </td>
+              )}
+              {canSeeHours && attendanceMode === 'strict' && (
+                <td className="px-4 py-2.5">
+                  {r.late_minutes > 0 ? <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span> : <span className="text-gray-400">-</span>}
+                </td>
+              )}
+              {canSeeHours && attendanceMode === 'strict' && (
+                <td className="px-4 py-2.5">
+                  {r.early_departure_minutes > 0 ? <span className="text-orange-700 font-medium">{fmtMin(r.early_departure_minutes)}</span> : <span className="text-gray-400">-</span>}
+                </td>
+              )}
+              <td className="px-4 py-2.5 text-center">
+                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-xs font-semibold text-gray-700">
+                  {r.swipes}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   useEffect(() => {
     loadDevices();
   }, []);
@@ -101,7 +185,11 @@ function AttendanceToday() {
         return () => clearInterval(interval);
       }
     }
-  }, [selectedDate, devices]);
+  }, [selectedDate, devices, deviceViewMode]);
+
+  useEffect(() => {
+    try { localStorage.setItem('todayDeviceView', deviceViewMode); } catch { /* ignore */ }
+  }, [deviceViewMode]);
 
   const loadDevices = async () => {
     try {
@@ -232,32 +320,52 @@ function AttendanceToday() {
       
       setLastSync(new Date());
 
-      // Reports-style per-employee daily summary, fetched PER DEVICE so each
-      // device shows only the punches that came from it.
+      // Reports-style per-employee daily summary.
+      //  • Merged view (or a single device): ONE combined table. The backend
+      //    dedups by matricule when employee_mode='shared' (cloned/bridged
+      //    devices) so a person who punched on both devices appears once.
+      //  • By-device view: one table per device (its own punches only).
+      const merged = deviceViewMode === 'merged' || devices.length <= 1;
       try {
-        const byDevice = {};
-        let mode = 'simple';
-        await Promise.all(devices.map(async (device) => {
-          try {
-            const sumResp = await api.authFetch(
-              `/api/reports/attendance/summary?date=${selectedDate}&device_id=${device.id}`,
-              { method: 'GET' }
-            );
-            if (sumResp.ok) {
-              const sumData = await sumResp.json();
-              byDevice[device.id] = sumData.summary || [];
-              mode = sumData.attendance_mode || mode;
-            } else {
+        if (merged) {
+          const sumResp = await api.authFetch(
+            `/api/reports/attendance/summary?date=${selectedDate}`, { method: 'GET' }
+          );
+          if (sumResp.ok) {
+            const sumData = await sumResp.json();
+            setMergedRows(sumData.summary || []);
+            setAttendanceMode(sumData.attendance_mode || 'simple');
+          } else {
+            setMergedRows([]);
+          }
+          setSummaryByDevice({});
+        } else {
+          const byDevice = {};
+          let mode = 'simple';
+          await Promise.all(devices.map(async (device) => {
+            try {
+              const sumResp = await api.authFetch(
+                `/api/reports/attendance/summary?date=${selectedDate}&device_id=${device.id}`,
+                { method: 'GET' }
+              );
+              if (sumResp.ok) {
+                const sumData = await sumResp.json();
+                byDevice[device.id] = sumData.summary || [];
+                mode = sumData.attendance_mode || mode;
+              } else {
+                byDevice[device.id] = [];
+              }
+            } catch {
               byDevice[device.id] = [];
             }
-          } catch {
-            byDevice[device.id] = [];
-          }
-        }));
-        setSummaryByDevice(byDevice);
-        setAttendanceMode(mode);
+          }));
+          setSummaryByDevice(byDevice);
+          setMergedRows([]);
+          setAttendanceMode(mode);
+        }
       } catch {
         setSummaryByDevice({});
+        setMergedRows([]);
       }
     } catch (error) {
       console.error('Failed to fetch attendance:', error);
@@ -417,13 +525,40 @@ function AttendanceToday() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          {/* Classified / Raw view toggle — disabled for now */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Display mode toggle — only when more than one device */}
+          {devices.length > 1 && (
+            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button
+                onClick={() => setDeviceViewMode('merged')}
+                className={`px-3 py-2 transition-colors ${deviceViewMode === 'merged' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                title={t('viewMergedDesc') || 'Fusionner les appareils — un employé apparaît une seule fois'}
+              >
+                {t('viewMerged') || 'Fusionné'}
+              </button>
+              <button
+                onClick={() => setDeviceViewMode('separate')}
+                className={`px-3 py-2 transition-colors border-l border-gray-200 ${deviceViewMode === 'separate' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                title={t('viewByDeviceDesc') || 'Un tableau par appareil'}
+              >
+                {t('viewByDevice') || 'Par appareil'}
+              </button>
+            </div>
+          )}
           {lastSync && (
             <span className="text-sm text-gray-500">
               {t('lastUpdated')}: {formatTime(lastSync)}
             </span>
           )}
+          <button
+            onClick={() => startSmartSync()}
+            disabled={syncing}
+            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+            title={t('syncSinceLastDesc') || 'Synchroniser les pointages de tous les appareils'}
+          >
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {syncing ? t('syncing') : (t('syncPointages') || 'Sync pointages')}
+          </button>
           <button
             onClick={() => setCorrection({ mode: 'add', employee: null, originalAttendanceId: null, defaultTimestamp: new Date().toISOString(), defaultPunchType: 0 })}
             className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
@@ -564,104 +699,40 @@ function AttendanceToday() {
           <p className="text-gray-500 text-lg">{t('noAttendanceRecords')}</p>
           <p className="text-gray-400 text-sm mt-2">{t('checkInsAppear')}</p>
         </div>
+      ) : (deviceViewMode === 'merged' || devices.length <= 1) ? (
+        /* Merged view — one combined table (deduped by matricule in shared mode) */
+        mergedRows.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-12 text-center">
+            <Calendar className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+            <p className="text-gray-500 text-lg">{t('noAttendanceRecords')}</p>
+            <p className="text-gray-400 text-sm mt-2">{t('checkInsAppear')}</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg shadow border border-gray-100 overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-gray-700">{t('employeesPresent') || 'Employés ayant pointé'}</h2>
+              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                {mergedRows.length} {mergedRows.length === 1 ? (t('employee') || 'employé') : (t('employees') || 'employés')}
+              </span>
+            </div>
+            {renderSummaryTable(mergedRows)}
+          </div>
+        )
       ) : (
+        /* By-device view — one table per device */
         <div className="space-y-6">
           {devices.map((device) => {
             const rows = summaryByDevice[device.id] || [];
             if (rows.length === 0) return null;
             return (
               <div key={device.id} className="bg-white rounded-lg shadow border border-gray-100 overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-gray-700">{device.name}</h2>
-                    <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                      {rows.length} {rows.length === 1 ? (t('employee') || 'employé') : (t('employees') || 'employés')}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => startSmartSync(device)}
-                    disabled={syncing}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 text-sm"
-                    title={t('syncSinceLastDesc') || 'Synchroniser les pointages de cet appareil'}
-                  >
-                    {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                    {t('syncPointages') || 'Sync pointages'}
-                  </button>
+                <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+                  <h2 className="text-sm font-semibold text-gray-700">{device.name}</h2>
+                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                    {rows.length} {rows.length === 1 ? (t('employee') || 'employé') : (t('employees') || 'employés')}
+                  </span>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('employee')}</th>
-                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('department')}</th>
-                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkIn') || 'Entrée'}</th>
-                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('checkOut') || 'Sortie'}</th>
-                        {canSeeHours && (
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('totalWorked') || 'Total'}</th>
-                        )}
-                        {canSeeHours && (
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('overtime') || 'Sup.'}</th>
-                        )}
-                        {canSeeHours && attendanceMode === 'strict' && (
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('lateMin') || 'Retard'}</th>
-                        )}
-                        {canSeeHours && attendanceMode === 'strict' && (
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase">{t('earlyMin') || 'Dép. ant.'}</th>
-                        )}
-                        <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase">{t('punches') || 'Passages'}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-100">
-                      {rows.map((r, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-4 py-2.5 font-medium text-gray-900">{r.employee_name}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{r.department || '-'}</td>
-                          <td className="px-4 py-2.5">
-                            {r.first_check_in ? (
-                              <span className="inline-flex items-center gap-1 text-green-700">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                {new Date(r.first_check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            ) : <span className="text-gray-400">-</span>}
-                          </td>
-                          <td className="px-4 py-2.5">
-                            {r.last_check_out ? (
-                              <span className="inline-flex items-center gap-1 text-red-600">
-                                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                                {new Date(r.last_check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            ) : <span className="text-gray-400">-</span>}
-                          </td>
-                          {canSeeHours && (
-                            <td className="px-4 py-2.5 text-gray-700">{fmtMin(r.total_minutes)}</td>
-                          )}
-                          {canSeeHours && (
-                            <td className="px-4 py-2.5">
-                              {r.overtime_minutes > 0 ? (
-                                <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
-                              ) : <span className="text-gray-400">-</span>}
-                            </td>
-                          )}
-                          {canSeeHours && attendanceMode === 'strict' && (
-                            <td className="px-4 py-2.5">
-                              {r.late_minutes > 0 ? <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span> : <span className="text-gray-400">-</span>}
-                            </td>
-                          )}
-                          {canSeeHours && attendanceMode === 'strict' && (
-                            <td className="px-4 py-2.5">
-                              {r.early_departure_minutes > 0 ? <span className="text-orange-700 font-medium">{fmtMin(r.early_departure_minutes)}</span> : <span className="text-gray-400">-</span>}
-                            </td>
-                          )}
-                          <td className="px-4 py-2.5 text-center">
-                            <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-xs font-semibold text-gray-700">
-                              {r.swipes}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {renderSummaryTable(rows)}
               </div>
             );
           })}
