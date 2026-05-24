@@ -8,6 +8,10 @@ from app.core.security import get_current_user, user_has_permission
 
 router = APIRouter()
 
+# Real permission codes in this system: roles.manage (super admin),
+# users.read, settings.manage. The page route is gated on roles.manage.
+_AUDIT_PERMS = ("roles.manage", "users.read", "settings.manage")
+
 
 @router.get("/audit-log")
 def list_audit_log(
@@ -18,8 +22,7 @@ def list_audit_log(
     path_contains: Optional[str] = None,
     current=Depends(get_current_user),
 ):
-    # Only admins (users with manage_users or audit_view permission)
-    if not (user_has_permission(current, "manage_users") or user_has_permission(current, "audit_view")):
+    if not any(user_has_permission(current, p) for p in _AUDIT_PERMS):
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Not authorized to view audit log")
 
