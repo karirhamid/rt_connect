@@ -89,7 +89,27 @@ class AdminAuditMiddleware(BaseHTTPMiddleware):
 
         try:
             user_id, username = _resolve_user(request.headers.get("authorization"))
+            is_login = path.endswith("/auth/login")
+
+            # Skip noise: an unauthenticated request that isn't a login attempt
+            # is almost always an expired-token call that the client immediately
+            # retries with a fresh token (which IS logged with the real user).
+            if user_id is None and not is_login:
+                return response
+
+            # For login attempts, show the ATTEMPTED username instead of "anonyme"
+            if user_id is None and is_login:
+                try:
+                    data = json.loads(body.decode("utf-8", errors="ignore")) if body else {}
+                    username = data.get("username") or None
+                except Exception:
+                    username = None
+
             ip = (request.client.host if request.client else None) or request.headers.get("x-forwarded-for")
+            action = None
+            if is_login:
+                action = "login success" if response.status_code < 400 else "login failed"
+
             with get_db_session() as db:
                 db.add(AdminAuditLog(
                     user_id=user_id,
@@ -98,6 +118,7 @@ class AdminAuditMiddleware(BaseHTTPMiddleware):
                     method=method,
                     path=path[:500],
                     status_code=response.status_code,
+                    action=action,
                     payload=_redact(body) or None,
                 ))
                 db.commit()
