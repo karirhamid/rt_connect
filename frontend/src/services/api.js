@@ -371,13 +371,15 @@ class ApiService {
     return response.json();
   }
 
-  async syncAttendanceFromDevice(deviceId, days = 30, previewOnly = false, { startDate, endDate } = {}) {
+  async syncAttendanceFromDevice(deviceId, days = 30, previewOnly = false, { startDate, endDate, startDatetime, endDatetime } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min
     const params = new URLSearchParams({ days: String(days) });
     if (previewOnly) params.set('preview_only', 'true');
     if (startDate) params.set('start_date', startDate);
     if (endDate) params.set('end_date', endDate);
+    if (startDatetime) params.set('start_datetime', startDatetime);
+    if (endDatetime) params.set('end_datetime', endDatetime);
     const url = `${API_BASE_URL}/api/devices/${deviceId}/sync-attendance?${params}`;
     try {
       const response = await fetch(url, { method: 'POST', signal: controller.signal });

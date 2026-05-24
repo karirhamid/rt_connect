@@ -854,6 +854,8 @@ async def sync_attendance_from_device(
     preview_only: bool = False,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    start_datetime: Optional[str] = None,  # ISO; second-precision lower bound (inclusive)
+    end_datetime: Optional[str] = None,    # ISO; second-precision upper bound (inclusive)
     db: Session = Depends(get_db)
 ):
     """Sync attendance logs from a specific device.
@@ -889,14 +891,16 @@ async def sync_attendance_from_device(
         await asyncio.to_thread(lock.acquire)
     try:
         return await _sync_attendance_locked(
-            device, device_id, days, preview_only, start_date, end_date, db
+            device, device_id, days, preview_only, start_date, end_date, db,
+            start_datetime, end_datetime
         )
     finally:
         lock.release()
 
 
 async def _sync_attendance_locked(
-    device, device_id, days, preview_only, start_date, end_date, db
+    device, device_id, days, preview_only, start_date, end_date, db,
+    start_datetime=None, end_datetime=None
 ):
     import time as _time
     from app.utils.timestamp_validator import validate_and_correct_timestamp
@@ -954,6 +958,28 @@ async def _sync_attendance_locked(
             pass
     if cutoff_date is None and days > 0:
         cutoff_date = datetime.utcnow() - timedelta(days=days)
+
+    # Second-precision overrides (gap-fill "from last sync → click time").
+    # When provided, these win over the date-level cutoffs so no second is
+    # missed and no extra day is re-scanned. Stored timestamps are naive,
+    # second-truncated; match that here.
+    def _parse_iso_naive(s):
+        try:
+            dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt.replace(microsecond=0)
+        except Exception:
+            return None
+
+    if start_datetime:
+        sd = _parse_iso_naive(start_datetime)
+        if sd is not None:
+            cutoff_date = sd                       # inclusive lower bound (timestamp < cutoff is skipped)
+    if end_datetime:
+        ed = _parse_iso_naive(end_datetime)
+        if ed is not None:
+            end_cutoff = ed + timedelta(seconds=1)  # inclusive of the click second
 
     # ── Step 3: Batch-load employees for this device (1 query) ───────────
     t1 = _time.perf_counter()
@@ -1119,6 +1145,8 @@ async def _sync_attendance_locked(
             "error_count": err_count,
             "preview_mode": True,
             "requires_confirmation": True,
+            "range_from": cutoff_date.isoformat() if cutoff_date is not None else None,
+            "range_to": (end_cutoff - timedelta(seconds=1)).isoformat() if end_cutoff is not None else None,
             "preview_data": preview_data[:200]
         }
 
@@ -1180,9 +1208,11 @@ async def _sync_attendance_locked(
         "device_name": device.name,
         "days_range": days if days > 0 else "all",
         "total_fetched": len(attendance_records),
-        "added": len(new_records),
+        "added": count_after - count_before,
         "skipped": skipped,
         "filtered_count": filtered_count,
+        "range_from": cutoff_date.isoformat() if cutoff_date is not None else None,
+        "range_to": (end_cutoff - timedelta(seconds=1)).isoformat() if end_cutoff is not None else None,
         "errors": errors[:20]
     }
 

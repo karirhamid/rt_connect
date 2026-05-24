@@ -394,37 +394,39 @@ function AttendanceToday() {
     }
   };
 
-  // ── "Sync pointages" — preview the gap from the last stored punch → now ──
-  // Pass a single device to sync just that one (per-device button); omit for all.
+  // ── "Sync pointages" — gap-fill each device from its last stored punch
+  // (to the SECOND) → the moment the button was clicked. Builds a per-device
+  // plan {from, to}, previews counts, then shows the confirmation.
   const startSmartSync = async (device = null) => {
     const targets = device ? [device] : devices;
     if (!targets.length) return;
     setSyncing(true);
     setSyncOverlay({ visible: true, phase: 'syncing', deviceName: device ? device.name : '', direction: 'fromDevice' });
     try {
-      const todayISO = new Date().toISOString().split('T')[0];
-      const endDate = todayISO;
+      const clickIso = new Date().toISOString();  // "to" = click moment (same for all devices)
 
-      // Preview each target device (its own last-log date → now)
       let newCount = 0, dupCount = 0;
-      let startDate = todayISO;
+      const plan = [];
       for (const dev of targets) {
         setSyncOverlay({ visible: true, phase: 'syncing', deviceName: dev.name, direction: 'fromDevice' });
+        let fromIso = null;
         try {
           const resp = await api.authFetch(`/api/attendance/latest-log-date?device_id=${dev.id}`, { method: 'GET' });
           const data = await resp.json().catch(() => ({}));
-          const devStart = data.latest_date || todayISO;
-          if (devStart < startDate) startDate = devStart;
-          const r = await api.syncAttendanceFromDevice(dev.id, 0, true, { startDate: devStart, endDate });
+          // Exact last stored punch (to the second). If none, fall back to 30 days back.
+          fromIso = data.latest_timestamp || new Date(Date.now() - 30 * 864e5).toISOString();
+          const r = await api.syncAttendanceFromDevice(dev.id, 0, true, { startDatetime: fromIso, endDatetime: clickIso });
           newCount += r.new_count || 0;
           dupCount += r.duplicate_count || 0;
+          plan.push({ id: dev.id, name: dev.name, from: r.range_from || fromIso, to: r.range_to || clickIso });
         } catch (e) {
           console.error(`Preview failed for ${dev.name}:`, e);
+          plan.push({ id: dev.id, name: dev.name, from: fromIso, to: clickIso });
         }
       }
 
       setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
-      setSmartSync({ devices: targets, endDate, newCount, dupCount, busy: false });
+      setSmartSync({ plan, newCount, dupCount, busy: false, results: null });
     } catch (error) {
       setSyncOverlay({ visible: true, phase: 'error', deviceName: '', direction: 'fromDevice' });
       await new Promise(r => setTimeout(r, 1200));
@@ -435,30 +437,31 @@ function AttendanceToday() {
     }
   };
 
-  // Confirm → actually import, WITHOUT showing a result summary
+  // Confirm → import each device over its planned [from → to] range, then
+  // show a per-device "from → to (N new)" summary.
   const confirmSmartSync = async () => {
     if (!smartSync) return;
-    const { devices: targets, endDate } = smartSync;
+    const plan = smartSync.plan || [];
     setSmartSync(s => ({ ...s, busy: true }));
     setSyncOverlay({ visible: true, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
+    const results = [];
     try {
-      const todayISO = new Date().toISOString().split('T')[0];
-      for (const dev of targets) {
-        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: dev.name, direction: 'fromDevice' });
+      for (const item of plan) {
+        setSyncOverlay({ visible: true, phase: 'syncing', deviceName: item.name, direction: 'fromDevice' });
         try {
-          const resp = await api.authFetch(`/api/attendance/latest-log-date?device_id=${dev.id}`, { method: 'GET' });
-          const data = await resp.json().catch(() => ({}));
-          const devStart = data.latest_date || todayISO;
-          await api.syncAttendanceFromDevice(dev.id, 0, false, { startDate: devStart, endDate });
+          const r = await api.syncAttendanceFromDevice(item.id, 0, false, { startDatetime: item.from, endDatetime: item.to });
+          results.push({ name: item.name, from: r.range_from || item.from, to: r.range_to || item.to, added: r.added || 0 });
         } catch (e) {
-          console.error(`Sync failed for ${dev.name}:`, e);
+          console.error(`Sync failed for ${item.name}:`, e);
+          results.push({ name: item.name, from: item.from, to: item.to, added: 0, error: true });
         }
       }
       setSyncOverlay({ visible: true, phase: 'done', deviceName: '', direction: 'fromDevice' });
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 700));
     } finally {
       setSyncOverlay({ visible: false, phase: 'syncing', deviceName: '', direction: 'fromDevice' });
-      setSmartSync(null);
+      // Keep the modal open to show the per-device from→to results
+      setSmartSync({ plan, busy: false, results });
       await fetchTodayAttendance();
       if (classifiedView) await fetchClassified();
     }
@@ -769,38 +772,73 @@ function AttendanceToday() {
                 {t('syncPointages') || 'Sync pointages'}
               </h2>
             </div>
-            <div className="px-6 pb-2">
-              <p className="text-sm text-slate-600">
-                <span className="font-mono text-slate-900">
-                  {(smartSync.devices || []).map(d => d.name).join(', ')}
-                </span>
-              </p>
-              <div className="mt-3 flex items-center gap-6 text-sm">
-                <span className="text-emerald-700">
-                  {t('newRecords') || 'Nouveaux'} : <strong>{smartSync.newCount}</strong>
-                </span>
-                <span className="text-slate-500">
-                  {t('existingRecords') || 'Déjà enregistrés'} : <strong>{smartSync.dupCount}</strong>
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2 px-6 py-4">
-              <button
-                onClick={() => setSmartSync(null)}
-                disabled={smartSync.busy}
-                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                {t('cancel') || 'Annuler'}
-              </button>
-              <button
-                onClick={confirmSmartSync}
-                disabled={smartSync.busy || smartSync.newCount === 0}
-                className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
-              >
-                {smartSync.busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                {t('confirm') || 'Confirmer'}
-              </button>
-            </div>
+            {smartSync.results ? (
+              /* ── Results: per-device from → to (N new) ── */
+              <>
+                <div className="px-6 pb-2 space-y-2">
+                  {smartSync.results.map((res, i) => (
+                    <div key={i} className="text-sm border border-slate-100 rounded-lg p-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-slate-800">{res.name}</span>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${res.added > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          +{res.added} {t('newRecords') || 'nouveaux'}
+                        </span>
+                      </div>
+                      <div className="mt-1 font-mono text-[11px] text-slate-500">
+                        {res.from ? new Date(res.from).toLocaleString() : '—'} → {res.to ? new Date(res.to).toLocaleString() : '—'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-end gap-2 px-6 py-4">
+                  <button
+                    onClick={() => setSmartSync(null)}
+                    className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg shadow-sm transition-colors"
+                  >
+                    <CheckCircle className="w-4 h-4" /> {t('done') || 'Terminé'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* ── Confirmation: per-device planned range + counts ── */
+              <>
+                <div className="px-6 pb-2 space-y-2">
+                  {(smartSync.plan || []).map((item, i) => (
+                    <div key={i} className="text-sm border border-slate-100 rounded-lg p-2.5">
+                      <div className="font-semibold text-slate-800">{item.name}</div>
+                      <div className="mt-1 font-mono text-[11px] text-slate-500">
+                        {item.from ? new Date(item.from).toLocaleString() : '—'} → {item.to ? new Date(item.to).toLocaleString() : '—'}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-6 text-sm pt-1">
+                    <span className="text-emerald-700">
+                      {t('newRecords') || 'Nouveaux'} : <strong>{smartSync.newCount}</strong>
+                    </span>
+                    <span className="text-slate-500">
+                      {t('existingRecords') || 'Déjà enregistrés'} : <strong>{smartSync.dupCount}</strong>
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-6 py-4">
+                  <button
+                    onClick={() => setSmartSync(null)}
+                    disabled={smartSync.busy}
+                    className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                  >
+                    {t('cancel') || 'Annuler'}
+                  </button>
+                  <button
+                    onClick={confirmSmartSync}
+                    disabled={smartSync.busy || smartSync.newCount === 0}
+                    className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
+                  >
+                    {smartSync.busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    {t('confirm') || 'Confirmer'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
           <style>{`
             @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
