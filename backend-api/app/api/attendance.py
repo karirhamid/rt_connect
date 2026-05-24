@@ -39,6 +39,75 @@ async def latest_log_date(
     }
 
 
+@router.get("/expected-working")
+async def expected_working(
+    target_date: Optional[str] = Query(None, description="Date YYYY-MM-DD, defaults to today"),
+    db: Session = Depends(get_db),
+):
+    """How many employees are EXPECTED to work on the given date.
+
+    A day is non-working for an employee when their weekly schedule
+    (EmployeeSchedule, else the DepartmentSchedule fallback) marks that
+    weekday as a day off. Employees with no schedule at all are assumed to
+    work (current behaviour). Used by the Today page to compute 'absent'
+    correctly — a person off on Sunday is not counted absent.
+
+    Note: night-guard / holiday-duty handling is NOT applied here yet — see
+    docs/NIGHT_SHIFT_GUARD.md for the planned feature.
+    """
+    from app.database.shift_schema import EmployeeSchedule, DepartmentSchedule
+    from app.database.schema import AppSettings as _AS
+
+    if target_date:
+        try:
+            day = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    else:
+        day = date.today()
+    weekday = day.weekday()  # 0=Mon .. 6=Sun — matches schedule day_of_week
+
+    settings = db.query(DBAppSettings).first()
+    shared = (getattr(settings, 'employee_mode', None) or 'shared') == 'shared'
+
+    employees = db.query(DBEmployee).filter(DBEmployee.is_active == True).all()  # noqa: E712
+
+    # Preload schedules for this weekday
+    emp_off = {
+        s.employee_id: s.is_day_off
+        for s in db.query(EmployeeSchedule).filter(EmployeeSchedule.day_of_week == weekday).all()
+    }
+    dept_off = {
+        s.department_id: s.is_day_off
+        for s in db.query(DepartmentSchedule).filter(DepartmentSchedule.day_of_week == weekday).all()
+    }
+
+    def is_working(emp) -> bool:
+        if emp.id in emp_off:
+            return not emp_off[emp.id]
+        if emp.department_id in dept_off:
+            return not dept_off[emp.department_id]
+        return True  # no schedule defined → assume working
+
+    # Dedup by matricule in shared mode so a person on two devices counts once
+    working_ids, off_ids = set(), set()
+    for e in employees:
+        key = e.user_id if shared else e.id
+        if is_working(e):
+            working_ids.add(key)
+        else:
+            off_ids.add(key)
+    # If any alias is working, the person is working
+    off_ids -= working_ids
+
+    return {
+        "date": day.isoformat(),
+        "weekday": weekday,
+        "expected_working": len(working_ids),
+        "day_off": len(off_ids),
+    }
+
+
 @router.get("/today")
 async def get_today_attendance(
     target_date: Optional[str] = Query(None, description="Date to view (YYYY-MM-DD), defaults to today"),

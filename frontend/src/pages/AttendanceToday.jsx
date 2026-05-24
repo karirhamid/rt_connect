@@ -310,14 +310,25 @@ function AttendanceToday() {
         });
       }
       const totalEmployees = statsRes.total_users || 0;
-      
+
+      // Absent = employees EXPECTED to work today (per their weekly schedule)
+      // who did not punch. Employees off today (e.g. Sunday) are not absent.
+      let expectedWorking = totalEmployees;
+      try {
+        const expResp = await api.authFetch(`/api/attendance/expected-working?target_date=${selectedDate}`, { method: 'GET' });
+        if (expResp.ok) {
+          const expData = await expResp.json();
+          if (typeof expData.expected_working === 'number') expectedWorking = expData.expected_working;
+        }
+      } catch { /* fall back to totalEmployees */ }
+
       setStats({
         present: totalPresent,
         late: totalLate,
-        absent: totalEmployees - totalUnique,
+        absent: Math.max(0, expectedWorking - totalUnique),
         totalEmployees: totalEmployees
       });
-      
+
       setLastSync(new Date());
 
       // Reports-style per-employee daily summary.
