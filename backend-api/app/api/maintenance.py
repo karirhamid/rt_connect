@@ -31,7 +31,7 @@ from pathlib import Path
 
 from app.database.connection import get_db_session, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 from app.database.schema import User, AppSettings
-from app.core.security import get_current_user
+from app.core.security import get_current_user, user_has_permission
 from app.services import backup_storage
 
 router = APIRouter()
@@ -126,8 +126,14 @@ class BackupScheduleOut(BackupScheduleIn):
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _is_admin(user: User) -> bool:
+    """Super admin: holds roles.manage, or the legacy 'Administrator' role."""
     try:
-        return any(r.name == 'Administrator' for r in (user.roles or []))
+        if any(r.name == 'Administrator' for r in (user.roles or [])):
+            return True
+    except Exception:
+        pass
+    try:
+        return user_has_permission(user, 'roles.manage')
     except Exception:
         return False
 
@@ -135,7 +141,7 @@ def _is_admin(user: User) -> bool:
 def _require_admin(user: User):
     if not _is_admin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail='Administrator role required')
+                            detail='Réservé au super administrateur')
 
 
 def _have_binary(name: str) -> bool:
