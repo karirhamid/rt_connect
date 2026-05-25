@@ -349,6 +349,7 @@ def attendance_summary(
                 func.max(DBAttendance.timestamp).label("last_ts"),
                 func.count(DBAttendance.id).label("swipes"),
                 func.array_agg(func.distinct(DBAttendance.source)).label("sources"),
+                func.array_agg(DBAttendance.timestamp).label("all_ts"),
             )
             .select_from(DBAttendance)
             .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
@@ -385,14 +386,27 @@ def attendance_summary(
                 "department": r.department,
                 "company": r.company,
                 "date": r.day.isoformat() if hasattr(r.day, "isoformat") else str(r.day),
-                "first_check_in": r.first_ts.isoformat() if r.first_ts else None,
-                "last_check_out": r.last_ts.isoformat() if r.last_ts else None,
-                "swipes": int(r.swipes or 0),
                 "sources": list(r.sources) if getattr(r, "sources", None) else ["device"],
             }
-            # Single punch: prevent showing the same timestamp in both entry and exit
-            if int(r.swipes or 0) == 1 and r.first_ts:
-                if r.first_ts.hour < 12:
+            # Merge near-duplicate punches (double-taps) the same way the PDF does,
+            # so e.g. two taps at 18:35 collapse to a single punch instead of being
+            # shown as both Entrée and Sortie at 18:35.
+            _merge_sec = int((getattr(_settings, 'punch_merge_window_min', 5) or 0)) * 60
+            _all_ts = [t for t in (getattr(r, 'all_ts', None) or []) if t is not None]
+            _merged = merge_close_punches(_all_ts, _merge_sec) if _all_ts else []
+            if _merged:
+                _first_ts = _merged[0][0]
+                _last_ts = _merged[-1][0]
+                _eff_swipes = len(_merged)
+            else:
+                _first_ts, _last_ts, _eff_swipes = r.first_ts, r.last_ts, int(r.swipes or 0)
+
+            item["first_check_in"] = _first_ts.isoformat() if _first_ts else None
+            item["last_check_out"] = _last_ts.isoformat() if _last_ts else None
+            item["swipes"] = _eff_swipes
+            # Single (effective) punch: don't show the same time as both in and out
+            if _eff_swipes == 1 and _first_ts:
+                if _first_ts.hour < 12:
                     item["last_check_out"] = None
                 else:
                     item["first_check_in"] = None
