@@ -1089,6 +1089,37 @@ def export_attendance_pdf(
             else:
                 _absent_emps = [e for e in _all_emps if e.id not in employee_set]
 
+            # Exclude employees who are OFF (per their weekly schedule) for the
+            # whole report period — e.g. Sunday day-off staff must not show as
+            # "absent". An employee counts as absent only if they were expected
+            # to work on at least one day in the period and didn't punch.
+            from datetime import timedelta as _td
+            from app.database.shift_schema import EmployeeSchedule as _ES, DepartmentSchedule as _DS
+            _sd = start_dt.date() if start_dt else None
+            _ed = end_dt.date() if end_dt else None
+            _covered_wd = set()
+            if _sd and _ed and _ed >= _sd and (_ed - _sd).days <= 366:
+                _d = _sd
+                while _d <= _ed:
+                    _covered_wd.add(_d.weekday())  # 0=Mon..6=Sun
+                    _d += _td(days=1)
+            _emp_off = {(s.employee_id, s.day_of_week): s.is_day_off for s in _absdb.query(_ES).all()}
+            _dept_off = {(s.department_id, s.day_of_week): s.is_day_off for s in _absdb.query(_DS).all()}
+
+            def _works_on(e, wd):
+                if (e.id, wd) in _emp_off:
+                    return not _emp_off[(e.id, wd)]
+                if (e.department_id, wd) in _dept_off:
+                    return not _dept_off[(e.department_id, wd)]
+                return True  # no schedule → assume working
+
+            # Expected-to-work per logical person (OR across their device rows)
+            _expected = {}
+            for e in _absent_emps:
+                key = e.user_id if shared else e.id
+                works = any(_works_on(e, wd) for wd in _covered_wd) if _covered_wd else True
+                _expected[key] = _expected.get(key, False) or works
+
             # DEDUPE — in shared mode the same person can be registered on
             # multiple devices (one Employee row per device), so we keep only
             # ONE row per logical person. Sort by user_id (numeric if possible)
@@ -1099,6 +1130,8 @@ def export_attendance_pdf(
                 key = e.user_id if shared else e.id
                 if key in _seen:
                     continue
+                if not _expected.get(key, True):
+                    continue  # off the whole period — not absent
                 _seen.add(key)
                 _dedup_data.append({
                     "name":       e.name or "—",
