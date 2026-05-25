@@ -174,6 +174,44 @@ class SmbStorage(BackupStorage):
         except Exception as e:
             return False, f"{type(e).__name__}: {e}"
 
+    # ── Browsing (used by the folder picker) ────────────────────────────────
+    def list_shares(self) -> List[str]:
+        """Enumerate the server's shared folders (NetShareEnum) via pysmb.
+
+        Raises if it can't, so the caller falls back to manual share entry.
+        """
+        from smb.SMBConnection import SMBConnection
+        conn = SMBConnection(self.username, self.password, "rtpointage", self.server,
+                             domain=self.domain or "", use_ntlm_v2=True, is_direct_tcp=True)
+        try:
+            if not conn.connect(self.server, 445, timeout=10):
+                raise RuntimeError("authentication failed")
+            return [s.name for s in conn.listShares(timeout=10)
+                    if not s.isSpecial and s.name.upper() != "IPC$"]
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def list_folders(self, share: str, path: str = "") -> List[dict]:
+        """List sub-folders (dirs only) within share/path. For the picker."""
+        from smbclient import scandir
+        self._connect()
+        out: List[dict] = []
+        try:
+            base = f"//{self.server}/{share.strip('/')}"
+            full = f"{base}/{path.strip('/')}" if path.strip("/") else base
+            for entry in scandir(full):
+                try:
+                    if entry.is_dir():
+                        out.append({"name": entry.name})
+                except Exception:
+                    continue
+        finally:
+            self._disconnect()
+        return sorted(out, key=lambda x: x["name"].lower())
+
 
 # ── Factory ─────────────────────────────────────────────────────────────────
 
@@ -193,6 +231,13 @@ def get_external() -> Optional[BackupStorage]:
         cfg = json.loads(raw)
     except Exception:
         return None
+    # Decrypt the stored password (legacy plaintext passes through).
+    if isinstance(cfg, dict) and cfg.get('password'):
+        try:
+            from app.core.crypto import decrypt_secret
+            cfg['password'] = decrypt_secret(cfg['password'])
+        except Exception:
+            pass
     if kind == 'smb':
         try:
             return SmbStorage(**cfg)

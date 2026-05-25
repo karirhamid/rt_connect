@@ -95,6 +95,22 @@ class TestStorageResponse(BaseModel):
     message: str
 
 
+class SmbBrowseIn(BaseModel):
+    server:   str
+    username: str
+    password: Optional[str] = None    # None / masked = reuse saved
+    domain:   Optional[str] = None
+    share:    Optional[str] = None     # None → list shares; set → list folders
+    path:     Optional[str] = ""       # subfolder within the share
+
+
+class SmbBrowseOut(BaseModel):
+    ok: bool
+    message: str = ""
+    shares:  List[str] = []
+    folders: List[str] = []
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _is_admin(user: User) -> bool:
@@ -604,7 +620,14 @@ def update_storage_config(payload: StorageConfigIn,
             s = AppSettings()
             db.add(s)
         s.backup_storage_type = kind
-        s.backup_storage_config = json.dumps(cfg) if (kind != 'none' and cfg) else None
+        if kind != 'none' and cfg:
+            from app.core.crypto import encrypt_secret
+            stored = dict(cfg)
+            if stored.get('password'):
+                stored['password'] = encrypt_secret(stored['password'])
+            s.backup_storage_config = json.dumps(stored)
+        else:
+            s.backup_storage_config = None
         db.commit()
 
     return StorageConfigOut(type=kind, config=_mask_password(cfg))
@@ -624,6 +647,9 @@ def test_storage_connection(payload: StorageConfigIn,
             return TestStorageResponse(ok=False, message='Missing SMB config')
         cfg = payload.smb.model_dump(exclude_none=True)
         cfg = _merge_with_existing_password(cfg, 'smb')
+        from app.core.crypto import decrypt_secret
+        if cfg.get('password'):
+            cfg['password'] = decrypt_secret(cfg['password'])  # plaintext passes through
         try:
             storage = backup_storage.SmbStorage(**cfg)
         except Exception as e:
@@ -631,3 +657,56 @@ def test_storage_connection(payload: StorageConfigIn,
         ok, msg = storage.test_connection()
         return TestStorageResponse(ok=ok, message=msg)
     return TestStorageResponse(ok=False, message=f'Unsupported type: {kind}')
+
+
+@router.post('/maintenance/storage/smb-browse', response_model=SmbBrowseOut,
+             dependencies=[Depends(get_current_user)])
+def smb_browse(payload: SmbBrowseIn, current_user: User = Depends(get_current_user)):
+    """Dynamic explorer: list a server's shares, or folders within a share.
+
+    Lets the admin enter a server IP and navigate to a destination instead of
+    typing the UNC path by hand. Password may be omitted/masked to reuse the
+    saved (encrypted) one.
+    """
+    _require_admin(current_user)
+    from app.core.crypto import decrypt_secret
+
+    pwd = (payload.password or '').strip()
+    if not pwd or pwd == _PWD_MASK:
+        # Reuse the saved SMB password
+        with get_db_session() as db:
+            s = db.query(AppSettings).first()
+            raw = getattr(s, 'backup_storage_config', None) if s else None
+        if raw:
+            try:
+                pwd = decrypt_secret((json.loads(raw) or {}).get('password')) or ''
+            except Exception:
+                pwd = ''
+
+    try:
+        storage = backup_storage.SmbStorage(
+            server=payload.server, share=(payload.share or 'IPC$'),
+            username=payload.username, password=pwd, domain=payload.domain,
+        )
+    except Exception as e:
+        return SmbBrowseOut(ok=False, message=f'Config invalide : {e}')
+
+    # No share chosen yet → enumerate shares
+    if not payload.share:
+        try:
+            shares = storage.list_shares()
+            return SmbBrowseOut(ok=True, shares=shares)
+        except Exception as e:
+            return SmbBrowseOut(
+                ok=False,
+                message=("Impossible de lister les partages automatiquement. "
+                         "Saisissez le nom du partage manuellement puis parcourez les dossiers. "
+                         f"({e})"),
+            )
+
+    # Share chosen → list its sub-folders at the given path
+    try:
+        folders = storage.list_folders(payload.share, payload.path or '')
+        return SmbBrowseOut(ok=True, folders=[f['name'] for f in folders])
+    except Exception as e:
+        return SmbBrowseOut(ok=False, message=f'{type(e).__name__}: {e}')

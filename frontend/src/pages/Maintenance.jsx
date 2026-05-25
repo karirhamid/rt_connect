@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, Upload, Trash2, Plus, AlertCircle, CheckCircle, Loader, Database, FileUp,
-         Server, Eye, EyeOff, ShieldCheck, CloudOff } from 'lucide-react';
+         Server, Eye, EyeOff, ShieldCheck, CloudOff, FolderTree, Folder, FolderOpen, ChevronRight, X, ArrowLeft } from 'lucide-react';
 import api from '../services/api';
 
 export default function Maintenance() {
@@ -28,6 +28,78 @@ export default function Maintenance() {
   const [storageMsg, setStorageMsg] = useState(null);
   const [verifyResult, setVerifyResult] = useState(null);
   const [verifyingFor, setVerifyingFor] = useState(null);
+
+  // SMB folder explorer
+  const [browse, setBrowse] = useState(null); // { loading, error, shares, folders, share, path }
+
+  const smbBrowseCall = async (share, path) => {
+    const { data } = await api.post('/maintenance/storage/smb-browse', {
+      server: smb.server.trim(),
+      username: smb.username.trim(),
+      password: (smb.password && !smb.password.startsWith('••')) ? smb.password : null,
+      domain: smb.domain.trim() || null,
+      share: share || null,
+      path: path || '',
+    });
+    return data;
+  };
+
+  const openBrowse = async () => {
+    if (!smb.server.trim() || !smb.username.trim()) {
+      setStorageMsg({ kind: 'err', text: t('smbNeedServerUser') || 'Renseignez le serveur et l’utilisateur d’abord.' });
+      return;
+    }
+    setBrowse({ loading: true, error: '', shares: [], folders: [], share: '', path: '' });
+    try {
+      const data = await smbBrowseCall(null, '');
+      setBrowse({ loading: false, error: data.ok ? '' : data.message, shares: data.shares || [], folders: [], share: '', path: '' });
+    } catch (e) {
+      setBrowse({ loading: false, error: e?.response?.data?.detail || e.message, shares: [], folders: [], share: '', path: '' });
+    }
+  };
+
+  const browseShare = async (share) => {
+    setBrowse(b => ({ ...b, loading: true, error: '', share, path: '' }));
+    try {
+      const data = await smbBrowseCall(share, '');
+      setBrowse(b => ({ ...b, loading: false, error: data.ok ? '' : data.message, folders: data.folders || [], share, path: '' }));
+    } catch (e) {
+      setBrowse(b => ({ ...b, loading: false, error: e?.response?.data?.detail || e.message }));
+    }
+  };
+
+  const browseInto = async (folder) => {
+    const newPath = browse.path ? `${browse.path}/${folder}` : folder;
+    setBrowse(b => ({ ...b, loading: true, error: '' }));
+    try {
+      const data = await smbBrowseCall(browse.share, newPath);
+      setBrowse(b => ({ ...b, loading: false, error: data.ok ? '' : data.message, folders: data.folders || [], path: newPath }));
+    } catch (e) {
+      setBrowse(b => ({ ...b, loading: false, error: e?.response?.data?.detail || e.message }));
+    }
+  };
+
+  const browseUp = async () => {
+    if (!browse.path) { return browseBackToShares(); }
+    const parts = browse.path.split('/'); parts.pop();
+    const up = parts.join('/');
+    setBrowse(b => ({ ...b, loading: true, error: '' }));
+    try {
+      const data = await smbBrowseCall(browse.share, up);
+      setBrowse(b => ({ ...b, loading: false, folders: data.folders || [], path: up, error: data.ok ? '' : data.message }));
+    } catch (e) {
+      setBrowse(b => ({ ...b, loading: false, error: e?.response?.data?.detail || e.message }));
+    }
+  };
+
+  const browseBackToShares = () => setBrowse(b => ({ ...b, share: '', path: '', folders: [] }));
+
+  const selectBrowseTarget = () => {
+    // Chosen destination = share + current path
+    setSmb(s => ({ ...s, share: browse.share, remote_path: browse.path || s.remote_path || 'rtpointage' }));
+    setBrowse(null);
+    setStorageMsg({ kind: 'ok', text: (t('smbTargetSelected') || 'Destination sélectionnée') + `: //${smb.server}/${browse.share}/${browse.path}` });
+  };
 
   // Load backups + storage config on mount
   useEffect(() => {
@@ -445,6 +517,16 @@ export default function Maintenance() {
                 placeholder="rtpointage"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
             </div>
+            <div className="sm:col-span-2">
+              <button type="button" onClick={openBrowse}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium border border-primary-300 text-primary-700 rounded-lg hover:bg-primary-50">
+                <FolderTree className="w-4 h-4" />
+                {t('smbBrowse') || 'Parcourir les dossiers du serveur'}
+              </button>
+              <p className="text-xs text-slate-400 mt-1">
+                {t('smbBrowseHint') || "Entrez le serveur + identifiants, puis parcourez les partages et dossiers pour choisir la destination."}
+              </p>
+            </div>
           </div>
         )}
 
@@ -666,6 +748,89 @@ export default function Maintenance() {
               >
                 {restoring ? <Loader className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 {restoring ? (t('restoring') || 'Restauration…') : (t('restore') || 'Restaurer')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SMB folder explorer ── */}
+      {browse && (
+        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/60 w-full max-w-lg overflow-hidden flex flex-col" style={{ maxHeight: '80vh' }}>
+            <div className="flex items-center justify-between px-5 py-3 border-b">
+              <div className="flex items-center gap-2 min-w-0">
+                <Server className="w-4 h-4 text-primary-600 shrink-0" />
+                <span className="text-sm font-semibold text-slate-800 truncate">
+                  {smb.server}{browse.share ? ` / ${browse.share}${browse.path ? '/' + browse.path : ''}` : ''}
+                </span>
+              </div>
+              <button onClick={() => setBrowse(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+
+            {/* Toolbar */}
+            <div className="flex items-center gap-2 px-5 py-2 border-b bg-slate-50 text-sm">
+              {browse.share ? (
+                <button onClick={browseUp} className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900">
+                  <ArrowLeft className="w-4 h-4" /> {browse.path ? (t('back') || 'Retour') : (t('smbShares') || 'Partages')}
+                </button>
+              ) : (
+                <span className="text-slate-500">{t('smbSelectShare') || 'Sélectionnez un partage'}</span>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-3">
+              {browse.loading ? (
+                <div className="flex items-center justify-center py-10 text-slate-400">
+                  <Loader className="w-5 h-5 animate-spin" />
+                </div>
+              ) : browse.error ? (
+                <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">{browse.error}</div>
+              ) : !browse.share ? (
+                browse.shares.length === 0 ? (
+                  <div className="text-sm text-slate-400 text-center py-8">{t('smbNoShares') || 'Aucun partage listé. Saisissez le nom du partage manuellement.'}</div>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {browse.shares.map(sh => (
+                      <li key={sh}>
+                        <button onClick={() => browseShare(sh)}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 rounded-lg text-left text-sm">
+                          <FolderOpen className="w-4 h-4 text-amber-500 shrink-0" />
+                          <span className="flex-1">{sh}</span>
+                          <ChevronRight className="w-4 h-4 text-slate-300" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              ) : browse.folders.length === 0 ? (
+                <div className="text-sm text-slate-400 text-center py-8">{t('smbEmptyFolder') || 'Aucun sous-dossier ici.'}</div>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {browse.folders.map(f => (
+                    <li key={f}>
+                      <button onClick={() => browseInto(f)}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 rounded-lg text-left text-sm">
+                        <Folder className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span className="flex-1">{f}</span>
+                        <ChevronRight className="w-4 h-4 text-slate-300" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t">
+              <button onClick={() => setBrowse(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">
+                {t('cancel') || 'Annuler'}
+              </button>
+              <button onClick={selectBrowseTarget} disabled={!browse.share}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg disabled:opacity-50">
+                <CheckCircle className="w-4 h-4" />
+                {t('smbSelectHere') || 'Choisir ce dossier'}
               </button>
             </div>
           </div>

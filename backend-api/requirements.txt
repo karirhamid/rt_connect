@@ -19,6 +19,8 @@ requests==2.31.0
 
 # External backup storage — SMB / network shares (Windows, Samba on Linux)
 smbprotocol==1.13.0
+# pysmb — used to enumerate a server's shares (NetShareEnum) for the folder picker
+pysmb==1.2.9.1
 
 # Payroll exports (XLSX)
 openpyxl==3.1.2
