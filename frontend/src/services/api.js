@@ -204,7 +204,9 @@ class ApiService {
   }
 
   async updateGeneralSettings(payload) {
-    const response = await fetch(`${API_BASE_URL}/api/settings/general`, {
+    // Must be authenticated — the endpoint requires a user (and gates the
+    // portal flag on roles.manage), so send the bearer token via authFetch.
+    const response = await this.authFetch('/api/settings/general', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
