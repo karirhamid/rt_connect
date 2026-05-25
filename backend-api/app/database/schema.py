@@ -248,6 +248,14 @@ class AppSettings(Base):
     backup_storage_type   = Column(String(20),  default='none',  nullable=False)
     backup_storage_config = Column(Text,        nullable=True)
 
+    # Scheduled automatic backups (cron-like, evaluated in APP_TIMEZONE)
+    backup_schedule_enabled   = Column(Boolean, default=False, nullable=False, server_default='false')
+    backup_schedule_frequency = Column(String(10), default='daily', nullable=False, server_default='daily')  # daily | weekly
+    backup_schedule_time      = Column(String(5),  default='02:00', nullable=False, server_default='02:00')   # HH:MM
+    backup_schedule_weekday   = Column(Integer, default=0, nullable=False, server_default='0')  # 0=Mon..6=Sun (weekly)
+    backup_retention_days     = Column(Integer, default=30, nullable=False, server_default='30')  # 0 = keep all
+    backup_last_run_at        = Column(DateTime, nullable=True)
+
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 

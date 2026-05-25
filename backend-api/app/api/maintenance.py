@@ -111,6 +111,18 @@ class SmbBrowseOut(BaseModel):
     folders: List[str] = []
 
 
+class BackupScheduleIn(BaseModel):
+    enabled:   bool = False
+    frequency: str = 'daily'      # daily | weekly
+    time:      str = '02:00'      # HH:MM
+    weekday:   int = 0            # 0=Mon..6=Sun (weekly only)
+    retention_days: int = 30      # 0 = keep all local backups
+
+
+class BackupScheduleOut(BackupScheduleIn):
+    last_run_at: Optional[str] = None
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _is_admin(user: User) -> bool:
@@ -237,55 +249,36 @@ def list_backups(current_user: User = Depends(get_current_user)):
 
 # ── Create ──────────────────────────────────────────────────────────────────
 
-@router.post('/maintenance/backup', response_model=BackupResponse,
-             dependencies=[Depends(get_current_user)])
-def create_backup(current_user: User = Depends(get_current_user)):
-    """Create a full database backup using pg_dump custom format."""
-    _require_admin(current_user)
-
+def _perform_backup() -> dict:
+    """Create a pg_dump backup, push to external storage (best-effort), and
+    apply retention. Reused by the HTTP endpoint AND the backup scheduler.
+    Raises RuntimeError on failure."""
     if not _have_binary('pg_dump'):
-        raise HTTPException(
-            status_code=500,
-            detail=("pg_dump binary not found in the backend container. "
-                    "Install 'postgresql-client' in the Dockerfile and rebuild."),
-        )
+        raise RuntimeError("pg_dump binary not found in the backend container. "
+                           "Install 'postgresql-client' in the Dockerfile and rebuild.")
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f'rtpointage_{timestamp}.dump'
     target = BACKUP_DIR / filename
-
     cmd = [
-        'pg_dump',
-        '--format=custom',
-        '--compress=6',
-        '--no-owner',         # avoids 'role "X" does not exist' on restore to a different env
-        '--no-privileges',
-        '--host', DB_HOST,
-        '--port', str(DB_PORT),
-        '--username', DB_USER,
-        '--dbname', DB_NAME,
-        '--file', str(target),
+        'pg_dump', '--format=custom', '--compress=6', '--no-owner', '--no-privileges',
+        '--host', DB_HOST, '--port', str(DB_PORT), '--username', DB_USER,
+        '--dbname', DB_NAME, '--file', str(target),
     ]
     logger.info(f"Running: pg_dump → {filename}")
-
     try:
-        proc = subprocess.run(
-            cmd, env=_pg_env(),
-            capture_output=True, text=True, timeout=600,  # 10 min cap
-        )
+        proc = subprocess.run(cmd, env=_pg_env(), capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired:
         target.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail='pg_dump timed out after 10 minutes')
-
+        raise RuntimeError('pg_dump timed out after 10 minutes')
     if proc.returncode != 0:
         target.unlink(missing_ok=True)
         err = (proc.stderr or proc.stdout or '').strip().splitlines()[-1:] or ['(no output)']
-        raise HTTPException(status_code=500, detail=f'pg_dump failed: {err[0]}')
+        raise RuntimeError(f'pg_dump failed: {err[0]}')
 
     size = target.stat().st_size
     logger.info(f"Backup OK: {filename} ({size / 1024:.1f} KB)")
 
-    # ── Push to external storage (best-effort — local copy is the source of truth) ──
     pushed = False
     ext_error: Optional[str] = None
     try:
@@ -294,18 +287,59 @@ def create_backup(current_user: User = Depends(get_current_user)):
             logger.info(f"Pushing {filename} to {ext.name} ...")
             ext.upload(target)
             pushed = True
-            logger.info(f"Pushed {filename} to {ext.name} successfully")
     except Exception as e:
         ext_error = str(e)
         logger.warning(f"External push failed for {filename}: {e}")
 
+    try:
+        cleanup_old_backups()
+    except Exception as e:
+        logger.warning(f"Backup retention cleanup failed: {e}")
+
+    return {'filename': filename, 'size': size, 'pushed': pushed,
+            'ext_error': ext_error, 'created_at': datetime.now().isoformat()}
+
+
+def cleanup_old_backups() -> int:
+    """Delete LOCAL backups older than backup_retention_days (0 = keep all).
+    External copies are left untouched. Returns count deleted."""
+    from app.database.connection import get_db_session
+    with get_db_session() as db:
+        s = db.query(AppSettings).first()
+        days = int(getattr(s, 'backup_retention_days', 30) or 0) if s else 0
+    if days <= 0:
+        return 0
+    cutoff = datetime.now().timestamp() - days * 86400
+    removed = 0
+    for pattern in ('*.dump', '*.json.gz'):
+        for f in BACKUP_DIR.glob(pattern):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink(missing_ok=True)
+                    removed += 1
+            except Exception:
+                pass
+    if removed:
+        logger.info(f"Retention: deleted {removed} local backup(s) older than {days}d")
+    return removed
+
+
+@router.post('/maintenance/backup', response_model=BackupResponse,
+             dependencies=[Depends(get_current_user)])
+def create_backup(current_user: User = Depends(get_current_user)):
+    """Create a full database backup using pg_dump custom format."""
+    _require_admin(current_user)
+    try:
+        r = _perform_backup()
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     return BackupResponse(
         message='Backup created successfully',
-        filename=filename,
-        created_at=datetime.now().isoformat(),
-        size_bytes=size,
-        pushed_to_external=pushed,
-        external_error=ext_error,
+        filename=r['filename'],
+        created_at=r['created_at'],
+        size_bytes=r['size'],
+        pushed_to_external=r['pushed'],
+        external_error=r['ext_error'],
     )
 
 
@@ -710,3 +744,54 @@ def smb_browse(payload: SmbBrowseIn, current_user: User = Depends(get_current_us
         return SmbBrowseOut(ok=True, folders=[f['name'] for f in folders])
     except Exception as e:
         return SmbBrowseOut(ok=False, message=f'{type(e).__name__}: {e}')
+
+
+@router.get('/maintenance/backup-schedule', response_model=BackupScheduleOut,
+            dependencies=[Depends(get_current_user)])
+def get_backup_schedule(current_user: User = Depends(get_current_user)):
+    _require_admin(current_user)
+    with get_db_session() as db:
+        s = db.query(AppSettings).first()
+        if not s:
+            return BackupScheduleOut()
+        lr = getattr(s, 'backup_last_run_at', None)
+        return BackupScheduleOut(
+            enabled=bool(getattr(s, 'backup_schedule_enabled', False)),
+            frequency=getattr(s, 'backup_schedule_frequency', 'daily') or 'daily',
+            time=getattr(s, 'backup_schedule_time', '02:00') or '02:00',
+            weekday=int(getattr(s, 'backup_schedule_weekday', 0) or 0),
+            retention_days=int(getattr(s, 'backup_retention_days', 30) or 0),
+            last_run_at=lr.isoformat() if lr else None,
+        )
+
+
+@router.put('/maintenance/backup-schedule', response_model=BackupScheduleOut,
+            dependencies=[Depends(get_current_user)])
+def update_backup_schedule(payload: BackupScheduleIn,
+                           current_user: User = Depends(get_current_user)):
+    _require_admin(current_user)
+    freq = payload.frequency if payload.frequency in ('daily', 'weekly') else 'daily'
+    # validate HH:MM
+    try:
+        hh, mm = [int(x) for x in (payload.time or '02:00').split(':')]
+        assert 0 <= hh <= 23 and 0 <= mm <= 59
+        tstr = f"{hh:02d}:{mm:02d}"
+    except Exception:
+        raise HTTPException(status_code=400, detail="Heure invalide (format HH:MM)")
+    with get_db_session() as db:
+        s = db.query(AppSettings).first()
+        if not s:
+            s = AppSettings(); db.add(s)
+        s.backup_schedule_enabled = bool(payload.enabled)
+        s.backup_schedule_frequency = freq
+        s.backup_schedule_time = tstr
+        s.backup_schedule_weekday = max(0, min(6, int(payload.weekday or 0)))
+        s.backup_retention_days = max(0, min(3650, int(payload.retention_days or 0)))
+        db.commit()
+        lr = getattr(s, 'backup_last_run_at', None)
+        return BackupScheduleOut(
+            enabled=s.backup_schedule_enabled, frequency=s.backup_schedule_frequency,
+            time=s.backup_schedule_time, weekday=s.backup_schedule_weekday,
+            retention_days=s.backup_retention_days,
+            last_run_at=lr.isoformat() if lr else None,
+        )

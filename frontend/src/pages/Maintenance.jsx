@@ -32,6 +32,11 @@ export default function Maintenance() {
   // SMB folder explorer
   const [browse, setBrowse] = useState(null); // { loading, error, shares, folders, share, path }
 
+  // Scheduled automatic backups
+  const [schedule, setSchedule] = useState({ enabled: false, frequency: 'daily', time: '02:00', weekday: 0, retention_days: 30, last_run_at: null });
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleMsg, setScheduleMsg] = useState(null);
+
   const smbBrowseCall = async (share, path) => {
     const { data } = await api.post('/maintenance/storage/smb-browse', {
       server: smb.server.trim(),
@@ -105,7 +110,42 @@ export default function Maintenance() {
   useEffect(() => {
     loadBackups();
     loadStorageConfig();
+    loadSchedule();
   }, []);
+
+  const loadSchedule = async () => {
+    try {
+      const { data } = await api.get('/maintenance/backup-schedule');
+      setSchedule({
+        enabled: !!data.enabled,
+        frequency: data.frequency || 'daily',
+        time: data.time || '02:00',
+        weekday: Number.isInteger(data.weekday) ? data.weekday : 0,
+        retention_days: Number.isInteger(data.retention_days) ? data.retention_days : 30,
+        last_run_at: data.last_run_at || null,
+      });
+    } catch { /* ignore */ }
+  };
+
+  const saveSchedule = async () => {
+    setSavingSchedule(true);
+    setScheduleMsg(null);
+    try {
+      const { data } = await api.put('/maintenance/backup-schedule', {
+        enabled: schedule.enabled,
+        frequency: schedule.frequency,
+        time: schedule.time,
+        weekday: schedule.weekday,
+        retention_days: schedule.retention_days,
+      });
+      setSchedule(s => ({ ...s, last_run_at: data.last_run_at || s.last_run_at }));
+      setScheduleMsg({ kind: 'ok', text: t('scheduleSaved') || 'Planification enregistrée' });
+    } catch (e) {
+      setScheduleMsg({ kind: 'err', text: e?.response?.data?.detail || e.message });
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
 
   const loadStorageConfig = async () => {
     try {
@@ -557,6 +597,78 @@ export default function Maintenance() {
             {savingStorage ? <Loader className="w-4 h-4 animate-spin" /> : null}
             {t('save') || 'Enregistrer'}
           </button>
+        </div>
+      </div>
+
+      {/* ── Scheduled automatic backups ── */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
+        <div className="p-6 border-b border-slate-200/60 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">{t('autoBackupTitle') || 'Sauvegarde automatique'}</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {t('autoBackupDesc') || "Lance un pg_dump automatiquement et l'envoie vers la destination configurée."}
+            </p>
+          </div>
+          <button type="button" onClick={() => setSchedule(s => ({ ...s, enabled: !s.enabled }))}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${schedule.enabled ? 'bg-primary-600' : 'bg-slate-300'}`}>
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${schedule.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 ${schedule.enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('frequency') || 'Fréquence'}</label>
+              <select value={schedule.frequency} onChange={e => setSchedule({ ...schedule, frequency: e.target.value })}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white">
+                <option value="daily">{t('freqDaily') || 'Quotidienne'}</option>
+                <option value="weekly">{t('freqWeekly') || 'Hebdomadaire'}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('atTime') || 'Heure'}</label>
+              <input type="time" value={schedule.time} onChange={e => setSchedule({ ...schedule, time: e.target.value })}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white" />
+            </div>
+            {schedule.frequency === 'weekly' && (
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t('dayOfWeek') || 'Jour'}</label>
+                <select value={schedule.weekday} onChange={e => setSchedule({ ...schedule, weekday: parseInt(e.target.value) })}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white">
+                  {[t('mon')||'Lundi', t('tue')||'Mardi', t('wed')||'Mercredi', t('thu')||'Jeudi', t('fri')||'Vendredi', t('sat')||'Samedi', t('sun')||'Dimanche'].map((d, i) => (
+                    <option key={i} value={i}>{d}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('retentionDays') || 'Rétention (jours)'}</label>
+              <input type="number" min="0" max="3650" value={schedule.retention_days}
+                onChange={e => setSchedule({ ...schedule, retention_days: parseInt(e.target.value) || 0 })}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white" />
+              <p className="text-[11px] text-slate-400 mt-1">{t('retentionHint') || '0 = conserver tout (local)'}</p>
+            </div>
+          </div>
+
+          {schedule.last_run_at && (
+            <p className="text-xs text-slate-500">
+              {t('lastRun') || 'Dernière exécution'} : {new Date(schedule.last_run_at).toLocaleString()}
+            </p>
+          )}
+
+          {scheduleMsg && (
+            <div className={`text-sm px-3 py-2 rounded-lg border ${scheduleMsg.kind === 'ok' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
+              {scheduleMsg.text}
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button onClick={saveSchedule} disabled={savingSchedule}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:bg-slate-300 text-sm font-medium">
+              {savingSchedule ? <Loader className="w-4 h-4 animate-spin" /> : null}
+              {t('save') || 'Enregistrer'}
+            </button>
+          </div>
         </div>
       </div>
 

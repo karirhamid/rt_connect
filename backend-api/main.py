@@ -120,6 +120,13 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text(
                 "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS portal_enabled BOOLEAN NOT NULL DEFAULT FALSE"
             ))
+            # Scheduled automatic backups
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_schedule_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_schedule_frequency VARCHAR(10) NOT NULL DEFAULT 'daily'"))
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_schedule_time VARCHAR(5) NOT NULL DEFAULT '02:00'"))
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_schedule_weekday INTEGER NOT NULL DEFAULT 0"))
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_retention_days INTEGER NOT NULL DEFAULT 30"))
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_last_run_at TIMESTAMP"))
             # Ensure the 'reports.hours' permission exists so admins can assign it
             # to a role (e.g. "RH Reporting logs") that may view computed-hours
             # columns (Total worked / Overtime / Late / Early). Plain reporting
@@ -377,6 +384,14 @@ async def lifespan(app: FastAPI):
         logger.info("Device heartbeat started")
     except Exception as e:
         logger.error(f"Failed to start device heartbeat: {e}")
+
+    # Start scheduled-backup thread
+    try:
+        from app.services.backup_scheduler import start as start_backup_scheduler
+        start_backup_scheduler()
+        logger.info("Backup scheduler started")
+    except Exception as e:
+        logger.error(f"Failed to start backup scheduler: {e}")
 
     yield
 
