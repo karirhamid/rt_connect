@@ -108,17 +108,23 @@ def update_email_settings(payload: EmailSettingsIn):
         )
 
 
+class TestAlertIn(BaseModel):
+    to: Optional[str] = None   # optional override so you can test before saving
+
+
 @router.post('/email-settings/test-alert',
              dependencies=[Depends(require_permission('roles.manage'))])
-def test_alert():
-    """Send a sample device-offline alert to the configured alerts recipient."""
+def test_alert(payload: Optional[TestAlertIn] = None):
+    """Send a sample device-offline alert. Uses the recipient from the request
+    body if provided (lets you test before saving), else the saved one."""
     with get_db_session() as db:
         row = _get_or_create(db)
-        recipient = getattr(row, 'alerts_recipient_email', None)
+        recipient = (payload.to.strip() if (payload and payload.to) else None) \
+            or getattr(row, 'alerts_recipient_email', None)
         if not recipient:
-            raise HTTPException(400, "alerts_recipient_email not set")
+            raise HTTPException(400, "Aucun destinataire d'alerte. Saisissez l'email puis enregistrez (ou réessayez).")
         if not row.host or not row.from_address:
-            raise HTTPException(400, "SMTP not configured")
+            raise HTTPException(400, "SMTP non configuré : renseignez le serveur et l'adresse d'expéditeur, puis enregistrez.")
         cfg = dict(host=row.host, port=row.port, username=row.username,
                    password=row.password, use_tls=row.use_tls, use_ssl=row.use_ssl,
                    from_name=row.from_name, from_address=row.from_address)

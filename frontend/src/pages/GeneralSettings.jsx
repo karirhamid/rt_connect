@@ -1378,8 +1378,11 @@ function GeneralSettings() {
                       type="button"
                       onClick={async () => {
                         try {
-                          const res = await api.post('/email-settings/test-alert');
-                          showNotification('success', res.data?.detail || 'Test alert envoyé');
+                          // Save first so the SMTP config + recipient are persisted,
+                          // then test the on-screen recipient.
+                          await saveEmailSettings();
+                          const res = await api.post('/email-settings/test-alert', { to: emailCfg.alerts_recipient_email });
+                          showNotification('success', res.data?.detail || 'Alerte de test envoyée');
                         } catch (e) {
                           showNotification('error', e?.response?.data?.detail || e.message);
                         }
