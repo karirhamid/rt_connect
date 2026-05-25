@@ -1,25 +1,27 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Save, Check, AlertCircle, Loader2, RefreshCw, Sun, Timer, Copy, FileText, Mail, Calendar, Play, Trash2, Edit, Plus, Clock, ToggleLeft, ToggleRight, ChevronDown, ChevronUp, Eye } from 'lucide-react';
+import { Globe, Save, Check, AlertCircle, Loader2, RefreshCw, Sun, Timer, Copy, FileText, Mail, Calendar, Play, Trash2, Edit, Plus, Clock, ToggleLeft, ToggleRight, ChevronDown, ChevronUp, Eye, Settings } from 'lucide-react';
 import api from '../services/api';
 import ScheduleModal from '../components/ScheduleModal';
 
 function GeneralSettings() {
   const { t, i18n } = useTranslation();
-  const [activeTab, setActiveTab] = useState('language');
+  const [activeTab, setActiveTab] = useState('sync');
   const [selectedLanguage, setSelectedLanguage] = useState(i18n.language || 'fr');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [notification, setNotification] = useState(null);
 
+  // Organized by domain: System & attendance policy first, then reporting,
+  // then personal/display preferences last.
   const tabs = [
-    { id: 'language',   name: t('languageTab'),   icon: Globe },
-    { id: 'sync',       name: t('syncTab'),        icon: RefreshCw },
-    { id: 'timing',     name: t('timingTab'),      icon: Timer },
-    { id: 'appearance', name: t('appearanceTab'),  icon: Sun },
-    { id: 'pdf',        name: t('pdfTab'),         icon: FileText },
-    { id: 'email',      name: 'Email SMTP',        icon: Mail },
-    { id: 'schedules',  name: 'Programmes',        icon: Calendar },
+    { id: 'sync',       name: t('systemTab') || 'Système',                 icon: Settings },
+    { id: 'timing',     name: t('timingTab'),                              icon: Timer },
+    { id: 'pdf',        name: t('pdfTab'),                                 icon: FileText },
+    { id: 'email',      name: t('emailTab') || 'Email SMTP',               icon: Mail },
+    { id: 'schedules',  name: t('schedulesTab') || 'Rapports planifiés',   icon: Calendar },
+    { id: 'appearance', name: t('appearanceTab'),                          icon: Sun },
+    { id: 'language',   name: t('languageTab'),                            icon: Globe },
   ];
 
   // ── Email (SMTP) state ────────────────────────────────────────────────────
@@ -713,27 +715,6 @@ function GeneralSettings() {
               </div>
             </div>
 
-            {/* Employee portal — super admin only */}
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h3 className="text-md font-semibold text-gray-900">{t('portalFeature') || 'Espace employé (portail)'}</h3>
-                  <p className="text-sm text-gray-600 mt-0.5">
-                    {t('portalFeatureDesc') || "Permet aux employés de consulter leurs pointages sur /portal-login. Réservé au super administrateur."}
-                  </p>
-                </div>
-                <button type="button" onClick={() => setPortalEnabled(v => !v)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${portalEnabled ? 'bg-primary-600' : 'bg-gray-300'}`}>
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${portalEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-                </button>
-              </div>
-              {portalEnabled && (
-                <div className="mt-2 text-xs text-amber-800">
-                  {t('portalEnabledHint') || "Quand activé, le portail est joignable à /portal-login. Mot de passe initial = prénom de l'employé."}
-                </div>
-              )}
-            </div>
-
             <div className="mb-2">
                <h2 className="text-lg font-semibold text-gray-900 mb-1">{t('syncSettingsTitle')}</h2>
                <p className="text-sm text-gray-600">{t('syncSettingsDesc')}</p>
@@ -803,6 +784,27 @@ function GeneralSettings() {
                  </div>
                </div>
              </div>
+
+            {/* Employee portal — super admin only (distinct feature, kept last) */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="text-md font-semibold text-gray-900">{t('portalFeature') || 'Espace employé (portail)'}</h3>
+                  <p className="text-sm text-gray-600 mt-0.5">
+                    {t('portalFeatureDesc') || "Permet aux employés de consulter leurs pointages sur /portal-login. Réservé au super administrateur."}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setPortalEnabled(v => !v)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${portalEnabled ? 'bg-primary-600' : 'bg-gray-300'}`}>
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${portalEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
+              {portalEnabled && (
+                <div className="mt-2 text-xs text-amber-800">
+                  {t('portalEnabledHint') || "Quand activé, le portail est joignable à /portal-login. Mot de passe initial = prénom de l'employé."}
+                </div>
+              )}
+            </div>
 
             <div className="flex items-center gap-3">
               <button
