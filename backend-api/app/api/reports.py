@@ -693,10 +693,18 @@ def export_attendance_pdf(
     INCOMPLETE_BG = colors.HexColor("#fff7ed")  # warm amber tint for single-punch rows
 
     buf = io.BytesIO()
+    # Single day when an explicit date is given OR start==end.
+    _is_single_day = bool(date) or bool(start_date and end_date and start_date == end_date)
+    _period_str = (date or start_date) if _is_single_day else f"{start_date or ''} – {end_date or ''}"
+    _doc_title = " — ".join(x for x in [(company_name or "RTPointage"), L["title"], _period_str] if x)
+
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         leftMargin=18 * mm, rightMargin=18 * mm,
         topMargin=18 * mm, bottomMargin=22 * mm,
+        title=_doc_title,
+        author=(company_name or "RTPointage"),
+        subject=L["title"],
     )
     width, height = A4
     styles = getSampleStyleSheet()
@@ -957,9 +965,11 @@ def export_attendance_pdf(
         ParagraphStyle("RT", parent=styles["Heading2"], fontSize=14, textColor=BRAND_COLOR),
     ))
 
-    date_label = date if date else f"{start_date or '—'}  →  {end_date or '—'}"
+    # Single day → "Date: X"; real range → "Période: X – Y" (en dash renders in
+    # Helvetica; the old "→" arrow showed as "®" in some PDF viewers).
+    date_label = _period_str if _is_single_day else f"{start_date or '—'} – {end_date or '—'}"
     meta = [
-        f"<b>{L['period'] if not date else L['date']}:</b> {date_label}",
+        f"<b>{L['date'] if _is_single_day else L['period']}:</b> {date_label}",
         f"<b>{L['generated']}:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         f"<b>Mode:</b> {mode_label}",
     ]
@@ -1386,6 +1396,8 @@ def export_employees_pdf(
         buf, pagesize=A4,
         leftMargin=18 * mm, rightMargin=18 * mm,
         topMargin=18 * mm, bottomMargin=22 * mm,
+        title=f"{company_name or 'RTPointage'} — Employés",
+        author=(company_name or "RTPointage"),
     )
     styles = getSampleStyleSheet()
 
