@@ -42,6 +42,8 @@ services:
       DEVICE_TIMEOUT:   ${DEVICE_TIMEOUT:-30}
       DEVICE_PASSWORD:  ${DEVICE_PASSWORD:-0}
       TZ:               ${TZ}
+      # Encrypts secrets stored in the DB (SMB backup password). Set in .env.
+      BACKUP_ENC_KEY:   ${BACKUP_ENC_KEY:-}
     networks: [rtnet]
 
   # ── Nginx + built React frontend (internal only — Caddy fronts it) ────────
