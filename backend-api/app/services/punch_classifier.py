@@ -524,6 +524,15 @@ def get_employee_day_summary(
             diff -= (_bin - _bout).total_seconds() / 60.0
         total_minutes = max(0, diff)
 
+    # Fallback: employee has no assigned shift, so classify_punch returned
+    # 'unknown' and no entry/exit pair was found. Derive the worked total from
+    # the real first→last punch span (skip sub-minute double-taps) so people
+    # without a schedule still get a total instead of a blank.
+    if total_minutes is None and len(punches) >= 2:
+        _span = (punches[-1].timestamp - punches[0].timestamp).total_seconds() / 60.0
+        if _span >= 1:
+            total_minutes = _span
+
     if record and record.work_end and exit_time:
         _exit_t = datetime.strptime(exit_time, "%H:%M").time()
         ot = _time_diff_minutes(_exit_t, record.work_end)
