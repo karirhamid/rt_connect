@@ -915,18 +915,6 @@ def export_attendance_pdf(
             cells.append(_late_para(r["late_minutes"]))
             cells.append(_early_para(r["early_departure_minutes"]))
             cells.append(_status_para(r))
-        # Passages (swipe count) — always shown so the PDF matches the GUI table.
-        # When the punch merger collapsed near-duplicates, also show the raw
-        # original count in grey: "1 (2 fusionnés)".
-        _sw = int(r.get("swipes") or 0)
-        _merged_n = int(r.get("swipes_merged") or 0)
-        if _sw and _merged_n > 0:
-            _sw_label = f'{_sw}  <font size=7 color="#94a3b8">(+{_merged_n} fus.)</font>'
-        elif _sw:
-            _sw_label = str(_sw)
-        else:
-            _sw_label = "-"
-        cells.append(Paragraph(_sw_label, cell_center))
         cells.append(Paragraph(r.get("device_names", "-"), cell_center))
         return cells
 
@@ -954,9 +942,6 @@ def export_attendance_pdf(
         if attendance_mode == "strict":
             headers += [L["late"], L["early_dep"], L["status"]]
             widths += [16 * mm, 18 * mm, 22 * mm]
-        # Passages = number of swipes (entry+exit+break punches) on this day
-        headers.append(L["swipes"])
-        widths.append(16 * mm)
         headers.append(L["device"])
         widths.append(26 * mm)
         return headers, widths
@@ -1208,10 +1193,10 @@ def export_attendance_pdf(
             )
             # In strict mode, _build_row's status column would say "À l'heure"
             # ("On Time") which is wrong for absentees — override it to "Absent".
-            # Column order ends in: ..., late, early_dep, status, swipes, device
-            # so status is at index -3 (was -2 before we added swipes).
-            if attendance_mode == "strict" and len(row_cells) >= 3:
-                row_cells[-3] = Paragraph(
+            # Column order now ends in: ..., late, early_dep, status, device
+            # so status is at index -2.
+            if attendance_mode == "strict" and len(row_cells) >= 2:
+                row_cells[-2] = Paragraph(
                     f'<font color="#9ca3af"><i>{L["absent_status"]}</i></font>',
                     cell_center,
                 )
