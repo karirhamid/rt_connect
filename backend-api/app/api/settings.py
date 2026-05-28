@@ -22,6 +22,7 @@ class GeneralSettings(BaseModel):
     pdf_show_overtime: bool = Field(default=True, description="Show overtime column in PDF reports")
     pdf_show_total_worked: bool = Field(default=True, description="Show total worked column in PDF reports")
     pdf_show_holidays: bool = Field(default=True, description="Show the bilingual holiday banner on PDFs")
+    lateness_module_enabled: bool = Field(default=False, description="Enable the lateness reports module (Retards tab + endpoints). Super admin only.")
     app_name: Optional[str] = Field(default="RTPointage", description="System name shown on login + sidebar")
     client_name: Optional[str] = Field(default=None, description="Client / customer organization name shown on login")
     device_heartbeat_enabled: bool = Field(default=True, description="Periodically ping devices to track online status")
@@ -74,6 +75,7 @@ async def get_general_settings():
             pdf_show_overtime=getattr(row, 'pdf_show_overtime', True) if hasattr(row, 'pdf_show_overtime') else True,
             pdf_show_total_worked=getattr(row, 'pdf_show_total_worked', True) if hasattr(row, 'pdf_show_total_worked') else True,
             pdf_show_holidays=bool(getattr(row, 'pdf_show_holidays', True)),
+            lateness_module_enabled=bool(getattr(row, 'lateness_module_enabled', False)),
             app_name=getattr(row, 'app_name', None) or 'RTPointage',
             client_name=getattr(row, 'client_name', None),
             device_heartbeat_enabled=bool(getattr(row, 'device_heartbeat_enabled', True)),
@@ -108,6 +110,14 @@ async def update_general_settings(payload: GeneralSettings, current=Depends(get_
         row.pdf_show_overtime = payload.pdf_show_overtime
         row.pdf_show_total_worked = payload.pdf_show_total_worked
         row.pdf_show_holidays = bool(payload.pdf_show_holidays)
+        # Gate (super admin only): the lateness module is a feature flag,
+        # not a display preference — same rule as portal_enabled above.
+        prev_lateness = bool(getattr(row, 'lateness_module_enabled', False))
+        if bool(payload.lateness_module_enabled) != prev_lateness:
+            if not user_has_permission(current, "roles.manage"):
+                raise HTTPException(status_code=403,
+                                    detail="Only a super administrator can enable or disable the lateness reports module.")
+            row.lateness_module_enabled = bool(payload.lateness_module_enabled)
         if payload.app_name is not None:
             row.app_name = payload.app_name.strip() or 'RTPointage'
         if payload.client_name is not None:
@@ -139,54 +149,11 @@ async def update_general_settings(payload: GeneralSettings, current=Depends(get_
 
 
 # ---------------------------------------------------------------------------
-# Reports module toggle — lives on its own endpoint so the Settings → Rapports
-# sub-page can read/write just this one flag without pulling in the entire
-# general-settings payload (which would require settings.manage too).
-# Super admin (roles.manage) only.
+# Public probe — tiny no-auth endpoint the Reports page hits on load to know
+# whether to surface the 'Type de rapport' dropdown. The flag itself is now
+# part of /settings/general (Settings → Général → PDF section); this probe
+# only exposes whether the dropdown should appear.
 # ---------------------------------------------------------------------------
-class ReportsModuleSettings(BaseModel):
-    lateness_module_enabled: bool = Field(
-        default=False,
-        description="Enable the lateness reports module (Retards tab + endpoints). Super admin only.",
-    )
-
-
-@router.get("/settings/reports-module", response_model=ReportsModuleSettings)
-async def get_reports_module_settings(current=Depends(get_current_user)):
-    """Read the reports module flags. Visible to anyone with settings.manage
-    (so managers can SEE the state) — only roles.manage may change it."""
-    if not (user_has_permission(current, "settings.manage")
-            or user_has_permission(current, "roles.manage")):
-        raise HTTPException(status_code=403, detail="Not authorized")
-    with get_db_session() as db:
-        row = db.query(AppSettings).first()
-        if not row:
-            row = AppSettings()
-            db.add(row); db.commit(); db.refresh(row)
-        return ReportsModuleSettings(
-            lateness_module_enabled=bool(getattr(row, 'lateness_module_enabled', False)),
-        )
-
-
-@router.put("/settings/reports-module", response_model=ReportsModuleSettings)
-async def update_reports_module_settings(payload: ReportsModuleSettings,
-                                          current=Depends(get_current_user)):
-    """Toggle the reports module flags. Super admin only."""
-    if not user_has_permission(current, "roles.manage"):
-        raise HTTPException(status_code=403,
-                            detail="Only a super administrator can change the reports module settings.")
-    with get_db_session() as db:
-        row = db.query(AppSettings).first()
-        if not row:
-            row = AppSettings(); db.add(row)
-        row.lateness_module_enabled = bool(payload.lateness_module_enabled)
-        db.commit(); db.refresh(row)
-        logger.info("Reports module toggled: lateness=%s", row.lateness_module_enabled)
-        return ReportsModuleSettings(
-            lateness_module_enabled=bool(row.lateness_module_enabled),
-        )
-
-
 @router.get("/settings/reports-module/public")
 async def get_reports_module_public():
     """Tiny public-ish endpoint the frontend can hit on every page to know

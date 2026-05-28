@@ -93,6 +93,7 @@ function GeneralSettings() {
   const [pdfShowOvertime, setPdfShowOvertime] = useState(true);
   const [pdfShowTotalWorked, setPdfShowTotalWorked] = useState(true);
   const [pdfShowHolidays, setPdfShowHolidays] = useState(true);
+  const [latenessModuleEnabled, setLatenessModuleEnabled] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [savingPdf, setSavingPdf] = useState(false);
 
@@ -384,6 +385,7 @@ function GeneralSettings() {
       setPdfShowOvertime(settings.pdf_show_overtime !== undefined ? !!settings.pdf_show_overtime : true);
       setPdfShowTotalWorked(settings.pdf_show_total_worked !== undefined ? !!settings.pdf_show_total_worked : true);
       setPdfShowHolidays(settings.pdf_show_holidays !== undefined ? !!settings.pdf_show_holidays : true);
+      setLatenessModuleEnabled(!!settings.lateness_module_enabled);
     } catch (err) {
       console.error('Failed to load PDF settings:', err);
       showNotification('error', t('failedToLoadData'));
@@ -396,7 +398,7 @@ function GeneralSettings() {
     setSavingPdf(true);
     try {
       const settings = await api.getGeneralSettings();
-      await api.updateGeneralSettings({ ...settings, pdf_style: pdfStyle, pdf_show_overtime: pdfShowOvertime, pdf_show_total_worked: pdfShowTotalWorked, pdf_show_holidays: pdfShowHolidays });
+      await api.updateGeneralSettings({ ...settings, pdf_style: pdfStyle, pdf_show_overtime: pdfShowOvertime, pdf_show_total_worked: pdfShowTotalWorked, pdf_show_holidays: pdfShowHolidays, lateness_module_enabled: latenessModuleEnabled });
       showNotification('success', t('settingsSaved'));
     } catch (err) {
       console.error('Failed to save PDF settings:', err);
@@ -981,6 +983,31 @@ function GeneralSettings() {
                       >
                         <span
                           className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${pdfShowHolidays ? 'translate-x-6' : 'translate-x-1'}`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Lateness module Toggle (super admin) — feature flag, not display preference */}
+                <div className="bg-amber-50 rounded-lg p-4 border border-amber-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <h3 className="text-md font-semibold text-gray-900 mb-1">
+                        {t('latenessModuleTitle') || 'Module de rapports — Retards'}
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        {t('latenessModuleDesc') || "Active le menu déroulant « Type de rapport » sur la page Rapports : Normal, Avec retards, Retards uniquement. Calcul minute-précis, sans tolérance."}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      <button
+                        onClick={() => setLatenessModuleEnabled(prev => !prev)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${latenessModuleEnabled ? 'bg-primary-600' : 'bg-gray-300'}`}
+                        aria-pressed={latenessModuleEnabled}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${latenessModuleEnabled ? 'translate-x-6' : 'translate-x-1'}`}
                         />
                       </button>
                     </div>
