@@ -1260,8 +1260,16 @@ def export_attendance_pdf(
         data_rows = [_build_row(r, include_employee=True, include_date=True) for r in flat_rows]
         inc = [i for i, r in enumerate(flat_rows) if r.get("incomplete")]
         story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
-        _tr = _total_retard_line(flat_rows, label_prefix=L.get("total_records") or "Total")
-        if _tr is not None: story.append(_tr)
+        # A grand 'Total retard' on the flat layout only makes sense when the
+        # report covers a single employee — summing lateness across many
+        # different people and many days is a meaningless number. For
+        # multi-employee reports the user should group by employee to get
+        # per-employee totals (which we do show, below each section).
+        _distinct_emp = {r.get("emp_id") for r in flat_rows}
+        if len(_distinct_emp) == 1:
+            _name = flat_rows[0].get("employee") or "—"
+            _tr = _total_retard_line(flat_rows, label_prefix=_name)
+            if _tr is not None: story.append(_tr)
 
     # ── Absentees section (employees with no punches in the period) ─────
     # Queries all employees matching the same device/employee filters as the

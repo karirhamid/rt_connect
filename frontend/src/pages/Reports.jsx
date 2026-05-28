@@ -441,7 +441,10 @@ export default function Reports() {
               </div>
             </div>
 
-            {/* Multi-employee chip picker */}
+            {/* Multi-employee chip picker — only the BUTTON sits in the
+                filters row so the row height stays constant. The selected
+                chips render below the whole row (see further down) so adding
+                a chip never pushes other inputs around. */}
             <div className="relative">
               <label className="block text-xs font-medium text-gray-500 mb-1">
                 {t('employeesSelected') || 'Employés'} {selectedEmployees.length > 0 && `(${selectedEmployees.length})`}
@@ -449,65 +452,52 @@ export default function Reports() {
               <button
                 type="button"
                 onClick={() => setEmployeePickerOpen(o => !o)}
-                className="border rounded-lg px-3 py-2 text-sm bg-white text-gray-700 hover:bg-gray-50 transition-colors inline-flex items-center gap-2 min-w-[12rem]"
+                className="border rounded-lg px-3 py-2 text-sm bg-white text-gray-700 hover:bg-gray-50 transition-colors inline-flex items-center gap-2 w-full sm:w-auto sm:min-w-[12rem]"
               >
-                <Users className="w-4 h-4 text-gray-400" />
+                <Users className="w-4 h-4 text-gray-400 shrink-0" />
                 {selectedEmployees.length === 0
                   ? (t('allEmployees') || 'Tous')
                   : `${selectedEmployees.length} ${t('selected') || 'sélectionné(s)'}`}
               </button>
               {employeePickerOpen && (
-                <div className="absolute z-30 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg p-2 max-h-72 overflow-y-auto">
-                  <div className="flex items-center justify-between px-2 py-1 text-xs text-gray-500">
-                    <span>{employeesAll.length} {t('employees') || 'employés'}</span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedEmployees([])}
-                      className="text-primary-600 hover:underline disabled:opacity-40"
-                      disabled={selectedEmployees.length === 0}
-                    >
-                      {t('clear') || 'Effacer'}
-                    </button>
+                <>
+                  {/* Click-away catcher */}
+                  <div className="fixed inset-0 z-20" onClick={() => setEmployeePickerOpen(false)} />
+                  <div className="absolute z-30 mt-1 w-[min(20rem,calc(100vw-2rem))] bg-white border border-gray-200 rounded-lg shadow-lg p-2 max-h-72 overflow-y-auto"
+                       onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between px-2 py-1 text-xs text-gray-500">
+                      <span>{employeesAll.length} {t('employees') || 'employés'}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedEmployees([])}
+                        className="text-primary-600 hover:underline disabled:opacity-40"
+                        disabled={selectedEmployees.length === 0}
+                      >
+                        {t('clear') || 'Effacer'}
+                      </button>
+                    </div>
+                    <ul className="divide-y divide-gray-50">
+                      {employeesAll.map(emp => {
+                        const uid = emp.user_id || emp.id;
+                        const checked = selectedEmployees.includes(uid);
+                        return (
+                          <li key={uid} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer"
+                              onClick={() => {
+                                setSelectedEmployees(prev =>
+                                  checked ? prev.filter(x => x !== uid) : [...prev, uid]);
+                              }}>
+                            <input type="checkbox" readOnly checked={checked}
+                                   className="w-4 h-4 text-primary-600 rounded"/>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-gray-900 truncate">{emp.name}</div>
+                              <div className="text-xs text-gray-500 font-mono">{uid}</div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
-                  <ul className="divide-y divide-gray-50">
-                    {employeesAll.map(emp => {
-                      const uid = emp.user_id || emp.id;
-                      const checked = selectedEmployees.includes(uid);
-                      return (
-                        <li key={uid} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer"
-                            onClick={() => {
-                              setSelectedEmployees(prev =>
-                                checked ? prev.filter(x => x !== uid) : [...prev, uid]);
-                            }}>
-                          <input type="checkbox" readOnly checked={checked}
-                                 className="w-4 h-4 text-primary-600 rounded"/>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm text-gray-900 truncate">{emp.name}</div>
-                            <div className="text-xs text-gray-500 font-mono">{uid}</div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-              {/* Visible chips of currently selected matricules */}
-              {selectedEmployees.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2 max-w-md">
-                  {selectedEmployees.slice(0, 6).map(uid => {
-                    const emp = employeesAll.find(e => (e.user_id || e.id) === uid);
-                    return (
-                      <span key={uid} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-primary-50 text-primary-700 border border-primary-100">
-                        {emp?.name || uid}
-                        <button type="button" onClick={() => setSelectedEmployees(prev => prev.filter(x => x !== uid))}
-                                className="hover:text-primary-900">×</button>
-                      </span>
-                    );
-                  })}
-                  {selectedEmployees.length > 6 && (
-                    <span className="text-xs text-gray-500 px-1">+{selectedEmployees.length - 6}</span>
-                  )}
-                </div>
+                </>
               )}
             </div>
 
@@ -543,6 +533,38 @@ export default function Reports() {
               </select>
             </div>
           </div>
+
+          {/* Row 1.5: Selected-employee chips — its own row so adding a chip
+              never shifts the inputs above. Renders only when selection is
+              non-empty. */}
+          {selectedEmployees.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 -mt-1">
+              <span className="text-xs text-gray-500 mr-1 shrink-0">
+                {t('employeesSelected') || 'Employés'} :
+              </span>
+              {selectedEmployees.slice(0, 12).map(uid => {
+                const emp = employeesAll.find(e => (e.user_id || e.id) === uid);
+                return (
+                  <span key={uid}
+                        className="inline-flex items-center gap-1 max-w-[14rem] px-2 py-0.5 rounded-full text-xs bg-primary-50 text-primary-700 border border-primary-100">
+                    <span className="truncate">{emp?.name || uid}</span>
+                    <button type="button"
+                            onClick={() => setSelectedEmployees(prev => prev.filter(x => x !== uid))}
+                            className="hover:text-primary-900 leading-none shrink-0"
+                            aria-label="remove">×</button>
+                  </span>
+                );
+              })}
+              {selectedEmployees.length > 12 && (
+                <span className="text-xs text-gray-500 px-1">+{selectedEmployees.length - 12}</span>
+              )}
+              <button type="button"
+                      onClick={() => setSelectedEmployees([])}
+                      className="ml-auto text-xs text-gray-500 hover:text-gray-700">
+                {t('clear') || 'Effacer'}
+              </button>
+            </div>
+          )}
 
           {/* Row 2: Action buttons — stack/wrap on phones */}
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
@@ -888,19 +910,28 @@ export default function Reports() {
                     </tr>
                   )}
                 </tbody>
-                {/* Grand-total Retard row (flat-table only — group totals are inline) */}
-                {reportType === 'with_lateness' && !groupedSummary && summary.length > 0 && (
-                  <tfoot className="bg-amber-50/60 border-t">
-                    <tr>
-                      <td className="px-4 py-2.5 text-xs text-amber-900 font-medium" colSpan={colCount - 1}>
-                        {t('latenessTotalLabel') || 'Total cumulé'}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-amber-800 font-bold text-sm">
-                        {fmtLateMin(summary.reduce((s, r) => s + (r.late_minutes || 0), 0))}
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
+                {/* Grand-total Retard row — flat layout only, and only when the
+                    report is about ONE employee (sum across many people is
+                    a meaningless figure; use 'group by employee' for that). */}
+                {(() => {
+                  if (reportType !== 'with_lateness' || groupedSummary || summary.length === 0) return null;
+                  const distinctEmp = new Set(summary.map(r => r.employee_id));
+                  if (distinctEmp.size !== 1) return null;
+                  const total = summary.reduce((s, r) => s + (r.late_minutes || 0), 0);
+                  const name = summary[0]?.employee_name || '—';
+                  return (
+                    <tfoot className="bg-amber-50/60 border-t">
+                      <tr>
+                        <td className="px-4 py-2.5 text-xs text-amber-900 font-medium" colSpan={colCount - 1}>
+                          {t('totalLateForPeriod') || 'Total retard sur la période'} — {name}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-amber-800 font-bold text-sm">
+                          {fmtLateMin(total)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
           ) : (
