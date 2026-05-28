@@ -438,6 +438,13 @@ def attendance_summary(
         attendance_mode = getattr(_settings, 'attendance_mode', None) or 'simple'
         employee_mode = getattr(_settings, 'employee_mode', None) or 'shared'
 
+        # Defense in depth: a caller could pass with_lateness=true directly
+        # against this URL even after the super admin disabled the module.
+        # Force it off so the response never exposes late_minutes and the
+        # column never bleeds back into the UI through a stale frontend.
+        if with_lateness and not getattr(_settings, 'lateness_module_enabled', False):
+            with_lateness = False
+
         shared = employee_mode == 'shared'
 
         # Choose grouping column
@@ -653,6 +660,14 @@ def export_attendance_pdf(
         pdf_style = getattr(_settings, 'pdf_style', None) or 'style1'
         pdf_show_overtime = getattr(_settings, 'pdf_show_overtime', True) if hasattr(_settings, 'pdf_show_overtime') else True
         pdf_show_total_worked = getattr(_settings, 'pdf_show_total_worked', True) if hasattr(_settings, 'pdf_show_total_worked') else True
+
+        # Honour the module flag even if the caller smuggled ?with_lateness=true:
+        # disabling the module in Settings → Rapports must make the Retard
+        # column disappear everywhere, including from a stale browser tab or
+        # a hand-built URL. The PDF then renders identical to the pre-Phase-1
+        # report — zero column, zero per-group totals, zero extra work.
+        if with_lateness and not getattr(_settings, 'lateness_module_enabled', False):
+            with_lateness = False
 
         shared = employee_mode == 'shared'
 
