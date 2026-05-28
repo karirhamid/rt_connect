@@ -60,6 +60,7 @@ _PDF_LABELS = {
         "late_status": "En retard",
         "early_status": "Départ anticipé",
         "absent_status": "Absent",
+        "holiday_label": "Jour férié",
         "absentees_title": "Employés sans pointage",
         "absentees_subtitle": "Pour la période sélectionnée",
         "absentees_count": "absent(s)",
@@ -113,6 +114,7 @@ _PDF_LABELS = {
         "late_status": "Late",
         "early_status": "Early Dep.",
         "absent_status": "Absent",
+        "holiday_label": "Public holiday",
         "absentees_title": "Employees with no attendance",
         "absentees_subtitle": "For the selected period",
         "absentees_count": "absent",
@@ -166,6 +168,7 @@ _PDF_LABELS = {
         "late_status": "متأخر",
         "early_status": "مغادرة مبكرة",
         "absent_status": "غائب",
+        "holiday_label": "عيد رسمي",
         "absentees_title": "موظفون بدون تسجيل حضور",
         "absentees_subtitle": "خلال الفترة المحددة",
         "absentees_count": "غائب(ون)",
@@ -993,6 +996,40 @@ def export_attendance_pdf(
         f"<b>{L['total_employees']}:</b> {len(employee_set)}"
     )
     story.append(Paragraph(summary_text, subtitle_style))
+
+    # ── Holiday notice (if the period covers any public holiday) ──────────
+    try:
+        from app.database.shift_schema import Holiday as _HOL2
+        _hsd = start_dt.date() if start_dt else None
+        _hed = end_dt.date() if end_dt else None
+        _holidays_in_period = []
+        if _hsd and _hed:
+            with get_db_session() as _hdb:
+                _holidays_in_period = (_hdb.query(_HOL2)
+                    .filter(_HOL2.date >= _hsd, _HOL2.date <= _hed)
+                    .order_by(_HOL2.date.asc()).all())
+        if _holidays_in_period:
+            _hol_style = ParagraphStyle(
+                "HolidayBanner", parent=subtitle_style,
+                fontSize=10, leading=14,
+                textColor=colors.HexColor("#92400e"),       # amber-800
+                backColor=colors.HexColor("#fef3c7"),       # amber-100
+                borderColor=colors.HexColor("#fcd34d"),     # amber-300
+                borderWidth=0.6, borderPadding=6,
+                borderRadius=4,
+                spaceBefore=4, spaceAfter=2,
+            )
+            _label = L.get("holiday_label", "Jour férié")
+            _bits = []
+            for _h in _holidays_in_period:
+                _d = _h.date.isoformat() if hasattr(_h.date, 'isoformat') else str(_h.date)
+                _bits.append(f"<b>{_d}</b> — {_h.name}")
+            _hol_html = f'<font size="11">★</font> &nbsp; <b>{_label}{"s" if len(_holidays_in_period) > 1 else ""} :</b>  ' + " &nbsp; · &nbsp; ".join(_bits)
+            story.append(Spacer(1, 3 * mm))
+            story.append(Paragraph(_hol_html, _hol_style))
+    except Exception as _hexc:
+        logger.warning(f"Holiday banner skipped: {_hexc}")
+
     story.append(Spacer(1, 4 * mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_COLOR, spaceAfter=4 * mm))
 
