@@ -289,11 +289,15 @@ class ApiService {
   }
 
   // Attendance Management
+  // NOTE: Every /api/attendance/* endpoint now requires a bearer token after
+  // the May 2026 hardening pass (commit 5a16a42). All four methods below
+  // route through authFetch so the token is attached and a 401 triggers a
+  // silent refresh + retry instead of bubbling up as "Failed to fetch".
   async getTodayAttendance(targetDate = null) {
-    const url = targetDate 
-      ? `${API_BASE_URL}/api/attendance/today?target_date=${targetDate}`
-      : `${API_BASE_URL}/api/attendance/today`;
-    const response = await fetch(url);
+    const path = targetDate
+      ? `/api/attendance/today?target_date=${targetDate}`
+      : `/api/attendance/today`;
+    const response = await this.authFetch(path);
     if (!response.ok) throw new Error('Failed to fetch today\'s attendance');
     return response.json();
   }
@@ -308,7 +312,7 @@ class ApiService {
     if (filters.companyId) params.append('company_id', filters.companyId);
     if (filters.status && filters.status !== 'all') params.append('status', filters.status);
 
-    const response = await fetch(`${API_BASE_URL}/api/attendance/filter?${params}`);
+    const response = await this.authFetch(`/api/attendance/filter?${params}`);
     if (!response.ok) throw new Error('Failed to filter attendance');
     return response.json();
   }
@@ -319,7 +323,7 @@ class ApiService {
     if (data.status !== undefined) params.append('status', data.status);
     if (data.punch !== undefined) params.append('punch', data.punch);
 
-    const response = await fetch(`${API_BASE_URL}/api/attendance/${attendanceId}?${params}`, {
+    const response = await this.authFetch(`/api/attendance/${attendanceId}?${params}`, {
       method: 'PUT',
     });
     if (!response.ok) {
@@ -330,7 +334,7 @@ class ApiService {
   }
 
   async deleteAttendance(attendanceId) {
-    const response = await fetch(`${API_BASE_URL}/api/attendance/${attendanceId}`, {
+    const response = await this.authFetch(`/api/attendance/${attendanceId}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
