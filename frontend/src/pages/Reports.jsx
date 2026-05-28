@@ -34,9 +34,16 @@ export default function Reports() {
 
   // Lateness module (optional, super-admin-toggled)
   const [latenessModuleOn, setLatenessModuleOn] = useState(false);
+  // Report type drives the whole flow: normal/with_lateness use the existing
+  // summary+records endpoints; lateness_only swaps the on-screen table for
+  // the ranking endpoint and the PDF button for the ranking PDF.
+  const [reportType, setReportType] = useState('normal'); // normal | with_lateness | lateness_only
   const [latenessRanking, setLatenessRanking] = useState([]);
-  const [latenessLoading, setLatenessLoading] = useState(false);
   const [latenessSummary, setLatenessSummary] = useState({ total: 0, offenders: 0 });
+  // Multi-employee chip picker — applies to all three report types.
+  const [employeesAll, setEmployeesAll] = useState([]); // [{ id, user_id, name, ... }]
+  const [selectedEmployees, setSelectedEmployees] = useState([]); // matricules (user_id strings)
+  const [employeePickerOpen, setEmployeePickerOpen] = useState(false);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -48,79 +55,24 @@ export default function Reports() {
       setDevices(Array.isArray(data) ? data : data?.devices || []);
     }).catch(() => {});
 
-    // Probe lateness module flag — hides/shows the Retards tab.
-    // Public endpoint, no auth required so a reporting user with limited
-    // perms still gets a correct answer.
+    // Load employees for the multi-select chip picker (used by all 3 report types)
+    api.getEmployees().then(data => {
+      const list = Array.isArray(data) ? data : (data?.employees || []);
+      setEmployeesAll(list);
+    }).catch(() => {});
+
+    // Probe lateness module flag — hides/shows the 'Avec retards' /
+    // 'Retards uniquement' options. Public endpoint, no auth required.
     fetch('/api/settings/reports-module/public')
       .then(r => r.ok ? r.json() : { lateness_module_enabled: false })
       .then(d => setLatenessModuleOn(!!d.lateness_module_enabled))
       .catch(() => setLatenessModuleOn(false));
   }, []);
 
-  // ── Lateness ranking — fetched only when the user opens the Retards tab ──
-  const fetchLateness = useCallback(async () => {
-    if (!latenessModuleOn) return;
-    setLatenessLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (mode === 'day' && date) { params.append('start_date', date); params.append('end_date', date); }
-      else { if (from) params.append('start_date', from); if (to) params.append('end_date', to); }
-      if (deviceId) params.append('device_id', deviceId);
-      const resp = await api.authFetch(`/api/reports/lateness/ranking?${params}`, { method: 'GET' });
-      if (resp.status === 403) {
-        // Module was just turned off by the super admin
-        setLatenessModuleOn(false);
-        setLatenessRanking([]);
-        return;
-      }
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || 'lateness fetch failed');
-      }
-      const data = await resp.json();
-      setLatenessRanking(data.ranking || []);
-      setLatenessSummary({
-        total: data.total_late_minutes_all || 0,
-        offenders: (data.ranking || []).filter(r => r.late_days_count > 0).length,
-      });
-    } catch (e) {
-      console.error(e);
-      setLatenessRanking([]);
-    } finally {
-      setLatenessLoading(false);
-    }
-  }, [latenessModuleOn, mode, date, from, to, deviceId]);
-
-  // Auto-load when switching to the Retards tab or when filters change
+  // Reset report type to 'normal' if the module gets turned off mid-session
   useEffect(() => {
-    if (hasSearched && activeTab === 'lateness') fetchLateness();
-  }, [activeTab, hasSearched, fetchLateness]);
-
-  const exportLatenessPDF = async () => {
-    setExporting('pdf');
-    try {
-      const params = new URLSearchParams();
-      if (mode === 'day' && date) { params.append('start_date', date); params.append('end_date', date); }
-      else { if (from) params.append('start_date', from); if (to) params.append('end_date', to); }
-      if (deviceId) params.append('device_id', deviceId);
-      params.append('lang', (i18n.language || 'fr').slice(0, 2));
-      const resp = await api.authFetch(`/api/reports/lateness/ranking/pdf?${params}`, { method: 'GET' });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || 'PDF failed');
-      }
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url;
-      a.download = `lateness_ranking_${from || date}_${to || date}.pdf`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      setError(e?.message || 'PDF failed');
-    } finally {
-      setExporting(null);
-    }
-  };
+    if (!latenessModuleOn && reportType !== 'normal') setReportType('normal');
+  }, [latenessModuleOn, reportType]);
 
   const fmtLateMin = (m) => {
     m = Number(m || 0);
@@ -137,15 +89,54 @@ export default function Reports() {
       if (to) params.append('end_date', to);
     }
     if (employeeName.trim()) params.append('employee_name', employeeName.trim());
+    if (selectedEmployees.length) params.append('employee_ids', selectedEmployees.join(','));
     if (deviceId) params.append('device_id', deviceId);
+    if (reportType === 'with_lateness') params.append('with_lateness', 'true');
     return params;
-  }, [mode, date, from, to, employeeName, deviceId]);
+  }, [mode, date, from, to, employeeName, deviceId, selectedEmployees, reportType]);
+
+  // For the ranking endpoints — same date/device/employee filters, but the
+  // range endpoint expects start_date+end_date (no 'date' singleton).
+  const buildRankingParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (mode === 'day' && date) { params.append('start_date', date); params.append('end_date', date); }
+    else { if (from) params.append('start_date', from); if (to) params.append('end_date', to); }
+    if (deviceId) params.append('device_id', deviceId);
+    if (selectedEmployees.length) params.append('employee_ids', selectedEmployees.join(','));
+    return params;
+  }, [mode, date, from, to, deviceId, selectedEmployees]);
 
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     setHasSearched(true);
     try {
+      if (reportType === 'lateness_only') {
+        // Ranking-only flow: one call, no summary/records.
+        const params = buildRankingParams();
+        const resp = await api.authFetch(`/api/reports/lateness/ranking?${params}`, { method: 'GET' });
+        if (resp.status === 403) {
+          // Module was turned off — bounce back to Normal mode
+          setLatenessModuleOn(false);
+          setReportType('normal');
+          throw new Error(t('latenessModuleDisabledMsg') || 'Module Retards désactivé. Activez-le dans Paramètres → Rapports.');
+        }
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || 'lateness fetch failed');
+        }
+        const data = await resp.json();
+        setLatenessRanking(data.ranking || []);
+        setLatenessSummary({
+          total: data.total_late_minutes_all || 0,
+          offenders: (data.ranking || []).filter(r => r.late_days_count > 0).length,
+        });
+        setRecords([]); setSummary([]);
+        setActiveTab('summary');  // tab bar is hidden in this mode; reset for next time
+        return;
+      }
+
+      // Normal + with_lateness — same data path, optional retard column.
       const params = buildParams();
       const [recResp, sumResp] = await Promise.all([
         api.authFetch(`/api/reports/attendance/records?${params}`, { method: 'GET' }),
@@ -168,10 +159,14 @@ export default function Reports() {
       setError(e?.message || t('failedToLoadReport'));
       setRecords([]);
       setSummary([]);
+      setLatenessRanking([]);
     } finally {
       setLoading(false);
     }
   };
+
+  // Convenience: does the on-screen table need a Retard column?
+  const showLateCol = reportType === 'with_lateness' || attendanceMode === 'strict';
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') fetchData();
@@ -205,22 +200,35 @@ export default function Reports() {
   const exportPDF = async () => {
     setExporting('pdf');
     try {
-      const params = buildParams();
-      params.append('lang', i18n.language || 'en');
-      if (groupBy) params.append('group_by', groupBy);
-      const resp = await api.authFetch(`/api/reports/attendance/export.pdf?${params}`, { method: 'GET' });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || t('exportFailed'));
+      let url, filename;
+      if (reportType === 'lateness_only') {
+        // Ranking PDF — single table, no group_by relevant here.
+        const params = buildRankingParams();
+        params.append('lang', (i18n.language || 'fr').slice(0, 2));
+        const resp = await api.authFetch(`/api/reports/lateness/ranking/pdf?${params}`, { method: 'GET' });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || t('exportFailed'));
+        }
+        url = window.URL.createObjectURL(new Blob([await resp.blob()], { type: 'application/pdf' }));
+        filename = `lateness_ranking_${mode === 'day' ? date : `${from}_${to}`}.pdf`;
+      } else {
+        // Normal or 'Avec retards' — same endpoint, with_lateness already
+        // in the query string thanks to buildParams.
+        const params = buildParams();
+        params.append('lang', i18n.language || 'en');
+        if (groupBy) params.append('group_by', groupBy);
+        const resp = await api.authFetch(`/api/reports/attendance/export.pdf?${params}`, { method: 'GET' });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || t('exportFailed'));
+        }
+        url = window.URL.createObjectURL(new Blob([await resp.blob()], { type: 'application/pdf' }));
+        filename = `${reportType === 'with_lateness' ? 'attendance_retards' : 'attendance'}_${mode === 'day' ? date : `${from}_${to}`}.pdf`;
       }
-      const blob = await resp.blob();
-      const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
       const link = document.createElement('a');
-      link.href = url;
-      link.download = `attendance_${mode === 'day' ? date : `${from}_${to}`}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      link.href = url; link.download = filename;
+      document.body.appendChild(link); link.click(); link.remove();
       window.URL.revokeObjectURL(url);
     } catch (e) {
       setError(e?.message || t('exportFailed'));
@@ -285,7 +293,11 @@ export default function Reports() {
     );
   };
 
-  const colCount = attendanceMode === 'strict' ? 10 : 8;
+  // Column count for the summary table — used by group-header rows.
+  // Base = 8 (Date, Employee, Dept, In, Out, TotalWorked, Overtime, Swipes).
+  // +1 when the Retard column is shown (with_lateness or strict).
+  // +1 when the Early dep column is shown (strict only).
+  const colCount = 8 + (showLateCol ? 1 : 0) + (attendanceMode === 'strict' ? 1 : 0);
 
   return (
     <div className="space-y-6">
@@ -320,6 +332,33 @@ export default function Reports() {
       {/* Filters Card */}
       <div className="bg-white rounded-xl shadow-sm border">
         <div className="p-4 space-y-4">
+          {/* Row 0: Report type selector (only shown when lateness module on) */}
+          {latenessModuleOn && (
+            <div className="flex flex-wrap gap-3 items-end pb-3 border-b border-dashed border-gray-200">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  {t('reportType') || 'Type de rapport'}
+                </label>
+                <select
+                  className="border rounded-lg px-3 py-2 text-sm bg-white text-gray-900 min-w-[15rem]"
+                  value={reportType}
+                  onChange={e => setReportType(e.target.value)}
+                >
+                  <option value="normal">{t('reportTypeNormal') || 'Normal'}</option>
+                  <option value="with_lateness">{t('reportTypeWithLateness') || 'Avec retards'}</option>
+                  <option value="lateness_only">{t('reportTypeLatenessOnly') || 'Retards uniquement'}</option>
+                </select>
+              </div>
+              {reportType !== 'normal' && (
+                <p className="text-xs text-gray-500 flex-1 pb-1.5">
+                  {reportType === 'with_lateness'
+                    ? (t('reportTypeWithLatenessHint') || 'Ajoute une colonne Retard et un total par groupe au rapport habituel.')
+                    : (t('reportTypeLatenessOnlyHint') || 'Tableau dédié : un employé par ligne avec son total de retard sur la période.')}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Row 1: Mode toggle + Date inputs */}
           <div className="flex flex-wrap gap-3 items-end">
             {/* Mode toggle */}
@@ -386,7 +425,7 @@ export default function Reports() {
               </>
             )}
 
-            {/* Employee name */}
+            {/* Employee name (free-text contains match) */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">{t('employeeName')}</label>
               <div className="relative">
@@ -400,6 +439,76 @@ export default function Reports() {
                   placeholder={t('searchEmployee') || 'Search...'}
                 />
               </div>
+            </div>
+
+            {/* Multi-employee chip picker */}
+            <div className="relative">
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                {t('employeesSelected') || 'Employés'} {selectedEmployees.length > 0 && `(${selectedEmployees.length})`}
+              </label>
+              <button
+                type="button"
+                onClick={() => setEmployeePickerOpen(o => !o)}
+                className="border rounded-lg px-3 py-2 text-sm bg-white text-gray-700 hover:bg-gray-50 transition-colors inline-flex items-center gap-2 min-w-[12rem]"
+              >
+                <Users className="w-4 h-4 text-gray-400" />
+                {selectedEmployees.length === 0
+                  ? (t('allEmployees') || 'Tous')
+                  : `${selectedEmployees.length} ${t('selected') || 'sélectionné(s)'}`}
+              </button>
+              {employeePickerOpen && (
+                <div className="absolute z-30 mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-lg p-2 max-h-72 overflow-y-auto">
+                  <div className="flex items-center justify-between px-2 py-1 text-xs text-gray-500">
+                    <span>{employeesAll.length} {t('employees') || 'employés'}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEmployees([])}
+                      className="text-primary-600 hover:underline disabled:opacity-40"
+                      disabled={selectedEmployees.length === 0}
+                    >
+                      {t('clear') || 'Effacer'}
+                    </button>
+                  </div>
+                  <ul className="divide-y divide-gray-50">
+                    {employeesAll.map(emp => {
+                      const uid = emp.user_id || emp.id;
+                      const checked = selectedEmployees.includes(uid);
+                      return (
+                        <li key={uid} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer"
+                            onClick={() => {
+                              setSelectedEmployees(prev =>
+                                checked ? prev.filter(x => x !== uid) : [...prev, uid]);
+                            }}>
+                          <input type="checkbox" readOnly checked={checked}
+                                 className="w-4 h-4 text-primary-600 rounded"/>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-gray-900 truncate">{emp.name}</div>
+                            <div className="text-xs text-gray-500 font-mono">{uid}</div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              {/* Visible chips of currently selected matricules */}
+              {selectedEmployees.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2 max-w-md">
+                  {selectedEmployees.slice(0, 6).map(uid => {
+                    const emp = employeesAll.find(e => (e.user_id || e.id) === uid);
+                    return (
+                      <span key={uid} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-primary-50 text-primary-700 border border-primary-100">
+                        {emp?.name || uid}
+                        <button type="button" onClick={() => setSelectedEmployees(prev => prev.filter(x => x !== uid))}
+                                className="hover:text-primary-900">×</button>
+                      </span>
+                    );
+                  })}
+                  {selectedEmployees.length > 6 && (
+                    <span className="text-xs text-gray-500 px-1">+{selectedEmployees.length - 6}</span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Device filter */}
@@ -522,8 +631,73 @@ export default function Reports() {
         </div>
       )}
 
-      {/* Tabs */}
-      {hasSearched && (
+      {/* Lateness-only ranking table — completely separate from Summary/Details */}
+      {hasSearched && reportType === 'lateness_only' && (
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <div className="px-4 py-3 border-b bg-amber-50/50 flex flex-wrap items-center gap-3 justify-between">
+            <div className="flex items-center gap-2 text-sm text-amber-900">
+              <AlertTriangle className="w-4 h-4" />
+              <span className="font-medium">{t('latenessHeader') || 'Classement des retards'}</span>
+              <span className="text-xs text-amber-700">
+                {t('latenessRule') || 'Calcul minute-précis · jours fériés et repos exclus'}
+              </span>
+            </div>
+          </div>
+          {loading ? (
+            <div className="flex items-center justify-center gap-3 py-16 text-gray-400">
+              <Loader className="w-5 h-5 animate-spin" /><span className="text-sm">{t('loading')}...</span>
+            </div>
+          ) : latenessRanking.length === 0 ? (
+            <div className="px-4 py-12 text-center text-gray-400 text-sm">
+              {t('latenessEmpty') || 'Aucun retard détecté sur la période.'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 w-10">#</th>
+                    <th className="px-4 py-3">ID</th>
+                    <th className="px-4 py-3">{t('employeeName')}</th>
+                    <th className="px-4 py-3">{t('department')}</th>
+                    <th className="px-4 py-3 text-center">{t('latenessDaysCol') || 'Jours en retard'}</th>
+                    <th className="px-4 py-3 text-right">{t('totalLateCol') || 'Total retard'}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {latenessRanking.map((r, i) => (
+                    <tr key={r.employee_id || i} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5 text-center text-gray-500 font-medium">{i + 1}</td>
+                      <td className="px-4 py-2.5 text-gray-600 font-mono text-xs">{r.employee_id}</td>
+                      <td className="px-4 py-2.5 font-medium text-gray-900">{r.employee_name || '—'}</td>
+                      <td className="px-4 py-2.5 text-gray-600">{r.department || '—'}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        {r.late_days_count > 0
+                          ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">{r.late_days_count}</span>
+                          : <span className="text-gray-400">0</span>}
+                      </td>
+                      <td className={`px-4 py-2.5 text-right font-semibold ${r.total_late_minutes > 0 ? 'text-amber-700' : 'text-gray-400'}`}>
+                        {fmtLateMin(r.total_late_minutes)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-50 border-t">
+                  <tr className="text-sm font-medium text-gray-700">
+                    <td className="px-4 py-3" colSpan={5}>
+                      {t('latenessTotalLabel') || 'Total cumulé'} — {latenessSummary.offenders} {t('latenessOffenders') || 'employé(s) concerné(s)'}
+                    </td>
+                    <td className="px-4 py-3 text-right text-amber-700 font-bold">{fmtLateMin(latenessSummary.total)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tabs (Summary/Details) — hidden in lateness_only mode */}
+      {hasSearched && reportType !== 'lateness_only' && (
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
           <div className="flex border-b">
             <button
@@ -546,20 +720,6 @@ export default function Reports() {
             >
               {t('detailedRecords')} ({records.length})
             </button>
-            {latenessModuleOn && (
-              <button
-                onClick={() => setActiveTab('lateness')}
-                className={`px-5 py-3 text-sm font-medium transition-colors inline-flex items-center gap-2 ${
-                  activeTab === 'lateness'
-                    ? 'border-b-2 border-amber-600 text-amber-700'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-                title={t('latenessTabHint') || 'Classement des retards sur la période'}
-              >
-                <AlertTriangle className="w-4 h-4" />
-                {t('latenessTab') || 'Retards'}
-              </button>
-            )}
           </div>
 
           {loading ? (
@@ -580,7 +740,7 @@ export default function Reports() {
                     <th className="px-4 py-3">{t('lastCheckOut')}</th>
                     <th className="px-4 py-3">{t('totalWorked')}</th>
                     <th className="px-4 py-3">{t('overtime')}</th>
-                    {attendanceMode === 'strict' && <th className="px-4 py-3">{t('lateMinutes')}</th>}
+                    {showLateCol && <th className="px-4 py-3">{t('lateMinutes')}</th>}
                     {attendanceMode === 'strict' && <th className="px-4 py-3">{t('earlyDeparture')}</th>}
                     <th className="px-4 py-3 text-center">{t('swipes') || 'Swipes'}</th>
                   </tr>
@@ -629,7 +789,7 @@ export default function Reports() {
                                 <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
                               ) : <span className="text-gray-400">-</span>}
                             </td>
-                            {attendanceMode === 'strict' && (
+                            {showLateCol && (
                               <td className="px-4 py-2.5">
                                 {r.late_minutes > 0 ? (
                                   <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span>
@@ -651,6 +811,18 @@ export default function Reports() {
                             </td>
                           </tr>
                         ))}
+                        {/* Per-group 'Total retard' footer when 'Avec retards' is active */}
+                        {reportType === 'with_lateness' && (() => {
+                          const totalLate = items.reduce((s, r) => s + (r.late_minutes || 0), 0);
+                          return (
+                            <tr className="bg-amber-50/40 border-t">
+                              <td className="px-4 py-2 text-xs text-amber-900 font-medium" colSpan={colCount - 1}>
+                                {t('totalLateForGroup') || 'Total retard'} — {groupLabel(groupBy, group, items)}
+                              </td>
+                              <td className="px-4 py-2 text-right text-amber-800 font-bold text-sm">{fmtLateMin(totalLate)}</td>
+                            </tr>
+                          );
+                        })()}
                       </React.Fragment>
                     ))
                   ) : (
@@ -685,7 +857,7 @@ export default function Reports() {
                             <span className="text-purple-700 font-medium">{fmtMin(r.overtime_minutes)}</span>
                           ) : <span className="text-gray-400">-</span>}
                         </td>
-                        {attendanceMode === 'strict' && (
+                        {showLateCol && (
                           <td className="px-4 py-2.5">
                             {r.late_minutes > 0 ? (
                               <span className="text-amber-700 font-medium">{fmtMin(r.late_minutes)}</span>
@@ -716,9 +888,22 @@ export default function Reports() {
                     </tr>
                   )}
                 </tbody>
+                {/* Grand-total Retard row (flat-table only — group totals are inline) */}
+                {reportType === 'with_lateness' && !groupedSummary && summary.length > 0 && (
+                  <tfoot className="bg-amber-50/60 border-t">
+                    <tr>
+                      <td className="px-4 py-2.5 text-xs text-amber-900 font-medium" colSpan={colCount - 1}>
+                        {t('latenessTotalLabel') || 'Total cumulé'}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-amber-800 font-bold text-sm">
+                        {fmtLateMin(summary.reduce((s, r) => s + (r.late_minutes || 0), 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
-          ) : activeTab === 'details' ? (
+          ) : (
             /* ── Detailed Records Table ── */
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -814,84 +999,6 @@ export default function Reports() {
                   )}
                 </tbody>
               </table>
-            </div>
-          ) : (
-            /* ── Lateness Ranking Table (optional module) ── */
-            <div>
-              <div className="px-4 py-3 border-b bg-amber-50/50 flex flex-wrap items-center gap-3 justify-between">
-                <div className="flex items-center gap-2 text-sm text-amber-900">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span className="font-medium">{t('latenessHeader') || 'Classement des retards'}</span>
-                  <span className="text-xs text-amber-700">
-                    {t('latenessRule') || 'Calcul minute-précis · jours fériés et repos exclus'}
-                  </span>
-                </div>
-                <button
-                  onClick={exportLatenessPDF}
-                  disabled={exporting === 'pdf' || latenessLoading || latenessRanking.length === 0}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs border rounded-lg bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 transition-colors"
-                >
-                  {exporting === 'pdf' ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                  PDF
-                </button>
-              </div>
-
-              {latenessLoading ? (
-                <div className="flex items-center justify-center gap-3 py-16 text-gray-400">
-                  <Loader className="w-5 h-5 animate-spin" />
-                  <span className="text-sm">{t('loading')}...</span>
-                </div>
-              ) : latenessRanking.length === 0 ? (
-                <div className="px-4 py-12 text-center text-gray-400 text-sm">
-                  {t('latenessEmpty') || 'Aucun retard détecté sur la période.'}
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b">
-                      <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        <th className="px-4 py-3 w-10">#</th>
-                        <th className="px-4 py-3">{t('employeeName')}</th>
-                        <th className="px-4 py-3">{t('department')}</th>
-                        <th className="px-4 py-3 text-center">{t('latenessDaysCol') || 'Jours en retard'}</th>
-                        <th className="px-4 py-3 text-center">{t('workedDaysCol') || 'Jours travaillés'}</th>
-                        <th className="px-4 py-3 text-right">{t('totalLateCol') || 'Total retard'}</th>
-                        <th className="px-4 py-3 text-right">{t('avgLateCol') || 'Moyenne'}</th>
-                        <th className="px-4 py-3 text-right">{t('maxLateCol') || 'Plus gros'}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {latenessRanking.map((r, i) => (
-                        <tr key={r.employee_id || i} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-4 py-2.5 text-center text-gray-500 font-medium">{i + 1}</td>
-                          <td className="px-4 py-2.5 font-medium text-gray-900">{r.employee_name || '—'}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{r.department || '—'}</td>
-                          <td className="px-4 py-2.5 text-center">
-                            {r.late_days_count > 0
-                              ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">{r.late_days_count}</span>
-                              : <span className="text-gray-400">0</span>}
-                          </td>
-                          <td className="px-4 py-2.5 text-center text-gray-600">{r.worked_days_count}</td>
-                          <td className={`px-4 py-2.5 text-right font-semibold ${r.total_late_minutes > 0 ? 'text-amber-700' : 'text-gray-400'}`}>
-                            {fmtLateMin(r.total_late_minutes)}
-                          </td>
-                          <td className="px-4 py-2.5 text-right text-gray-600">{fmtLateMin(r.avg_late_minutes)}</td>
-                          <td className="px-4 py-2.5 text-right text-gray-600">{fmtLateMin(r.max_late_minutes)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-gray-50 border-t">
-                      <tr className="text-sm font-medium text-gray-700">
-                        <td className="px-4 py-3" colSpan={5}>
-                          {t('latenessTotalLabel') || 'Total cumulé'} — {latenessSummary.offenders} {t('latenessOffenders') || 'employé(s) concerné(s)'}
-                        </td>
-                        <td className="px-4 py-3 text-right text-amber-700 font-bold">{fmtLateMin(latenessSummary.total)}</td>
-                        <td colSpan={2}/>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
             </div>
           )}
         </div>

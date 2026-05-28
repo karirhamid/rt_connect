@@ -326,7 +326,16 @@ def parse_dates(single_date: Optional[str], start_date: Optional[str], end_date:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
 
-def _base_filters(start_dt, end_dt, employee_name, employee_id, device_id):
+def _parse_employee_ids(employee_ids: Optional[str]) -> Optional[list[str]]:
+    """Split a comma-separated matricule list. Empty / None → None (no filter)."""
+    if not employee_ids:
+        return None
+    ids = [x.strip() for x in employee_ids.split(",") if x.strip()]
+    return ids or None
+
+
+def _base_filters(start_dt, end_dt, employee_name, employee_id, device_id,
+                  employee_ids: Optional[list[str]] = None):
     """Build common filter list used by all report endpoints."""
     filters = [
         DBAttendance.voided_by_correction_id.is_(None),  # hide voided rows
@@ -340,6 +349,11 @@ def _base_filters(start_dt, end_dt, employee_name, employee_id, device_id):
         filters.append(DBEmployee.name.ilike(f"%{employee_name}%"))
     if employee_id:
         filters.append(DBEmployee.user_id == employee_id)
+    if employee_ids:
+        # Multi-employee selection from the new chip picker. AND'd with any
+        # other employee filter — sensible because the chip picker is the
+        # primary input; the legacy single-id arg is rarely set alongside.
+        filters.append(DBEmployee.user_id.in_(employee_ids))
     if device_id:
         filters.append(DBAttendance.device_id == device_id)
     return filters
@@ -352,12 +366,14 @@ def attendance_records(
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
     employee_name: Optional[str] = Query(None, description="Employee name (partial match)"),
     employee_id: Optional[str] = Query(None, description="Employee user_id"),
+    employee_ids: Optional[str] = Query(None, description="Comma-separated matricules (chip picker)"),
     device_id: Optional[str] = Query(None, description="Filter by device ID"),
     limit: int = Query(1000, ge=1, le=5000),
     current=Depends(get_current_user),
 ):
     """Detailed attendance records with filters."""
     start_dt, end_dt = parse_dates(date, start_date, end_date)
+    emp_ids = _parse_employee_ids(employee_ids)
 
     with get_db_session() as db:
         q = (
@@ -368,7 +384,7 @@ def attendance_records(
             .outerjoin(DBDevice, DBAttendance.device_id == DBDevice.id)
         )
 
-        filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id)
+        filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id, emp_ids)
         if filters:
             q = q.filter(and_(*filters))
 
@@ -404,13 +420,16 @@ def attendance_summary(
     end_date: Optional[str] = Query(None),
     employee_name: Optional[str] = Query(None),
     employee_id: Optional[str] = Query(None),
+    employee_ids: Optional[str] = Query(None, description="Comma-separated matricules (chip picker)"),
     device_id: Optional[str] = Query(None),
+    with_lateness: bool = Query(False, description="Always populate late_minutes regardless of attendance_mode"),
     current=Depends(get_current_user),
 ):
     """Daily per-employee summary: first in, last out, total swipes.
     In 'shared' employee mode, groups by user_id to merge records across devices.
     In 'separate' mode, groups by Employee.id (each device row is independent)."""
     start_dt, end_dt = parse_dates(date, start_date, end_date)
+    emp_ids = _parse_employee_ids(employee_ids)
 
     with get_db_session() as db:
         # Read settings
@@ -442,7 +461,7 @@ def attendance_summary(
             .outerjoin(DBCompany, DBEmployee.company_id == DBCompany.id)
         )
 
-        filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id)
+        filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id, emp_ids)
         if filters:
             q = q.filter(and_(*filters))
 
@@ -507,11 +526,14 @@ def attendance_summary(
                 )
                 item["total_minutes"] = summary_data.get("total_minutes")
                 item["overtime_minutes"] = summary_data.get("overtime_minutes", 0)
-                if attendance_mode == 'strict':
+                if attendance_mode == 'strict' or with_lateness:
+                    # When the user asked for the 'avec retards' report we
+                    # surface late_minutes even though attendance_mode is
+                    # 'simple' — it's the whole point of that report type.
                     item["late_minutes"] = summary_data.get("late_minutes", 0)
                     item["early_departure_minutes"] = summary_data.get("early_departure_minutes", 0)
             out.append(item)
-        return {"count": len(out), "summary": out, "attendance_mode": attendance_mode, "employee_mode": employee_mode}
+        return {"count": len(out), "summary": out, "attendance_mode": attendance_mode, "employee_mode": employee_mode, "with_lateness": with_lateness}
 
 
 @router.get("/attendance/export.csv")
@@ -521,6 +543,7 @@ def export_attendance_csv(
     end_date: Optional[str] = Query(None),
     employee_name: Optional[str] = Query(None),
     employee_id: Optional[str] = Query(None),
+    employee_ids: Optional[str] = Query(None, description="Comma-separated matricules (chip picker)"),
     device_id: Optional[str] = Query(None),
     current=Depends(get_current_user),
 ):
@@ -528,6 +551,7 @@ def export_attendance_csv(
     import csv
 
     start_dt, end_dt = parse_dates(date, start_date, end_date)
+    emp_ids = _parse_employee_ids(employee_ids)
 
     with get_db_session() as db:
         q = (
@@ -537,7 +561,7 @@ def export_attendance_csv(
             .outerjoin(DBCompany, DBEmployee.company_id == DBCompany.id)
             .outerjoin(DBDevice, DBAttendance.device_id == DBDevice.id)
         )
-        filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id)
+        filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id, emp_ids)
         if filters:
             q = q.filter(and_(*filters))
         rows = q.order_by(DBAttendance.timestamp.desc()).limit(5000).all()
@@ -583,12 +607,20 @@ def export_attendance_pdf(
     end_date: Optional[str] = Query(None),
     employee_name: Optional[str] = Query(None),
     employee_id: Optional[str] = Query(None),
+    employee_ids: Optional[str] = Query(None, description="Comma-separated matricules (chip picker)"),
     device_id: Optional[str] = Query(None),
     lang: str = Query("en", description="Language: en, fr, ar"),
     group_by: Optional[str] = Query(None, description="Group by: employee, date, or omit for flat"),
+    with_lateness: bool = Query(False, description="Add 'Retard' column + per-group totals"),
     current=Depends(get_current_user),
 ):
-    """Export attendance to a professionally formatted PDF report."""
+    """Export attendance to a professionally formatted PDF report.
+
+    When `with_lateness` is true:
+    - Each row gets a 'Retard' column populated regardless of attendance_mode.
+    - Each group (employee / date / department / flat) ends with a
+      'Total retard' footer line.
+    """
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
@@ -644,7 +676,8 @@ def export_attendance_pdf(
             .outerjoin(DBDepartment, DBEmployee.department_id == DBDepartment.id)
             .outerjoin(DBCompany, DBEmployee.company_id == DBCompany.id)
         )
-        filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id)
+        emp_ids = _parse_employee_ids(employee_ids)
+        filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id, emp_ids)
         if filters:
             q = q.filter(and_(*filters))
         if shared:
@@ -687,7 +720,7 @@ def export_attendance_pdf(
             .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
             .outerjoin(DBDevice, DBAttendance.device_id == DBDevice.id)
         )
-        dev_filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id)
+        dev_filters = _base_filters(start_dt, end_dt, employee_name, employee_id, device_id, emp_ids)
         if dev_filters:
             dev_q = dev_q.filter(and_(*dev_filters))
         for dr in dev_q.all():
@@ -1002,6 +1035,11 @@ def export_attendance_pdf(
         return Paragraph(val, cell_center)
 
     # ── Build row cells helper per mode ────────────────────────────────
+    # `_show_late_only` controls whether to add JUST the 'Retard' column
+    # without the strict-mode Early/Status pair. It's the on-demand flag
+    # the 'Avec retards' report type uses on top of any attendance_mode.
+    _show_late_only = (with_lateness and attendance_mode != "strict")
+
     def _build_row(r, include_employee=True, include_date=True, include_department=True):
         """Return a list of Paragraph cells for one summary row."""
         cells = []
@@ -1022,6 +1060,8 @@ def export_attendance_pdf(
             cells.append(_late_para(r["late_minutes"]))
             cells.append(_early_para(r["early_departure_minutes"]))
             cells.append(_status_para(r))
+        elif _show_late_only:
+            cells.append(_late_para(r.get("late_minutes", 0)))
         cells.append(Paragraph(r.get("device_names", "-"), cell_center))
         return cells
 
@@ -1049,9 +1089,30 @@ def export_attendance_pdf(
         if attendance_mode == "strict":
             headers += [L["late"], L["early_dep"], L["status"]]
             widths += [16 * mm, 18 * mm, 22 * mm]
+        elif _show_late_only:
+            headers.append(L["late"])
+            widths.append(18 * mm)
         headers.append(L["device"])
         widths.append(26 * mm)
         return headers, widths
+
+    # ── 'Total retard' footer (only when 'Avec retards' was requested) ────
+    _total_retard_style = ParagraphStyle(
+        "TotalRetard", parent=styles["Normal"],
+        fontSize=9, alignment=TA_RIGHT,
+        textColor=LATE_COLOR, spaceBefore=1, spaceAfter=2,
+    )
+    def _total_retard_line(rows: list, label_prefix: str = "") -> "Paragraph | None":
+        """Return a 'Total retard: Xh Ym' paragraph for the given rows,
+        or None if the report doesn't include the retard column."""
+        if not with_lateness:
+            return None
+        total = sum(int(r.get("late_minutes") or 0) for r in rows)
+        prefix = f"{label_prefix} — " if label_prefix else ""
+        return Paragraph(
+            f'<b>{prefix}{L["late"]} :</b> {_fmt_min(total)}',
+            _total_retard_style,
+        )
 
     story = []
 
@@ -1141,6 +1202,8 @@ def export_attendance_pdf(
             story.append(Paragraph(subtitle, group_sub_style))
             story.append(Spacer(1, 2 * mm))
             story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
+            _tr = _total_retard_line(emp_rows, label_prefix=f"{emp_name}")
+            if _tr is not None: story.append(_tr)
             story.append(Spacer(1, 4 * mm))
 
     # ── GROUP BY DATE ──────────────────────────────────────────────────
@@ -1163,6 +1226,8 @@ def export_attendance_pdf(
             story.append(Paragraph(subtitle, group_sub_style))
             story.append(Spacer(1, 2 * mm))
             story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
+            _tr = _total_retard_line(day_rows, label_prefix=str(day))
+            if _tr is not None: story.append(_tr)
             story.append(Spacer(1, 4 * mm))
 
     # ── GROUP BY DEPARTMENT ────────────────────────────────────────────
@@ -1185,6 +1250,8 @@ def export_attendance_pdf(
             story.append(Paragraph(subtitle, group_sub_style))
             story.append(Spacer(1, 2 * mm))
             story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
+            _tr = _total_retard_line(dept_rows, label_prefix=str(dept_name))
+            if _tr is not None: story.append(_tr)
             story.append(Spacer(1, 4 * mm))
 
     # ── NO GROUPING (flat table) ───────────────────────────────────────
@@ -1193,6 +1260,8 @@ def export_attendance_pdf(
         data_rows = [_build_row(r, include_employee=True, include_date=True) for r in flat_rows]
         inc = [i for i, r in enumerate(flat_rows) if r.get("incomplete")]
         story.append(_make_table(col_headers, data_rows, col_widths, incomplete_rows=inc))
+        _tr = _total_retard_line(flat_rows, label_prefix=L.get("total_records") or "Total")
+        if _tr is not None: story.append(_tr)
 
     # ── Absentees section (employees with no punches in the period) ─────
     # Queries all employees matching the same device/employee filters as the
@@ -1795,7 +1864,8 @@ def _require_lateness_enabled():
 
 def _compute_ranking(start_dt: datetime, end_dt: datetime,
                      department_id: Optional[int] = None,
-                     device_id: Optional[str] = None) -> tuple[list[dict], str]:
+                     device_id: Optional[str] = None,
+                     employee_ids: Optional[list[str]] = None) -> tuple[list[dict], str]:
     """Aggregate lateness per employee over the period.
 
     Returns (rows, employee_mode). Each row:
@@ -1830,6 +1900,8 @@ def _compute_ranking(start_dt: datetime, end_dt: datetime,
             q = q.filter(DBEmployee.department_id == department_id)
         if device_id:
             q = q.filter(DBAttendance.device_id == device_id)
+        if employee_ids:
+            q = q.filter(DBEmployee.user_id.in_(employee_ids))
         if shared:
             q = q.group_by(DBEmployee.user_id, cast(DBAttendance.timestamp, Date))
         else:
@@ -1890,19 +1962,20 @@ def lateness_ranking(
     end_date:   str = Query(..., description="End date YYYY-MM-DD"),
     department_id: Optional[int] = Query(None),
     device_id:     Optional[str] = Query(None),
+    employee_ids:  Optional[str] = Query(None, description="Comma-separated matricules (chip picker)"),
     current=Depends(get_current_user),
 ):
     """Lateness ranking — one row per employee, sorted by total late minutes.
 
-    Requires `reports.hours` (or any manager perm). Returns 403 with
-    `lateness_module_disabled` when the super admin hasn't enabled the
-    module; the frontend uses that signal to hide the Retards tab.
+    Returns 403 with `lateness_module_disabled` when the super admin hasn't
+    enabled the module; the frontend uses that signal to hide the option.
     """
     _require_lateness_enabled()
     start_dt, end_dt = parse_dates(None, start_date, end_date)
     if not start_dt or not end_dt:
         raise HTTPException(status_code=400, detail="start_date and end_date are required")
-    rows, employee_mode = _compute_ranking(start_dt, end_dt, department_id, device_id)
+    emp_ids = _parse_employee_ids(employee_ids)
+    rows, employee_mode = _compute_ranking(start_dt, end_dt, department_id, device_id, emp_ids)
     return {
         "count":         len(rows),
         "ranking":       rows,
@@ -1920,6 +1993,7 @@ def lateness_ranking_pdf(
     end_date:   str = Query(..., description="End date YYYY-MM-DD"),
     department_id: Optional[int] = Query(None),
     device_id:     Optional[str] = Query(None),
+    employee_ids:  Optional[str] = Query(None, description="Comma-separated matricules (chip picker)"),
     lang: str = Query("fr", description="Language: en, fr, ar"),
     current=Depends(get_current_user),
 ):
@@ -1940,7 +2014,8 @@ def lateness_ranking_pdf(
     if not start_dt or not end_dt:
         raise HTTPException(status_code=400, detail="start_date and end_date are required")
 
-    rows, _ = _compute_ranking(start_dt, end_dt, department_id, device_id)
+    emp_ids = _parse_employee_ids(employee_ids)
+    rows, _ = _compute_ranking(start_dt, end_dt, department_id, device_id, emp_ids)
 
     # Branding from settings
     from app.database.schema import AppSettings as _AS
