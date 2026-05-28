@@ -93,3 +93,40 @@ day's night shift) when we build it.
   counted absent**.
 - NOT yet handled here: holidays, guard/night duty, per-day duty assignment,
   midnight-crossing night shifts. Those are the next phase described above.
+
+---
+
+## Audit gap to fix BEFORE building this feature (May 2026 audit)
+
+Before the full "la garde" / holiday-duty workflow can be built, the
+plumbing for crossing-midnight shifts must be fixed. The May 2026 senior
+audit found:
+
+- `backend-api/app/services/punch_classifier.py:516-525` —
+  `get_employee_day_summary` does a naive `HH:MM` string subtraction. For
+  a 22:00 → 06:00 shift, `06:00 − 22:00 = −16h`, then `max(0, diff) → 0`.
+  The whole day collapses to zero worked time, zero overtime, and the
+  entry/exit pair lands on TWO different `DailyShiftRecord` rows.
+
+- `backend-api/app/services/punch_classifier.py:463-475` —
+  `day_start/day_end = datetime.combine(day, time.min/max)` buckets by
+  calendar date, so a 22:00 Mon entry and a 06:00 Tue exit are forever
+  separated.
+
+What "fixed" looks like:
+
+1. When the resolved `record.work_end < record.work_start` (or
+   `is_overnight` flagged), treat the exit datetime as `+1 day` before
+   subtracting.
+2. Bucket the night-shift day around the work_start's calendar date
+   (extend `day_end` to `work_end + tolerance` on the next day).
+3. Surface an `is_overnight: bool` on the day-summary dict so the PDF
+   renders "nuit" rather than the misleading "incomplet".
+
+Once that's done, the "la garde" workflow described above can layer on
+top: a duty assignment for a public holiday simply creates a one-day
+overnight shift record for the assigned employee, and the existing
+report machinery does the rest.
+
+A consolidated index of every deferred item (including this one) is at
+`docs/TODO_BACKLOG.md` § A.
