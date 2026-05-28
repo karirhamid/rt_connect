@@ -507,10 +507,10 @@ function AttendanceToday() {
   return (
     <div className="space-y-6">
       <SyncOverlay visible={syncOverlay.visible} phase={syncOverlay.phase} deviceName={syncOverlay.deviceName} direction={syncOverlay.direction} />
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <div className="flex items-center gap-3">
+      {/* Header — stacks on mobile so buttons stay reachable */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">{t('todaysAttendance')}</h1>
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
               employeeMode === 'shared'
@@ -521,7 +521,7 @@ function AttendanceToday() {
               {employeeMode === 'shared' ? (t('employeeModeShared') || 'Shared') : (t('employeeModeSeparate') || 'Separate')}
             </span>
           </div>
-          <div className="flex items-center gap-4 mt-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2">
             <input
               type="date"
               value={selectedDate}
@@ -530,16 +530,16 @@ function AttendanceToday() {
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
             <p className="text-sm text-gray-500">
-              {new Date(selectedDate).toLocaleDateString('en-US', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
+              {new Date(selectedDate).toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
               })}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full md:w-auto md:justify-end">
           {/* Display mode toggle — only when more than one device */}
           {devices.length > 1 && (
             <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
@@ -567,7 +567,7 @@ function AttendanceToday() {
           <button
             onClick={() => startSmartSync()}
             disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 flex-1 sm:flex-none"
             title={t('syncSinceLastDesc') || 'Synchroniser les pointages de tous les appareils'}
           >
             {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -575,7 +575,7 @@ function AttendanceToday() {
           </button>
           <button
             onClick={() => setCorrection({ mode: 'add', employee: null, originalAttendanceId: null, defaultTimestamp: new Date().toISOString(), defaultPunchType: 0 })}
-            className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors flex-1 sm:flex-none"
             title={t('addManualPunch') || 'Pointage manuel'}
           >
             <Plus className="w-4 h-4" />

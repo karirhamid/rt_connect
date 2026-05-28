@@ -203,14 +203,14 @@ export default function Reports() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      {/* Header — stacks on mobile */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold text-gray-900">{t('reports')}</h1>
           <p className="text-sm text-gray-500">{t('generateReport')}</p>
         </div>
         {hasSearched && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
               employeeMode === 'shared'
                 ? 'bg-blue-100 text-blue-700 border border-blue-200'
@@ -349,23 +349,23 @@ export default function Reports() {
             </div>
           </div>
 
-          {/* Row 2: Action buttons */}
-          <div className="flex flex-wrap items-center gap-2 pt-1 border-t">
+          {/* Row 2: Action buttons — stack/wrap on phones */}
+          <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
             <button
               onClick={fetchData}
               disabled={loading}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors w-full sm:w-auto"
             >
               {loading ? <Loader className="w-4 h-4 animate-spin" /> : <Filter className="w-4 h-4" />}
               {t('generateReport')}
             </button>
 
-            <div className="w-px h-6 bg-gray-200 mx-1" />
+            <div className="hidden sm:block w-px h-6 bg-gray-200 mx-1" />
 
             <button
               onClick={exportCSV}
               disabled={!!exporting || loading}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg hover:bg-gray-50 text-gray-700 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm border rounded-lg hover:bg-gray-50 text-gray-700 disabled:opacity-50 transition-colors flex-1 sm:flex-none"
             >
               {exporting === 'csv' ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
               CSV
@@ -373,7 +373,7 @@ export default function Reports() {
             <button
               onClick={exportPDF}
               disabled={!!exporting || loading}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm border rounded-lg hover:bg-gray-50 text-gray-700 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center justify-center gap-2 px-3 py-2 text-sm border rounded-lg hover:bg-gray-50 text-gray-700 disabled:opacity-50 transition-colors flex-1 sm:flex-none"
             >
               {exporting === 'pdf' ? <Loader className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
               PDF
