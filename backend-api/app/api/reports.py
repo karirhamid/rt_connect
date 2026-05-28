@@ -1763,3 +1763,317 @@ def _attendance_counts(start_date: str, end_date: str,
         total_employees = len({g.gid for g in groups})  # distinct matricules
 
     return total_employees, total_records
+
+
+# ===========================================================================
+# Lateness module — Phase 1 (ranking only)
+#
+# Off by default. Gated on AppSettings.lateness_module_enabled, super admin
+# only. When off, every endpoint here returns 403 so the frontend gets a
+# clear signal to hide the tab (the public probe at
+# /settings/reports-module/public is what the UI actually reads on load).
+#
+# Lateness math: minute-exact, no grace.
+#   late = max(0, first_check_in − scheduled_start)
+# Scheduled_start comes from get_employee_day_summary() which already does
+# the EmployeeSchedule → DepartmentSchedule → device-timing fallback chain.
+# Days the employee was absent (no check-in) or had no scheduled start
+# (holiday / day-off / unscheduled) don't contribute and aren't counted in
+# late_days.
+# ===========================================================================
+def _require_lateness_enabled():
+    """Raise 403 if the module flag is off. Cheap — one settings row read."""
+    from app.database.schema import AppSettings as _AS
+    with get_db_session() as _db:
+        _row = _db.query(_AS).first()
+        if not (_row and getattr(_row, 'lateness_module_enabled', False)):
+            raise HTTPException(
+                status_code=403,
+                detail="lateness_module_disabled",
+            )
+
+
+def _compute_ranking(start_dt: datetime, end_dt: datetime,
+                     department_id: Optional[int] = None,
+                     device_id: Optional[str] = None) -> tuple[list[dict], str]:
+    """Aggregate lateness per employee over the period.
+
+    Returns (rows, employee_mode). Each row:
+      { employee_id, employee_name, department, late_days_count,
+        total_late_minutes, max_late_minutes, avg_late_minutes,
+        worked_days_count }
+    Sorted by total_late_minutes desc, then late_days desc.
+    """
+    from app.database.schema import AppSettings as _AS
+    with get_db_session() as db:
+        _settings   = db.query(_AS).first()
+        employee_mode = getattr(_settings, 'employee_mode', None) or 'shared'
+        shared        = employee_mode == 'shared'
+
+        # 1) Find the (employee, day) pairs that have any approved punch in the
+        #    period — that's our universe of candidate "worked days".
+        id_col = DBEmployee.user_id if shared else DBEmployee.id
+        q = (db.query(
+                id_col.label("eid"),
+                func.min(DBEmployee.name).label("ename") if shared else DBEmployee.name.label("ename"),
+                func.coalesce(func.min(DBDepartment.name), "-").label("dept") if shared else func.coalesce(DBDepartment.name, "-").label("dept"),
+                cast(DBAttendance.timestamp, Date).label("day"),
+             )
+             .select_from(DBAttendance)
+             .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
+             .outerjoin(DBDepartment, DBEmployee.department_id == DBDepartment.id)
+             .filter(DBAttendance.voided_by_correction_id.is_(None))
+             .filter(DBAttendance.approved.isnot(False))
+             .filter(DBAttendance.timestamp >= start_dt)
+             .filter(DBAttendance.timestamp <= end_dt))
+        if department_id:
+            q = q.filter(DBEmployee.department_id == department_id)
+        if device_id:
+            q = q.filter(DBAttendance.device_id == device_id)
+        if shared:
+            q = q.group_by(DBEmployee.user_id, cast(DBAttendance.timestamp, Date))
+        else:
+            q = q.group_by(DBEmployee.id, DBEmployee.name, DBDepartment.name, cast(DBAttendance.timestamp, Date))
+        worked = q.all()
+
+        # 2) For shared mode we need every Employee PK belonging to each
+        #    matricule so the day-summary query merges across devices.
+        uid_to_pks: dict = {}
+        if shared:
+            uids = {w.eid for w in worked}
+            for uid in uids:
+                pks = db.query(DBEmployee.id).filter(DBEmployee.user_id == uid).all()
+                uid_to_pks[uid] = [pk[0] for pk in pks]
+
+        # 3) Accumulate lateness per employee.
+        agg: dict = {}
+        for w in worked:
+            day_date = w.day if hasattr(w.day, 'isoformat') else None
+            if not day_date:
+                continue
+            if shared:
+                all_pks = uid_to_pks.get(w.eid, [])
+                pk = all_pks[0] if all_pks else None
+                if pk is None:
+                    continue
+                summary = get_employee_day_summary(db, pk, day_date, employee_ids=all_pks)
+            else:
+                summary = get_employee_day_summary(db, w.eid, day_date)
+            late = int(summary.get("late_minutes") or 0)
+            row = agg.setdefault(w.eid, {
+                "employee_id":   w.eid,
+                "employee_name": w.ename,
+                "department":    w.dept,
+                "worked_days_count": 0,
+                "late_days_count":   0,
+                "total_late_minutes": 0,
+                "max_late_minutes":   0,
+            })
+            row["worked_days_count"] += 1
+            if late > 0:
+                row["late_days_count"]    += 1
+                row["total_late_minutes"] += late
+                if late > row["max_late_minutes"]:
+                    row["max_late_minutes"] = late
+
+        rows = []
+        for r in agg.values():
+            r["avg_late_minutes"] = round(r["total_late_minutes"] / r["late_days_count"]) if r["late_days_count"] else 0
+            rows.append(r)
+        rows.sort(key=lambda r: (r["total_late_minutes"], r["late_days_count"]), reverse=True)
+    return rows, employee_mode
+
+
+@router.get("/reports/lateness/ranking")
+def lateness_ranking(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date:   str = Query(..., description="End date YYYY-MM-DD"),
+    department_id: Optional[int] = Query(None),
+    device_id:     Optional[str] = Query(None),
+    current=Depends(get_current_user),
+):
+    """Lateness ranking — one row per employee, sorted by total late minutes.
+
+    Requires `reports.hours` (or any manager perm). Returns 403 with
+    `lateness_module_disabled` when the super admin hasn't enabled the
+    module; the frontend uses that signal to hide the Retards tab.
+    """
+    _require_lateness_enabled()
+    start_dt, end_dt = parse_dates(None, start_date, end_date)
+    if not start_dt or not end_dt:
+        raise HTTPException(status_code=400, detail="start_date and end_date are required")
+    rows, employee_mode = _compute_ranking(start_dt, end_dt, department_id, device_id)
+    return {
+        "count":         len(rows),
+        "ranking":       rows,
+        "employee_mode": employee_mode,
+        "start_date":    start_dt.date().isoformat(),
+        "end_date":      end_dt.date().isoformat(),
+        "total_late_minutes_all": sum(r["total_late_minutes"] for r in rows),
+        "total_late_days_all":    sum(r["late_days_count"] for r in rows),
+    }
+
+
+@router.get("/reports/lateness/ranking/pdf")
+def lateness_ranking_pdf(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date:   str = Query(..., description="End date YYYY-MM-DD"),
+    department_id: Optional[int] = Query(None),
+    device_id:     Optional[str] = Query(None),
+    lang: str = Query("fr", description="Language: en, fr, ar"),
+    current=Depends(get_current_user),
+):
+    """Lateness ranking PDF — same data as /lateness/ranking, rendered as a
+    single-table report ordered by total late minutes desc.
+    """
+    _require_lateness_enabled()
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
+    start_dt, end_dt = parse_dates(None, start_date, end_date)
+    if not start_dt or not end_dt:
+        raise HTTPException(status_code=400, detail="start_date and end_date are required")
+
+    rows, _ = _compute_ranking(start_dt, end_dt, department_id, device_id)
+
+    # Branding from settings
+    from app.database.schema import AppSettings as _AS
+    with get_db_session() as db:
+        _settings = db.query(_AS).first()
+        client_name = (getattr(_settings, 'client_name', None) or '').strip()
+
+    LBL = {
+        "fr": dict(
+            title="Classement des retards",
+            period="Période", generated="Généré le",
+            rank="#", employee="Employé(e)", department="Département",
+            late_days="Jours en retard", worked_days="Jours travaillés",
+            total_late="Total retard", avg_late="Moyenne / retard",
+            max_late="Plus gros retard",
+            empty="Aucun retard détecté sur la période.",
+            summary_total="Total cumulé", summary_offenders="Employés concernés",
+        ),
+        "en": dict(
+            title="Lateness ranking",
+            period="Period", generated="Generated",
+            rank="#", employee="Employee", department="Department",
+            late_days="Late days", worked_days="Worked days",
+            total_late="Total late", avg_late="Avg per late day",
+            max_late="Max late",
+            empty="No lateness recorded for the period.",
+            summary_total="Cumulative total", summary_offenders="Employees concerned",
+        ),
+        "ar": dict(
+            title="ترتيب التأخر",
+            period="الفترة", generated="تم الإنشاء في",
+            rank="#", employee="الموظف", department="القسم",
+            late_days="أيام التأخر", worked_days="أيام العمل",
+            total_late="إجمالي التأخر", avg_late="متوسط التأخر",
+            max_late="أكبر تأخر",
+            empty="لا توجد حالات تأخر مسجلة في هذه الفترة.",
+            summary_total="المجموع التراكمي", summary_offenders="عدد الموظفين",
+        ),
+    }
+    L = LBL.get(lang, LBL["fr"])
+
+    def _fmt_min(m: int) -> str:
+        m = int(m or 0)
+        if m <= 0: return "—"
+        h, r = divmod(m, 60)
+        return f"{h}h {r:02d}m" if h else f"{r}m"
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        topMargin=16 * mm, bottomMargin=16 * mm,
+        leftMargin=14 * mm, rightMargin=14 * mm,
+        title=L["title"], author="RT Connect",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("RnkTitle", parent=styles["Heading1"],
+                                 fontSize=18, leading=22, alignment=TA_CENTER,
+                                 textColor=colors.HexColor("#0f172a"))
+    sub_style = ParagraphStyle("RnkSub", parent=styles["Normal"],
+                               fontSize=9, leading=12, alignment=TA_CENTER,
+                               textColor=colors.HexColor("#475569"))
+    story = []
+    if client_name:
+        story.append(Paragraph(f"<b>{client_name}</b>", sub_style))
+    story.append(Paragraph(L["title"], title_style))
+    story.append(Paragraph(
+        f"{L['period']} : <b>{start_dt.date().isoformat()}</b> &rarr; <b>{end_dt.date().isoformat()}</b>"
+        f"  &bull;  {L['generated']} {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        sub_style,
+    ))
+    story.append(Spacer(1, 4 * mm))
+    story.append(HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#cbd5e1"), spaceAfter=4 * mm))
+
+    if not rows:
+        story.append(Spacer(1, 20 * mm))
+        story.append(Paragraph(L["empty"],
+                               ParagraphStyle("Empty", parent=styles["Normal"],
+                                              fontSize=12, alignment=TA_CENTER,
+                                              textColor=colors.HexColor("#94a3b8"))))
+    else:
+        header = [L["rank"], L["employee"], L["department"],
+                  L["late_days"], L["worked_days"],
+                  L["total_late"], L["avg_late"], L["max_late"]]
+        data = [header]
+        for i, r in enumerate(rows, start=1):
+            data.append([
+                str(i),
+                r["employee_name"] or "—",
+                r["department"] or "—",
+                str(r["late_days_count"]),
+                str(r["worked_days_count"]),
+                _fmt_min(r["total_late_minutes"]),
+                _fmt_min(r["avg_late_minutes"]),
+                _fmt_min(r["max_late_minutes"]),
+            ])
+        col_widths = [10*mm, 50*mm, 35*mm, 22*mm, 22*mm, 22*mm, 22*mm, 22*mm]
+        tbl = Table(data, colWidths=col_widths, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+            ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",   (0, 0), (-1, 0), 9),
+            ("ALIGN",      (0, 0), (-1, 0), "CENTER"),
+            ("FONTSIZE",   (0, 1), (-1, -1), 9),
+            ("ALIGN",      (0, 1), (0, -1), "CENTER"),
+            ("ALIGN",      (3, 1), (-1, -1), "CENTER"),
+            ("ALIGN",      (1, 1), (2, -1), "LEFT"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID",        (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+            ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING",(0, 0), (-1, -1), 4),
+            ("TOPPADDING",  (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 4),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 4 * mm))
+
+        total_minutes = sum(r["total_late_minutes"] for r in rows)
+        offenders     = sum(1 for r in rows if r["late_days_count"] > 0)
+        story.append(Paragraph(
+            f"<b>{L['summary_total']} :</b> {_fmt_min(total_minutes)}"
+            f"  &bull;  <b>{L['summary_offenders']} :</b> {offenders}",
+            ParagraphStyle("RnkSum", parent=styles["Normal"],
+                           fontSize=10, alignment=TA_RIGHT,
+                           textColor=colors.HexColor("#334155")),
+        ))
+
+    doc.build(story)
+    buf.seek(0)
+    filename = f"lateness_ranking_{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.pdf"
+    return Response(
+        content=buf.read(), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

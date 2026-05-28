@@ -234,6 +234,13 @@ class AppSettings(Base):
     # When disabled: login + all /api/portal/* endpoints return 503.
     portal_enabled = Column(Boolean, default=False, nullable=False, server_default='false')
 
+    # Lateness reports module — opt-in, super admin only.
+    # When off the Retards tab is hidden in /reports and the
+    # /api/reports/lateness/* endpoints return 403. Lateness math is
+    # minute-exact (no grace) and uses the employee's scheduled start
+    # (EmployeeSchedule → DepartmentSchedule fallback).
+    lateness_module_enabled = Column(Boolean, default=False, nullable=False, server_default='false')
+
     # Branding (shown on login + sidebar)
     app_name    = Column(String(100), nullable=True, default='RTPointage')
     client_name = Column(String(255), nullable=True)  # The customer org using this install

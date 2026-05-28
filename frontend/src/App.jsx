@@ -9,6 +9,7 @@ import AttendanceToday from './pages/AttendanceToday';
 
 import EmployeeManagement from './pages/EmployeeManagement';
 import GeneralSettings from './pages/GeneralSettings';
+import ReportSettings from './pages/ReportSettings';
 import ShiftManagement from './pages/ShiftManagement';
 import HolidayCalendar from './pages/HolidayCalendar';
 import BulkShiftAssignment from './pages/BulkShiftAssignment';
@@ -127,6 +128,7 @@ function AppContent() {
       items: [
         { type: 'divider', label: t('groupSystem') || 'Système' },
         { name: t('general'),       href: '/settings/general',     icon: Settings },
+        { name: t('reportSettings') || 'Rapports', href: '/settings/reports', icon: FileText },
         { name: t('companyConfig'), href: '/settings/company',     icon: Building2 },
         { type: 'divider', label: t('groupAccess') || 'Accès' },
         { name: t('users') || 'Utilisateurs', href: '/settings/users', icon: Users },
@@ -163,6 +165,7 @@ function AppContent() {
         return { ...s, items: s.items.filter(i =>
           i.href !== '/settings/roles' &&
           i.href !== '/settings/general' &&
+          i.href !== '/settings/reports' &&
           i.href !== '/settings/maintenance'
         )};
       }
@@ -414,6 +417,7 @@ function AppContent() {
 
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings/general" element={<ProtectedRoute perm="roles.manage"><GeneralSettings /></ProtectedRoute>} />
+            <Route path="/settings/reports" element={<ProtectedRoute perm="roles.manage"><ReportSettings /></ProtectedRoute>} />
             <Route path="/settings/devices" element={<ProtectedRoute perm="devices.sync"><DeviceSettings /></ProtectedRoute>} />
             <Route path="/settings/company" element={<ProtectedRoute perm="settings.manage"><CompanyConfig /></ProtectedRoute>} />
             <Route path="/settings/users" element={<ProtectedRoute perm="users.read"><UsersManagement /></ProtectedRoute>} />
