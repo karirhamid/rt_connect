@@ -11,9 +11,16 @@ from app.database.schema import (
     Company as DBCompany,
     AppSettings as DBAppSettings,
 )
+from app.core.security import get_current_user
 import logging
 
-router = APIRouter()
+# Every endpoint under /api/attendance/* requires a valid bearer token.
+# Defense in depth: applied at the router level so a future endpoint added
+# to this file is protected by default — a missing per-route gate cannot
+# leak attendance data to unauthenticated callers. The audit found the old
+# version had ZERO auth on /today, /filter, /latest-log-date,
+# /expected-working, and the PUT/DELETE attendance edit routes.
+router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 
@@ -142,12 +149,18 @@ async def get_today_attendance(
         day_start = datetime.combine(target_day, datetime.min.time())
         day_end = datetime.combine(target_day, datetime.max.time())
         
+        # Match reports.py:_base_filters — hide HR-deleted (voided) rows and
+        # pending manual corrections (approved=False). Before this fix, voided
+        # punches kept appearing on the live Today screen while having
+        # correctly vanished from reports/payroll — a visible inconsistency.
         records = db.query(DBAttendance).join(
             DBEmployee, DBAttendance.employee_id == DBEmployee.id
         ).join(
             DBDepartment, DBEmployee.department_id == DBDepartment.id
         ).filter(
             and_(
+                DBAttendance.voided_by_correction_id.is_(None),
+                DBAttendance.approved.isnot(False),
                 DBAttendance.timestamp >= day_start,
                 DBAttendance.timestamp <= day_end
             )
@@ -215,9 +228,13 @@ async def filter_attendance(
             DBCompany, DBEmployee.company_id == DBCompany.id
         )
         
-        # Apply filters
-        filters = []
-        
+        # Apply filters — start with the same hide-voided / hide-unapproved
+        # baseline as reports.py:_base_filters so /filter and reports agree.
+        filters = [
+            DBAttendance.voided_by_correction_id.is_(None),
+            DBAttendance.approved.isnot(False),
+        ]
+
         if start_date:
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
             filters.append(DBAttendance.timestamp >= start_dt)

@@ -374,16 +374,38 @@ def _scheduler_loop():
 
 
 def _tick():
+    """Find due schedules and run them.
+
+    We advance `next_run_at` to a tentative future value BEFORE the run
+    starts, not just after it. If the loop body takes longer than a single
+    tick (slow PDF, slow SMTP), the next tick used to re-select the same
+    schedule because next_run_at had not moved — duplicate-fire bug. The
+    advance is provisional: `run_schedule` recomputes the canonical
+    next_run_at at the end based on the actual finish time.
+    """
     from app.database.connection import get_db_session
     from app.database.schema import ReportSchedule
+    from app.api.report_schedules import _calc_next
 
     now = datetime.now(timezone.utc)
+    ids: list[int] = []
     with get_db_session() as db:
         due = (db.query(ReportSchedule)
                .filter(ReportSchedule.is_active == True,
                        ReportSchedule.next_run_at <= now)
                .all())
-        ids = [s.id for s in due]
+        for s in due:
+            ids.append(s.id)
+            # Provisional bump: push next_run_at out by one full cadence so
+            # the next tick will not pick this row again while it's running.
+            # run_schedule overwrites this with the canonical value when it
+            # finishes (success or failure).
+            try:
+                s.next_run_at = _calc_next(s, after=now)
+            except Exception as exc:
+                logger.warning(f"schedule {s.id} provisional bump failed: {exc}")
+        if ids:
+            db.commit()
 
     for sid in ids:
         try:

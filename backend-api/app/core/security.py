@@ -13,7 +13,8 @@ from sqlalchemy import inspect
 
 SECRET_KEY = os.getenv('JWT_SECRET', 'dev-secret-key')
 ALGORITHM = 'HS256'
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '480'))
+# Default 8h (one work shift). Override via env if you want shorter sessions.
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES') or 480)
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv('REFRESH_TOKEN_EXPIRE_DAYS', '7'))
 
 """

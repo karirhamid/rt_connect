@@ -456,8 +456,25 @@ def _restore_pg_dump(path: Path) -> RestoreResponse:
 # ── Legacy JSON restore (kept for backward compatibility) ──────────────────
 
 def _restore_legacy_json(path: Path) -> RestoreResponse:
-    """Restore from the old .json.gz format produced by earlier versions."""
+    """Restore from the old .json.gz format produced by earlier versions.
+
+    Hardened against malicious backup files: only tables that exist in the
+    current SQLAlchemy metadata can be touched, and column names must match
+    real columns on those tables. Without this check, a crafted backup file
+    could trick the f-string SQL builder below into running arbitrary DDL
+    (e.g. table_name = '"; DROP TABLE employees; --').
+    """
     from sqlalchemy import text as _sql_text
+    from app.database.schema import Base as _BaseSchema
+    from app.database.shift_schema import Base as _BaseShifts
+
+    # Build the allow-list once from the actual ORM metadata. This includes
+    # every table the running app knows about — adding a new model
+    # automatically extends the allow-list with no maintenance.
+    _allowed_tables: dict[str, set[str]] = {}
+    for _meta in (_BaseSchema.metadata, _BaseShifts.metadata):
+        for _tbl in _meta.tables.values():
+            _allowed_tables[_tbl.name] = {c.name for c in _tbl.columns}
 
     with gzip.open(path, 'rt', encoding='utf-8') as f:
         data = json.load(f)
@@ -466,14 +483,24 @@ def _restore_legacy_json(path: Path) -> RestoreResponse:
     restored = 0
     with get_db_session() as db:
         for table_name, rows in data.items():
+            if table_name not in _allowed_tables:
+                logger.warning(f"Legacy restore: skipping unknown table {table_name!r}")
+                continue
+            allowed_cols = _allowed_tables[table_name]
             try:
                 db.execute(_sql_text(f'DELETE FROM "{table_name}"'))
                 db.commit()
                 for row in rows or []:
-                    columns = ', '.join([f'"{k}"' for k in row.keys()])
-                    values  = ', '.join([f':{k}' for k in row.keys()])
+                    # Drop any column the schema doesn't know — prevents
+                    # injection via crafted JSON keys and also tolerates
+                    # backups taken from an older schema version.
+                    safe_row = {k: v for k, v in row.items() if k in allowed_cols}
+                    if not safe_row:
+                        continue
+                    columns = ', '.join([f'"{k}"' for k in safe_row.keys()])
+                    values  = ', '.join([f':{k}' for k in safe_row.keys()])
                     row_data = {}
-                    for k, v in row.items():
+                    for k, v in safe_row.items():
                         if isinstance(v, str) and 'T' in v:
                             try: v = datetime.fromisoformat(v)
                             except Exception: pass

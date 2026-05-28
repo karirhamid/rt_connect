@@ -205,7 +205,30 @@ def resolve_daily_record(
 
     dow = punch_date.weekday()  # 0=Monday .. 6=Sunday
 
+    # ── 0. Public-holiday short-circuit ─────────────────────────────────
+    # A punch on a public holiday must NOT be measured against the regular
+    # weekday schedule — otherwise an employee who shows up on Aid Al-Adha
+    # (the on-duty "garde") gets flagged late against the 09:00 office
+    # baseline. Mirrors the user-stated rule of the lateness module:
+    # "Les jours fériés, jours de repos et absences n'entrent pas dans le
+    # calcul." Returns None so get_employee_day_summary skips the
+    # late_minutes / early_departure / overtime-vs-baseline branch.
+    try:
+        from app.database.shift_schema import Holiday as _Holiday
+        if db.query(_Holiday.id).filter(_Holiday.date == punch_date).first():
+            return None
+    except Exception:
+        # Holiday table is part of the shift schema; if it's somehow not
+        # available the punch falls through to normal resolution. Same
+        # graceful-degradation pattern as the PDF holiday banner.
+        pass
+
     # ── 1. Personal schedule (only when mode is "employee" or "both") ──
+    # Remember whether ANY schedule layer marked today as a day off — we
+    # use it after the guard-shift check below so that an employee on
+    # Sunday who only has a "Regular 09-17" auto-detect candidate is NOT
+    # silently mapped to that shift and flagged late.
+    had_day_off_marker = False
     if timing_mode in ('employee', 'both'):
         personal = db.query(EmployeeSchedule).filter(
             and_(
@@ -216,7 +239,7 @@ def resolve_daily_record(
         if personal:
             if personal.is_day_off:
                 # Still check guard shifts below before returning None
-                pass
+                had_day_off_marker = True
             else:
                 if record is None:
                     record = _upsert_daily_shift(
@@ -243,7 +266,7 @@ def resolve_daily_record(
             if dept_sched:
                 if dept_sched.is_day_off:
                     # Still check guard shifts below
-                    pass
+                    had_day_off_marker = True
                 else:
                     if record is None:
                         record = _upsert_daily_shift(
@@ -302,6 +325,14 @@ def resolve_daily_record(
     if timing_mode == 'off':
         return None
 
+    # Honour an explicit day-off marker from steps 1 / 1.5. If the schedule
+    # says "Sunday off" and no assigned/guard shift covers this punch, we
+    # must NOT silently map this employee to whatever Regular shift is
+    # closest in time. Otherwise the same Sunday-late bug we fixed in the
+    # report comes back through auto-detection.
+    if had_day_off_marker:
+        return None
+
     # Check if employee already has OTHER punches today → means a shift is already
     # in progress (day shift) and this punch is overtime, not a new shift.
     existing_punches_today = db.query(DBAttendance).filter(
@@ -310,6 +341,9 @@ def resolve_daily_record(
             DBAttendance.timestamp >= datetime.combine(punch_date, time.min),
             DBAttendance.timestamp <= datetime.combine(punch_date, time.max),
             DBAttendance.voided_by_correction_id.is_(None),
+            # See companion comment in get_employee_day_summary — pending
+            # manual punches must not influence auto-detection either.
+            DBAttendance.approved.isnot(False),
         )
     ).count()
 
@@ -471,6 +505,12 @@ def get_employee_day_summary(
             DBAttendance.timestamp >= day_start,
             DBAttendance.timestamp <= day_end,
             DBAttendance.voided_by_correction_id.is_(None),
+            # Honour the manual-punch approval workflow: a pending HR
+            # correction (approved=False) must NOT shift total_minutes,
+            # overtime_minutes or late_minutes until a manager approves.
+            # reports.py:_base_filters and the ranking seed already filter
+            # this way — this query is now consistent with them.
+            DBAttendance.approved.isnot(False),
         )
     ).order_by(DBAttendance.timestamp.asc()).all()
 

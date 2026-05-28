@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 import logging
+import os
 from contextlib import asynccontextmanager
 from app.core import settings
 from app.api.users import router as users_router
@@ -29,8 +30,13 @@ from app.database.connection import get_db_session
 from app.database.schema import AppSettings
 
 # Configure logging
+# Default INFO in production — DEBUG logs raw SQL parameters (including JWT
+# secrets and PII) which is fine for development but unsafe in prod.
+# Override with: LOG_LEVEL=DEBUG (or WARNING / ERROR) in the env.
+_log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed to DEBUG for more detailed logging
+    level=_log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
