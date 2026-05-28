@@ -448,22 +448,29 @@ async def get_statistics(db: Session = Depends(get_db)):
         if 0 <= days_ago < 7:
             weekly_attendance[6 - days_ago] = record.count
     
-    # Get device status and recent devices
+    # Get device status and recent devices.
+    # "Online" here means the same thing as in the heartbeat widget on the
+    # dashboard: the background heartbeat thread reached the device on its
+    # last attempt. Reading device.last_sync instead (the time of the last
+    # *log import*) made the pie chart show 100% offline whenever nobody
+    # had synced in the last 10 min, even though the devices were happily
+    # responding to TCP pings — the user saw the two widgets contradict.
     all_devices = db.query(DBDevice).filter(DBDevice.is_active == True).all()
     device_status = {"online": 0, "offline": 0}
     recent_devices = []
     active_devices = 0
-    
+
+    # Same window as /devices/status: 2 × heartbeat interval, default 5 min.
+    heartbeat_sec = int(getattr(_settings, 'device_heartbeat_interval_sec', 300) or 300) if _settings else 300
+    online_window = timedelta(seconds=2 * heartbeat_sec)
+    now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+
     for device in all_devices:
-        # Check if device was recently synced (within last 10 minutes)
-        now = datetime.now(timezone.utc)
-        if device.last_sync:
-            # Ensure device.last_sync is timezone-aware
-            last_sync = device.last_sync if device.last_sync.tzinfo else device.last_sync.replace(tzinfo=timezone.utc)
-            is_online = (now - last_sync).seconds < 600
-        else:
-            is_online = False
-        
+        last_seen = device.last_seen_at
+        if last_seen and last_seen.tzinfo is not None:
+            last_seen = last_seen.astimezone(timezone.utc).replace(tzinfo=None)
+        is_online = bool(last_seen and (now_utc_naive - last_seen) <= online_window)
+
         if is_online:
             device_status["online"] += 1
             active_devices += 1
@@ -483,7 +490,8 @@ async def get_statistics(db: Session = Depends(get_db)):
             "port": device.port,
             "status": "online" if is_online else "offline",
             "user_count": user_count,
-            "last_sync": device.last_sync.isoformat() if device.last_sync else None
+            "last_sync":    device.last_sync.isoformat() if device.last_sync else None,
+            "last_seen_at": last_seen.isoformat() if last_seen else None,
         })
     
     # Format weekly attendance for chart
