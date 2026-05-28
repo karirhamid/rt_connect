@@ -113,14 +113,14 @@ MOROCCO_ISLAMIC_HOLIDAYS_2025 = [
 # Morocco Holidays for 2026 (for planning ahead)
 MOROCCO_FIXED_HOLIDAYS_2026 = [
     {"name": "Jour de l'An / New Year's Day / رأس السنة الميلادية", "date": date(2026, 1, 1), "type": "public_holiday", "is_paid": True},
-    {"name": "Manifeste de l'Indépendance / Independence Manifesto Day", "date": date(2026, 1, 11), "type": "national_day", "is_paid": True},
+    {"name": "Manifeste de l'Indépendance / Independence Manifesto Day / ذكرى تقديم وثيقة الاستقلال", "date": date(2026, 1, 11), "type": "national_day", "is_paid": True},
     {"name": "Fête du Travail / Labour Day / عيد العمال", "date": date(2026, 5, 1), "type": "public_holiday", "is_paid": True},
     {"name": "Fête du Trône / Throne Day / عيد العرش", "date": date(2026, 7, 30), "type": "national_day", "is_paid": True},
-    {"name": "Journée de Oued Ed-Dahab / Oued Ed-Dahab Day", "date": date(2026, 8, 14), "type": "national_day", "is_paid": True},
-    {"name": "Révolution du Roi et du Peuple / Revolution Day", "date": date(2026, 8, 20), "type": "national_day", "is_paid": True},
+    {"name": "Journée de Oued Ed-Dahab / Oued Ed-Dahab Day / ذكرى استرجاع إقليم وادي الذهب", "date": date(2026, 8, 14), "type": "national_day", "is_paid": True},
+    {"name": "Révolution du Roi et du Peuple / Revolution Day / ذكرى ثورة الملك والشعب", "date": date(2026, 8, 20), "type": "national_day", "is_paid": True},
     {"name": "Fête de la Jeunesse / Youth Day / عيد الشباب", "date": date(2026, 8, 21), "type": "national_day", "is_paid": True},
-    {"name": "Marche Verte / Green March Day", "date": date(2026, 11, 6), "type": "national_day", "is_paid": True},
-    {"name": "Fête de l'Indépendance / Independence Day", "date": date(2026, 11, 18), "type": "national_day", "is_paid": True}
+    {"name": "Marche Verte / Green March Day / ذكرى المسيرة الخضراء", "date": date(2026, 11, 6), "type": "national_day", "is_paid": True},
+    {"name": "Fête de l'Indépendance / Independence Day / عيد الاستقلال", "date": date(2026, 11, 18), "type": "national_day", "is_paid": True}
 ]
 
 MOROCCO_ISLAMIC_HOLIDAYS_2026 = [
@@ -128,7 +128,7 @@ MOROCCO_ISLAMIC_HOLIDAYS_2026 = [
     {"name": "Aid Al-Fitr / عيد الفطر (Jour 2)", "date": date(2026, 3, 21), "type": "aid", "is_paid": True},
     {"name": "Aid Al-Adha / عيد الأضحى (Jour 1)", "date": date(2026, 5, 27), "type": "aid", "is_paid": True},
     {"name": "Aid Al-Adha / عيد الأضحى (Jour 2)", "date": date(2026, 5, 28), "type": "aid", "is_paid": True},
-    {"name": "Nouvel An Hégirien / Hijri New Year", "date": date(2026, 6, 16), "type": "public_holiday", "is_paid": True},
+    {"name": "Nouvel An Hégirien / Hijri New Year / رأس السنة الهجرية", "date": date(2026, 6, 16), "type": "public_holiday", "is_paid": True},
     {"name": "Aid Al-Mawlid Nabawi / عيد المولد النبوي", "date": date(2026, 8, 25), "type": "public_holiday", "is_paid": True}
 ]
 

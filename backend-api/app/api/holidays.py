@@ -145,46 +145,46 @@ async def load_morocco_holidays(
     
     loaded = []
     skipped = []
-    
+    refreshed = []
+
     for holiday_data in holidays_data:
-        # Check if holiday already exists
         existing = db.query(Holiday).filter(
             Holiday.date == holiday_data["date"]
         ).first()
-        
+
         if existing:
-            skipped.append({
-                "date": holiday_data["date"],
-                "name": holiday_data["name"],
-                "reason": "Already exists"
-            })
+            # Idempotent name refresh: if the preset name has more info (e.g.,
+            # added Arabic translation), update the existing row's name.
+            if existing.name != holiday_data["name"]:
+                old = existing.name
+                existing.name = holiday_data["name"]
+                refreshed.append({"date": holiday_data["date"], "from": old, "to": holiday_data["name"]})
+            else:
+                skipped.append({"date": holiday_data["date"], "name": holiday_data["name"], "reason": "Already exists"})
             continue
-        
-        # Create holiday
+
         db_holiday = Holiday(
             name=holiday_data["name"],
             date=holiday_data["date"],
             holiday_type=holiday_data["type"],
             is_paid=holiday_data["is_paid"],
             country="MA",
-            description=holiday_data.get("note")
+            description=holiday_data.get("note"),
         )
         db.add(db_holiday)
-        loaded.append({
-            "date": holiday_data["date"],
-            "name": holiday_data["name"],
-            "type": holiday_data["type"]
-        })
-    
+        loaded.append({"date": holiday_data["date"], "name": holiday_data["name"], "type": holiday_data["type"]})
+
     db.commit()
-    
+
     return {
         "year": year,
         "total_available": len(holidays_data),
         "loaded": len(loaded),
         "skipped": len(skipped),
+        "refreshed": len(refreshed),
         "loaded_holidays": loaded,
-        "skipped_holidays": skipped
+        "skipped_holidays": skipped,
+        "refreshed_holidays": refreshed,
     }
 
 
@@ -192,49 +192,42 @@ async def load_morocco_holidays(
 async def load_all_morocco_holidays(db: Session = Depends(get_db)):
     """Load all pre-defined Morocco holidays (2025-2026)"""
     holidays_data = get_all_preloaded_holidays()
-    
+
     loaded = []
     skipped = []
-    
+    refreshed = []
+
     for holiday_data in holidays_data:
-        # Check if holiday already exists
         existing = db.query(Holiday).filter(
             Holiday.date == holiday_data["date"]
         ).first()
-        
         if existing:
-            skipped.append({
-                "date": holiday_data["date"],
-                "name": holiday_data["name"],
-                "reason": "Already exists"
-            })
+            if existing.name != holiday_data["name"]:
+                old = existing.name
+                existing.name = holiday_data["name"]
+                refreshed.append({"date": holiday_data["date"], "from": old, "to": holiday_data["name"]})
+            else:
+                skipped.append({"date": holiday_data["date"], "name": holiday_data["name"], "reason": "Already exists"})
             continue
-        
-        # Create holiday
         db_holiday = Holiday(
-            name=holiday_data["name"],
-            date=holiday_data["date"],
-            holiday_type=holiday_data["type"],
-            is_paid=holiday_data["is_paid"],
-            country="MA",
-            description=holiday_data.get("note")
+            name=holiday_data["name"], date=holiday_data["date"],
+            holiday_type=holiday_data["type"], is_paid=holiday_data["is_paid"],
+            country="MA", description=holiday_data.get("note"),
         )
         db.add(db_holiday)
-        loaded.append({
-            "date": holiday_data["date"],
-            "name": holiday_data["name"],
-            "type": holiday_data["type"]
-        })
-    
+        loaded.append({"date": holiday_data["date"], "name": holiday_data["name"], "type": holiday_data["type"]})
+
     db.commit()
-    
+
     return {
         "years": "2025-2026",
         "total_available": len(holidays_data),
         "loaded": len(loaded),
         "skipped": len(skipped),
+        "refreshed": len(refreshed),
         "loaded_holidays": loaded,
-        "skipped_holidays": skipped
+        "skipped_holidays": skipped,
+        "refreshed_holidays": refreshed,
     }
 
 
