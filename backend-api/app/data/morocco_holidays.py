@@ -67,32 +67,32 @@ MOROCCO_FIXED_HOLIDAYS_2025 = [
 # Note: Islamic holidays depend on moon sighting and may vary by ±1 day
 MOROCCO_ISLAMIC_HOLIDAYS_2025 = [
     {
-        "name": "Aid Al-Fitr / عيد الفطر (Jour 1)",
+        "name": "Aid Al-Fitr (2 jours) / عيد الفطر",
         "date": date(2025, 3, 30),
         "type": "aid",
         "is_paid": True,
-        "note": "End of Ramadan - Day 1"
+        "note": "End of Ramadan - 2-day holiday"
     },
     {
-        "name": "Aid Al-Fitr / عيد الفطر (Jour 2)",
+        "name": "Aid Al-Fitr (2 jours) / عيد الفطر",
         "date": date(2025, 3, 31),
         "type": "aid",
         "is_paid": True,
-        "note": "End of Ramadan - Day 2"
+        "note": "End of Ramadan - 2-day holiday"
     },
     {
-        "name": "Aid Al-Adha / عيد الأضحى (Jour 1)",
+        "name": "Aid Al-Adha (2 jours) / عيد الأضحى",
         "date": date(2025, 6, 6),
         "type": "aid",
         "is_paid": True,
-        "note": "Feast of Sacrifice - Day 1"
+        "note": "Feast of Sacrifice - 2-day holiday"
     },
     {
-        "name": "Aid Al-Adha / عيد الأضحى (Jour 2)",
+        "name": "Aid Al-Adha (2 jours) / عيد الأضحى",
         "date": date(2025, 6, 7),
         "type": "aid",
         "is_paid": True,
-        "note": "Feast of Sacrifice - Day 2"
+        "note": "Feast of Sacrifice - 2-day holiday"
     },
     {
         "name": "Nouvel An Hégirien / Hijri New Year / رأس السنة الهجرية",
@@ -124,10 +124,10 @@ MOROCCO_FIXED_HOLIDAYS_2026 = [
 ]
 
 MOROCCO_ISLAMIC_HOLIDAYS_2026 = [
-    {"name": "Aid Al-Fitr / عيد الفطر (Jour 1)", "date": date(2026, 3, 20), "type": "aid", "is_paid": True},
-    {"name": "Aid Al-Fitr / عيد الفطر (Jour 2)", "date": date(2026, 3, 21), "type": "aid", "is_paid": True},
-    {"name": "Aid Al-Adha / عيد الأضحى (Jour 1)", "date": date(2026, 5, 27), "type": "aid", "is_paid": True},
-    {"name": "Aid Al-Adha / عيد الأضحى (Jour 2)", "date": date(2026, 5, 28), "type": "aid", "is_paid": True},
+    {"name": "Aid Al-Fitr (2 jours) / عيد الفطر", "date": date(2026, 3, 20), "type": "aid", "is_paid": True},
+    {"name": "Aid Al-Fitr (2 jours) / عيد الفطر", "date": date(2026, 3, 21), "type": "aid", "is_paid": True},
+    {"name": "Aid Al-Adha (2 jours) / عيد الأضحى", "date": date(2026, 5, 27), "type": "aid", "is_paid": True},
+    {"name": "Aid Al-Adha (2 jours) / عيد الأضحى", "date": date(2026, 5, 28), "type": "aid", "is_paid": True},
     {"name": "Nouvel An Hégirien / Hijri New Year / رأس السنة الهجرية", "date": date(2026, 6, 16), "type": "public_holiday", "is_paid": True},
     {"name": "Aid Al-Mawlid Nabawi / عيد المولد النبوي", "date": date(2026, 8, 25), "type": "public_holiday", "is_paid": True}
 ]
