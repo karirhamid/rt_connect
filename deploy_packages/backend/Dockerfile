@@ -3,9 +3,11 @@
 # ============================================================================
 FROM python:3.11-slim
 
-# System dependencies needed for psycopg2 and the ZKTeco lib
+# System dependencies needed for psycopg2, the ZKTeco lib, and Arabic-capable
+# fonts so the PDF can render FR + AR holiday labels.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq-dev gcc curl tzdata postgresql-client \
+        fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

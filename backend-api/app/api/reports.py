@@ -17,6 +17,87 @@ from app.services.punch_classifier import classify_attendance_records, get_emplo
 
 router = APIRouter()
 
+
+# ── Arabic-capable font for PDF (bilingual holiday labels, AR reports) ────────
+def _register_arabic_font_once():
+    """Register an Arabic-capable TrueType font as 'AR' on first call. Returns
+    the registered family name, or None if no font found. Idempotent."""
+    if getattr(_register_arabic_font_once, "_done", False):
+        return getattr(_register_arabic_font_once, "_name", None)
+    _register_arabic_font_once._done = True
+    candidates = [
+        # Linux / Docker (fonts-dejavu-core, fonts-noto)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        # Windows dev
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/tahoma.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+        # macOS dev
+        "/Library/Fonts/Arial.ttf",
+    ]
+    import os
+    for p in candidates:
+        if not os.path.isfile(p):
+            continue
+        try:
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            pdfmetrics.registerFont(TTFont("AR", p))
+            _register_arabic_font_once._name = "AR"
+            return "AR"
+        except Exception:
+            continue
+    _register_arabic_font_once._name = None
+    return None
+
+
+def _has_arabic(s: str) -> bool:
+    return any(0x0600 <= ord(c) <= 0x06FF for c in (s or ""))
+
+
+def _shape_arabic(s: str) -> str:
+    """Reshape connected Arabic letters + apply RTL bidi for visual order in PDF."""
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        return get_display(arabic_reshaper.reshape(s))
+    except Exception:
+        return s
+
+
+def _bilingual_html(text: str) -> str:
+    """Take a holiday name like 'Aid Al-Adha / عيد الأضحى (Jour 2)' and return
+    HTML where the Arabic portion is wrapped in the AR font (if registered)
+    and properly shaped+bidi'd; Latin portion stays in the default font."""
+    if not text:
+        return text
+    has_ar = _has_arabic(text)
+    ar_font = _register_arabic_font_once() if has_ar else None
+    if not has_ar or not ar_font:
+        return text  # nothing to do or no font available
+    # Split into runs of Arabic vs non-Arabic and wrap the Arabic ones
+    out = []
+    buf = []
+    in_ar = None
+    def flush():
+        if not buf: return
+        s = "".join(buf)
+        if in_ar:
+            out.append(f'<font name="{ar_font}">{_shape_arabic(s)}</font>')
+        else:
+            out.append(s)
+    for ch in text:
+        is_ar = 0x0600 <= ord(ch) <= 0x06FF
+        if in_ar is None:
+            in_ar = is_ar
+        if is_ar != in_ar:
+            flush(); buf = []; in_ar = is_ar
+        buf.append(ch)
+    flush()
+    return "".join(out)
+
 # ---------------------------------------------------------------------------
 # PDF translation dictionaries
 # ---------------------------------------------------------------------------
@@ -1023,7 +1104,7 @@ def export_attendance_pdf(
             _bits = []
             for _h in _holidays_in_period:
                 _d = _h.date.isoformat() if hasattr(_h.date, 'isoformat') else str(_h.date)
-                _bits.append(f"<b>{_d}</b> — {_h.name}")
+                _bits.append(f"<b>{_d}</b> — {_bilingual_html(_h.name)}")
             _hol_html = f'<font size="11">★</font> &nbsp; <b>{_label}{"s" if len(_holidays_in_period) > 1 else ""} :</b>  ' + " &nbsp; · &nbsp; ".join(_bits)
             story.append(Spacer(1, 3 * mm))
             story.append(Paragraph(_hol_html, _hol_style))

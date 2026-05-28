@@ -27,3 +27,7 @@ openpyxl==3.1.2
 
 # Timezone database (needed by zoneinfo on Windows / slim images)
 tzdata==2024.1
+
+# Arabic shaping + bi-directional text (bilingual FR/AR labels in PDFs)
+arabic-reshaper==3.0.0
+python-bidi==0.4.2
