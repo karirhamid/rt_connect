@@ -129,6 +129,8 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS backup_last_run_at TIMESTAMP"))
             # Lateness reports module — opt-in, super admin only
             conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS lateness_module_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+            # Holiday banner toggle (PDF). On by default to preserve previous behaviour.
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS pdf_show_holidays BOOLEAN NOT NULL DEFAULT TRUE"))
             # Ensure the 'reports.hours' permission exists so admins can assign it
             # to a role (e.g. "RH Reporting logs") that may view computed-hours
             # columns (Total worked / Overtime / Late / Early). Plain reporting

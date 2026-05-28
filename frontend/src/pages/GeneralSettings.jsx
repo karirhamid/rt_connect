@@ -92,6 +92,7 @@ function GeneralSettings() {
   const [pdfStyle, setPdfStyle] = useState('style1');
   const [pdfShowOvertime, setPdfShowOvertime] = useState(true);
   const [pdfShowTotalWorked, setPdfShowTotalWorked] = useState(true);
+  const [pdfShowHolidays, setPdfShowHolidays] = useState(true);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [savingPdf, setSavingPdf] = useState(false);
 
@@ -382,6 +383,7 @@ function GeneralSettings() {
       setPdfStyle(settings.pdf_style || 'style1');
       setPdfShowOvertime(settings.pdf_show_overtime !== undefined ? !!settings.pdf_show_overtime : true);
       setPdfShowTotalWorked(settings.pdf_show_total_worked !== undefined ? !!settings.pdf_show_total_worked : true);
+      setPdfShowHolidays(settings.pdf_show_holidays !== undefined ? !!settings.pdf_show_holidays : true);
     } catch (err) {
       console.error('Failed to load PDF settings:', err);
       showNotification('error', t('failedToLoadData'));
@@ -394,7 +396,7 @@ function GeneralSettings() {
     setSavingPdf(true);
     try {
       const settings = await api.getGeneralSettings();
-      await api.updateGeneralSettings({ ...settings, pdf_style: pdfStyle, pdf_show_overtime: pdfShowOvertime, pdf_show_total_worked: pdfShowTotalWorked });
+      await api.updateGeneralSettings({ ...settings, pdf_style: pdfStyle, pdf_show_overtime: pdfShowOvertime, pdf_show_total_worked: pdfShowTotalWorked, pdf_show_holidays: pdfShowHolidays });
       showNotification('success', t('settingsSaved'));
     } catch (err) {
       console.error('Failed to save PDF settings:', err);
@@ -958,6 +960,27 @@ function GeneralSettings() {
                       >
                         <span
                           className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${pdfShowTotalWorked ? 'translate-x-6' : 'translate-x-1'}`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Holiday banner Toggle */}
+                <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <h3 className="text-md font-semibold text-gray-900 mb-1">{t('pdfShowHolidays') || 'Jours fériés sur le PDF'}</h3>
+                      <p className="text-sm text-gray-600">{t('pdfShowHolidaysDesc') || 'Affiche un bandeau bilingue (FR / AR) avec les jours fériés contenus dans la période. Décochez pour les masquer complètement (pas de bandeau, pas de requête).'}</p>
+                    </div>
+                    <div className="flex items-center gap-2 ml-4">
+                      <button
+                        onClick={() => setPdfShowHolidays(prev => !prev)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${pdfShowHolidays ? 'bg-primary-600' : 'bg-gray-300'}`}
+                        aria-pressed={pdfShowHolidays}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${pdfShowHolidays ? 'translate-x-6' : 'translate-x-1'}`}
                         />
                       </button>
                     </div>

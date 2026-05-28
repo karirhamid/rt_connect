@@ -1156,12 +1156,15 @@ def export_attendance_pdf(
     story.append(Paragraph(summary_text, subtitle_style))
 
     # ── Holiday notice (if the period covers any public holiday) ──────────
+    # Skipped entirely — no DB query, no banner — when the super admin
+    # disabled pdf_show_holidays in Settings → Général. Default is ON.
+    _show_holidays = bool(getattr(_settings, 'pdf_show_holidays', True))
     try:
         from app.database.shift_schema import Holiday as _HOL2
         _hsd = start_dt.date() if start_dt else None
         _hed = end_dt.date() if end_dt else None
         _holidays_in_period = []
-        if _hsd and _hed:
+        if _show_holidays and _hsd and _hed:
             with get_db_session() as _hdb:
                 _holidays_in_period = (_hdb.query(_HOL2)
                     .filter(_HOL2.date >= _hsd, _HOL2.date <= _hed)
@@ -1805,9 +1808,11 @@ def _attendance_pdf_bytes(
         end_date=end_date,
         employee_name=None,
         employee_id=None,
+        employee_ids=None,
         device_id=device_id,
         lang=lang,
         group_by=group_by,
+        with_lateness=False,
         current=None,
     )
     return response.body

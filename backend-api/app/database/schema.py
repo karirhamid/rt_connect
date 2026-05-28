@@ -228,6 +228,8 @@ class AppSettings(Base):
     pdf_style = Column(String(20), default='style1', nullable=False)  # style1 | style2
     pdf_show_overtime = Column(Boolean, default=True, nullable=False)  # Show overtime column in PDF
     pdf_show_total_worked = Column(Boolean, default=True, nullable=False)  # Show total worked column in PDF
+    pdf_show_holidays = Column(Boolean, default=True, nullable=False,
+                               server_default='true')  # Show the bilingual holiday banner on PDFs
     punch_merge_window_min = Column(Integer, default=5, nullable=False)    # Merge punches within N min (0 = disabled)
 
     # Employee self-service portal — global on/off (super admin only).
