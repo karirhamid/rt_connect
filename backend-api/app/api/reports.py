@@ -1884,7 +1884,7 @@ def _compute_ranking(start_dt: datetime, end_dt: datetime,
     return rows, employee_mode
 
 
-@router.get("/reports/lateness/ranking")
+@router.get("/lateness/ranking")
 def lateness_ranking(
     start_date: str = Query(..., description="Start date YYYY-MM-DD"),
     end_date:   str = Query(..., description="End date YYYY-MM-DD"),
@@ -1914,7 +1914,7 @@ def lateness_ranking(
     }
 
 
-@router.get("/reports/lateness/ranking/pdf")
+@router.get("/lateness/ranking/pdf")
 def lateness_ranking_pdf(
     start_date: str = Query(..., description="Start date YYYY-MM-DD"),
     end_date:   str = Query(..., description="End date YYYY-MM-DD"),
