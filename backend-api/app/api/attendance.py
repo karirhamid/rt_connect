@@ -55,7 +55,7 @@ async def expected_working(
     Note: night-guard / holiday-duty handling is NOT applied here yet — see
     docs/NIGHT_SHIFT_GUARD.md for the planned feature.
     """
-    from app.database.shift_schema import EmployeeSchedule, DepartmentSchedule
+    from app.database.shift_schema import EmployeeSchedule, DepartmentSchedule, Holiday
     from app.database.schema import AppSettings as _AS
 
     if target_date:
@@ -66,6 +66,20 @@ async def expected_working(
     else:
         day = date.today()
     weekday = day.weekday()  # 0=Mon .. 6=Sun — matches schedule day_of_week
+
+    # Public holiday → nobody is expected to work (la garde / on-duty staff is
+    # the planned future feature; until then a holiday = 0 expected).
+    holiday = db.query(Holiday).filter(Holiday.date == day).first()
+    if holiday:
+        # Still report day_off count from schedules for transparency
+        return {
+            "date": day.isoformat(),
+            "weekday": weekday,
+            "expected_working": 0,
+            "day_off": 0,
+            "holiday": True,
+            "holiday_name": holiday.name,
+        }
 
     settings = db.query(DBAppSettings).first()
     shared = (getattr(settings, 'employee_mode', None) or 'shared') == 'shared'
@@ -105,6 +119,7 @@ async def expected_working(
         "weekday": weekday,
         "expected_working": len(working_ids),
         "day_off": len(off_ids),
+        "holiday": False,
     }
 
 

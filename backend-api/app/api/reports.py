@@ -1098,19 +1098,27 @@ def export_attendance_pdf(
             else:
                 _absent_emps = [e for e in _all_emps if e.id not in employee_set]
 
-            # Exclude employees who are OFF (per their weekly schedule) for the
-            # whole report period — e.g. Sunday day-off staff must not show as
-            # "absent". An employee counts as absent only if they were expected
-            # to work on at least one day in the period and didn't punch.
+            # Exclude employees who are OFF (per their weekly schedule) OR for
+            # whom the whole period is public holidays. An employee counts as
+            # absent only if they were expected to work on at least one
+            # NON-HOLIDAY day in the period and didn't punch.
             from datetime import timedelta as _td
-            from app.database.shift_schema import EmployeeSchedule as _ES, DepartmentSchedule as _DS
+            from app.database.shift_schema import (
+                EmployeeSchedule as _ES, DepartmentSchedule as _DS, Holiday as _HOL,
+            )
             _sd = start_dt.date() if start_dt else None
             _ed = end_dt.date() if end_dt else None
-            _covered_wd = set()
+            # Working dates = period dates that are not public holidays
+            _holidays = set()
+            if _sd and _ed:
+                _holidays = {h.date for h in _absdb.query(_HOL)
+                              .filter(_HOL.date >= _sd, _HOL.date <= _ed).all()}
+            _working_dates = []
             if _sd and _ed and _ed >= _sd and (_ed - _sd).days <= 366:
                 _d = _sd
                 while _d <= _ed:
-                    _covered_wd.add(_d.weekday())  # 0=Mon..6=Sun
+                    if _d not in _holidays:
+                        _working_dates.append(_d)
                     _d += _td(days=1)
             _emp_off = {(s.employee_id, s.day_of_week): s.is_day_off for s in _absdb.query(_ES).all()}
             _dept_off = {(s.department_id, s.day_of_week): s.is_day_off for s in _absdb.query(_DS).all()}
@@ -1126,7 +1134,7 @@ def export_attendance_pdf(
             _expected = {}
             for e in _absent_emps:
                 key = e.user_id if shared else e.id
-                works = any(_works_on(e, wd) for wd in _covered_wd) if _covered_wd else True
+                works = any(_works_on(e, d.weekday()) for d in _working_dates) if _working_dates else False
                 _expected[key] = _expected.get(key, False) or works
 
             # DEDUPE — in shared mode the same person can be registered on
