@@ -70,33 +70,34 @@ def _shape_arabic(s: str) -> str:
 def _bilingual_html(text: str) -> str:
     """Take a holiday name like 'Aid Al-Adha / عيد الأضحى (Jour 2)' and return
     HTML where the Arabic portion is wrapped in the AR font (if registered)
-    and properly shaped+bidi'd; Latin portion stays in the default font."""
+    and properly shaped + RTL-ordered; Latin portion stays in the default font.
+
+    The previous version split at every non-Arabic-block code point, which
+    broke phrases like 'عيد الأضحى' on the inner space — each word then got
+    shaped+bidi'd in isolation and ReportLab laid them out left-to-right,
+    so the phrase appeared in the wrong visual order. We now match each
+    *maximal* Arabic phrase (Arabic letters with internal ASCII spaces) as
+    one run, so reshape+get_display sees the whole phrase and produces
+    correct RTL-ordered output.
+    """
     if not text:
         return text
-    has_ar = _has_arabic(text)
-    ar_font = _register_arabic_font_once() if has_ar else None
-    if not has_ar or not ar_font:
-        return text  # nothing to do or no font available
-    # Split into runs of Arabic vs non-Arabic and wrap the Arabic ones
-    out = []
-    buf = []
-    in_ar = None
-    def flush():
-        if not buf: return
-        s = "".join(buf)
-        if in_ar:
-            out.append(f'<font name="{ar_font}">{_shape_arabic(s)}</font>')
-        else:
-            out.append(s)
-    for ch in text:
-        is_ar = 0x0600 <= ord(ch) <= 0x06FF
-        if in_ar is None:
-            in_ar = is_ar
-        if is_ar != in_ar:
-            flush(); buf = []; in_ar = is_ar
-        buf.append(ch)
-    flush()
-    return "".join(out)
+    if not _has_arabic(text):
+        return text
+    ar_font = _register_arabic_font_once()
+    if not ar_font:
+        return text  # font missing — leave as plain text
+
+    import re
+    # An Arabic phrase = one or more Arabic letters, optionally with ASCII
+    # spaces between them (but must start AND end on an Arabic letter so
+    # surrounding Latin spaces stay on the Latin side).
+    _PHRASE = re.compile(r'[؀-ۿ](?:[؀-ۿ  ]*[؀-ۿ])?')
+
+    def _repl(m):
+        return f'<font name="{ar_font}">{_shape_arabic(m.group(0))}</font>'
+
+    return _PHRASE.sub(_repl, text)
 
 # ---------------------------------------------------------------------------
 # PDF translation dictionaries
