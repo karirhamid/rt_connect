@@ -2197,10 +2197,14 @@ def lateness_ranking_pdf(
             fontSize=8, leading=10, alignment=TA_CENTER,
             fontName="Helvetica-Bold", textColor=th_color,
         )
+        # Slim 6-column layout: rank, name, dept, jours en retard, jours
+        # travaillés, total retard. 'Moyenne' and 'Plus gros' were removed
+        # at the user's request — they're still available via the JSON
+        # endpoint /lateness/ranking for anyone who wants them.
         header = [Paragraph(f"<b>{lbl}</b>", th_style)
                   for lbl in [L["rank"], L["employee"], L["department"],
                               L["late_days"], L["worked_days"],
-                              L["total_late"], L["avg_late"], L["max_late"]]]
+                              L["total_late"]]]
         data: list = [header]
         for i, r in enumerate(rows, start=1):
             data.append([
@@ -2210,13 +2214,11 @@ def lateness_ranking_pdf(
                 str(r["late_days_count"]),
                 str(r["worked_days_count"]),
                 _fmt_min(r["total_late_minutes"]),
-                _fmt_min(r["avg_late_minutes"]),
-                _fmt_min(r["max_late_minutes"]),
             ])
-        # Widened the four numeric columns (was 22 each) so a wrapped
-        # two-line header fits cleanly. Total of all widths is still under
-        # the printable area; the auto-scale below stretches to fill.
-        col_widths = [10*mm, 44*mm, 30*mm, 24*mm, 24*mm, 24*mm, 26*mm, 24*mm]
+        # Six columns split to use the full printable width; auto-scale
+        # below stretches/shrinks to fit. Wider name/dept columns now
+        # that we have more horizontal room.
+        col_widths = [12*mm, 60*mm, 40*mm, 28*mm, 28*mm, 32*mm]
         # Scale to printable width to fill the page same as the main PDF
         _printable_w = width - 2 * 18 * mm
         _natural_w = sum(col_widths)
