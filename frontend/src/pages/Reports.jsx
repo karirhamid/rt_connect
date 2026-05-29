@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Filter, Download, FileText, Loader, Users, Clock, CalendarDays, Search, BarChart3, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
+import PunchReviewPanel from '../components/PunchReviewPanel';
 
 const PUNCH_CATEGORY_STYLES = {
   entry:         { bg: 'bg-green-100', text: 'text-green-800', key: 'punchEntry' },
@@ -1055,6 +1056,9 @@ export default function Reports() {
           <p className="text-gray-500 text-sm">{t('selectFiltersAndGenerate') || 'Select filters and click Generate Report'}</p>
         </div>
       )}
+
+      {/* Punch review / entrée-sortie validation — self-contained, own filters */}
+      <PunchReviewPanel />
     </div>
   );
 }
