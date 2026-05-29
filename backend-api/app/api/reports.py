@@ -292,14 +292,26 @@ def _resolve_entry_exit(first_ts, last_ts, swipes: int, summary_data: dict):
     """Return (entry_str|None, exit_str|None), never the same value in both columns.
 
     Priority:
-      1. Punch classification from summary_data (when timing mode is active)
+      1. Punch classification from summary_data — but ONLY when it produced a
+         COMPLETE entry+exit pair (proper schedule + break detection).
       2. Time-of-day heuristic for single-punch days: before noon = entry, else = exit
       3. First/last timestamps for multi-punch days
+
+    Why (1) requires BOTH sides: the classifier measures each punch's distance
+    to work_start / work_end. When every punch lands in the afternoon (e.g. an
+    employee with three punches at 13:02 / 13:41 / 15:57 against a 09:00–16:00
+    schedule), they ALL get tagged 'exit' and no 'entry' is produced. The old
+    code returned that partial pair → the report showed Entrée = '-' while the
+    Today page (which uses first/last) showed 13:02. The two surfaces
+    disagreed. Trusting the classifier only when it found both sides, and
+    otherwise falling through to first/last, makes the report match the Today
+    page and gives the expected 'first punch = entrée, last punch = sortie'
+    rule for multi-punch days.
     """
     if summary_data:
         s_entry = summary_data.get("entry")
         s_exit = summary_data.get("exit")
-        if s_entry or s_exit:
+        if s_entry and s_exit:
             return s_entry, s_exit
 
     if swipes == 1 and first_ts:
