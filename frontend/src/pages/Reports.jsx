@@ -217,7 +217,7 @@ export default function Reports() {
         // in the query string thanks to buildParams.
         const params = buildParams();
         params.append('lang', i18n.language || 'en');
-        if (groupBy) params.append('group_by', groupBy);
+        if (effectiveGroupBy) params.append('group_by', effectiveGroupBy);
         const resp = await api.authFetch(`/api/reports/attendance/export.pdf?${params}`, { method: 'GET' });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
@@ -261,8 +261,19 @@ export default function Reports() {
     return group;
   };
 
-  const groupedSummary = groupBy ? groupData(summary, groupBy) : null;
-  const groupedRecords = groupBy ? groupData(records, groupBy) : null;
+  // Effective group_by — honours an explicit user choice first, otherwise
+  // defaults to 'employee' when the 'Avec retards' report covers multiple
+  // selected employees. That auto-default surfaces each person's own
+  // 'Total retard' line without forcing the user to remember the dropdown.
+  // The auto-default only fires when the user has NOT picked a grouping;
+  // explicit 'By date' or 'By department' choices are respected.
+  const effectiveGroupBy =
+    groupBy
+    || (reportType === 'with_lateness' && selectedEmployees.length > 1 ? 'employee' : '');
+  const autoGroupApplied = !groupBy && effectiveGroupBy === 'employee';
+
+  const groupedSummary = effectiveGroupBy ? groupData(summary, effectiveGroupBy) : null;
+  const groupedRecords = effectiveGroupBy ? groupData(records, effectiveGroupBy) : null;
 
   const fmtMin = (m) => {
     if (m == null) return '-';
@@ -520,13 +531,25 @@ export default function Reports() {
 
             {/* Group by */}
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">{t('groupBy') || 'Group by'}</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                {t('groupBy') || 'Group by'}
+                {autoGroupApplied && (
+                  <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800"
+                        title={t('groupByAutoHint') || "Grouping by employee enabled automatically because several employees are selected with 'Avec retards'. Pick a value to override."}>
+                    {t('autoLabel') || 'auto'}
+                  </span>
+                )}
+              </label>
               <select
                 className="border rounded-lg px-3 py-2 text-sm bg-white text-gray-900"
                 value={groupBy}
                 onChange={e => setGroupBy(e.target.value)}
               >
-                <option value="">{t('groupByNone') || 'No grouping'}</option>
+                <option value="">
+                  {autoGroupApplied
+                    ? (t('groupByNoneAutoEmployee') || 'No grouping (auto → Employee)')
+                    : (t('groupByNone') || 'No grouping')}
+                </option>
                 <option value="employee">{t('groupByEmployee') || 'By Employee'}</option>
                 <option value="date">{t('groupByDate') || 'By Date'}</option>
                 <option value="department">{t('groupByDepartment') || 'By Department'}</option>
@@ -774,7 +797,7 @@ export default function Reports() {
                         <tr className="bg-primary-50/60">
                           <td colSpan={colCount} className="px-4 py-2.5">
                             <div className="flex items-center gap-2">
-                              <span className="font-semibold text-primary-800 text-sm">{groupLabel(groupBy, group, items)}</span>
+                              <span className="font-semibold text-primary-800 text-sm">{groupLabel(effectiveGroupBy, group, items)}</span>
                               <span className="text-xs text-primary-500 bg-primary-100 px-2 py-0.5 rounded-full">{items.length} {items.length === 1 ? t('record') || 'record' : t('records') || 'records'}</span>
                               <span className="text-xs text-gray-500 ml-auto">{t('totalSwipes') || 'Total swipes'}: {items.reduce((s, r) => s + r.swipes, 0)}</span>
                             </div>
@@ -839,7 +862,7 @@ export default function Reports() {
                           return (
                             <tr className="bg-amber-50/40 border-t">
                               <td className="px-4 py-2 text-xs text-amber-900 font-medium" colSpan={colCount - 1}>
-                                {t('totalLateForGroup') || 'Total retard'} — {groupLabel(groupBy, group, items)}
+                                {t('totalLateForGroup') || 'Total retard'} — {groupLabel(effectiveGroupBy, group, items)}
                               </td>
                               <td className="px-4 py-2 text-right text-amber-800 font-bold text-sm">{fmtLateMin(totalLate)}</td>
                             </tr>
@@ -956,7 +979,7 @@ export default function Reports() {
                         <tr className="bg-primary-50/60">
                           <td colSpan={7} className="px-4 py-2.5">
                             <div className="flex items-center gap-2">
-                              <span className="font-semibold text-primary-800 text-sm">{groupLabel(groupBy, group, items)}</span>
+                              <span className="font-semibold text-primary-800 text-sm">{groupLabel(effectiveGroupBy, group, items)}</span>
                               <span className="text-xs text-gray-500">({items.length})</span>
                             </div>
                           </td>
