@@ -252,12 +252,15 @@ class AppSettings(Base):
     # (EmployeeSchedule → DepartmentSchedule fallback).
     lateness_module_enabled = Column(Boolean, default=False, nullable=False, server_default='false')
 
-    # Leave / Congés module settings
-    # leave_weekend_counts: when computing a congé span, do Sat/Sun count as
-    #   leave days? Default False (weekends are free, common in Morocco admin).
-    # leave_default_annual_days: the default annual entitlement seeded for a
-    #   new LeaveBalance row when HR hasn't set one explicitly.
-    leave_weekend_counts      = Column(Boolean, default=False, nullable=False, server_default='false')
+    # Leave / Congés module settings.
+    # A congé span charges only WORKING days. Mon–Fri always count. Saturday
+    # and Sunday count only if the company works them (some Moroccan firms
+    # are Mon–Sat, others Mon–Fri). Public holidays inside the span never
+    # count (handled in code against the Holiday table). Example: a congé
+    # Thu→Mon with Saturday working + Sunday off charges Thu,Fri,Sat,Mon = 4;
+    # with Saturday off too it charges Thu,Fri,Mon = 3.
+    leave_count_saturday      = Column(Boolean, default=True,  nullable=False, server_default='true')
+    leave_count_sunday        = Column(Boolean, default=False, nullable=False, server_default='false')
     leave_default_annual_days = Column(Float, default=18.0, nullable=False, server_default='18')
 
     # Branding (shown on login + sidebar)

@@ -545,16 +545,29 @@ def get_employee_day_summary(
     except Exception:
         _override = None  # never let the override path break the summary
 
+    resolved_override = False
+    entry_iso = None
+    exit_iso = None
     if _override is not None:
-        # Map the chosen attendance IDs to HH:MM from the day's punches.
+        # Map the chosen attendance IDs to HH:MM (and full ISO) from the
+        # day's punches. A reviewer choice of NONE for a role is honoured
+        # verbatim — e.g. entry=None must show '-' in the report, not fall
+        # back to the first punch. resolved_override tells callers to trust
+        # these values as authoritative.
+        resolved_override = True
         _by_id = {p.id: p for p in punches}
         def _ts(aid):
             p = _by_id.get(aid) if aid else None
             return p.timestamp.strftime("%H:%M") if p else None
+        def _iso(aid):
+            p = _by_id.get(aid) if aid else None
+            return p.timestamp.isoformat() if p else None
         entry_time     = _ts(_override.entry_attendance_id)
         break_out_time = _ts(_override.break_out_attendance_id)
         break_in_time  = _ts(_override.break_in_attendance_id)
         exit_time      = _ts(_override.exit_attendance_id)
+        entry_iso      = _iso(_override.entry_attendance_id)
+        exit_iso       = _iso(_override.exit_attendance_id)
     else:
         for c in classified:
             if c["category"] == "entry" and entry_time is None:
@@ -628,6 +641,11 @@ def get_employee_day_summary(
         "overtime_minutes": round(overtime_minutes),
         "late_minutes": round(late_minutes),
         "early_departure_minutes": round(early_departure_minutes),
+        # When True the entry/exit above came from a reviewer's manual
+        # designation and must be treated as authoritative (even a None side).
+        "resolved_override": resolved_override,
+        "entry_iso": entry_iso,
+        "exit_iso": exit_iso,
         "all_punches": classified,
         "schedule": {
             "work_start": record.work_start.strftime("%H:%M") if record and record.work_start else None,

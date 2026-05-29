@@ -61,18 +61,29 @@ def _uid(user) -> Optional[int]:
 # ── Working-days computation (honours weekend setting + half-days) ─────────
 def compute_working_days(start: date, end: date,
                          start_fraction: str, end_fraction: str,
-                         weekend_counts: bool) -> float:
+                         count_saturday: bool, count_sunday: bool,
+                         holidays: Optional[set] = None) -> float:
     """Chargeable congé days for [start, end].
 
-    Weekends (Sat/Sun) are skipped unless weekend_counts. Half-day fractions
-    knock 0.5 off the first / last counted day. A single-day request uses
-    start_fraction only.
+    Mon–Fri always count. Saturday counts only if count_saturday; Sunday only
+    if count_sunday. Any date in `holidays` (a set of date objects — public
+    holidays) never counts, even if it's a working weekday. Half-day
+    fractions knock 0.5 off the first / last counted day. A single-day
+    request uses start_fraction only.
     """
     if end < start:
         return 0.0
+    holidays = holidays or set()
 
     def counts(d: date) -> bool:
-        return weekend_counts or d.weekday() < 5  # Mon..Fri = 0..4
+        if d in holidays:
+            return False                 # public holiday — never charged
+        wd = d.weekday()                 # Mon=0 .. Sun=6
+        if wd < 5:
+            return True                  # Mon–Fri
+        if wd == 5:
+            return count_saturday
+        return count_sunday              # wd == 6 (Sunday)
 
     # Single day
     if start == end:
@@ -276,10 +287,16 @@ def create_request(payload: RequestIn, current=Depends(get_current_user)):
         if not emp:
             raise HTTPException(404, "Employee not found")
         settings = db.query(AppSettings).first()
-        weekend_counts = bool(getattr(settings, "leave_weekend_counts", False))
-        wd = compute_working_days(sd, ed, payload.start_fraction, payload.end_fraction, weekend_counts)
+        count_sat = bool(getattr(settings, "leave_count_saturday", True))
+        count_sun = bool(getattr(settings, "leave_count_sunday", False))
+        # Public holidays within the span are never charged.
+        from app.database.shift_schema import Holiday as _HOL
+        hol = {h.date for h in db.query(_HOL)
+               .filter(_HOL.date >= sd, _HOL.date <= ed).all()}
+        wd = compute_working_days(sd, ed, payload.start_fraction, payload.end_fraction,
+                                  count_sat, count_sun, hol)
         if wd <= 0:
-            raise HTTPException(400, "Selected range has 0 chargeable days (weekend-only?)")
+            raise HTTPException(400, "Selected range has 0 chargeable days (weekend / holidays only?)")
         req = LeaveRequest(
             employee_user_id=payload.employee_user_id,
             type=payload.type,

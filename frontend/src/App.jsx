@@ -135,6 +135,7 @@ function AppContent() {
         { type: 'divider', label: t('groupTools') || 'Outils' },
         { name: t('maintenance') || 'Maintenance', href: '/settings/maintenance', icon: Wrench },
         { name: t('auditLog') || "Journal d'audit", href: '/settings/audit-log', icon: FileText },
+        { name: t('anomalyInbox') || 'Anomalies', href: '/anomalies', icon: AlertTriangle, badgeKey: 'anomalies' },
       ],
     },
   ];

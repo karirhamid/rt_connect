@@ -308,6 +308,12 @@ def _resolve_entry_exit(first_ts, last_ts, swipes: int, summary_data: dict):
     page and gives the expected 'first punch = entrée, last punch = sortie'
     rule for multi-punch days.
     """
+    # A manual override (Validation des pointages) is authoritative — return
+    # its entry/exit verbatim, INCLUDING a deliberate None side (reviewer said
+    # "no entrée" → show '-', don't fall back to the first punch).
+    if summary_data and summary_data.get("resolved_override"):
+        return summary_data.get("entry"), summary_data.get("exit")
+
     if summary_data:
         s_entry = summary_data.get("entry")
         s_exit = summary_data.get("exit")
@@ -551,6 +557,12 @@ def attendance_summary(
                     # 'simple' — it's the whole point of that report type.
                     item["late_minutes"] = summary_data.get("late_minutes", 0)
                     item["early_departure_minutes"] = summary_data.get("early_departure_minutes", 0)
+                # A manual override is authoritative for the displayed
+                # Entrée/Sortie too — including a deliberate None side. This
+                # keeps the Today page consistent with the report/PDF.
+                if summary_data.get("resolved_override"):
+                    item["first_check_in"] = summary_data.get("entry_iso")
+                    item["last_check_out"] = summary_data.get("exit_iso")
             out.append(item)
         return {"count": len(out), "summary": out, "attendance_mode": attendance_mode, "employee_mode": employee_mode, "with_lateness": with_lateness}
 

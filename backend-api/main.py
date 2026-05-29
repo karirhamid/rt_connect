@@ -208,8 +208,10 @@ async def lifespan(app: FastAPI):
                     ('leave.manage',  'Approve congés, manage balances (HR-congé role)')
                 ON CONFLICT (code) DO NOTHING
             """))
-            # Leave settings: do Sat/Sun count as congé days when computing span?
-            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_weekend_counts BOOLEAN NOT NULL DEFAULT FALSE"))
+            # Leave settings: which weekend days count as congé days + default
+            # annual entitlement. Mon–Fri always count; public holidays never do.
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_count_saturday BOOLEAN NOT NULL DEFAULT TRUE"))
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_count_sunday BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_default_annual_days DOUBLE PRECISION NOT NULL DEFAULT 18"))
             # Ensure the 'reports.hours' permission exists so admins can assign it
             # to a role (e.g. "RH Reporting logs") that may view computed-hours
