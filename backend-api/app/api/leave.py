@@ -16,10 +16,11 @@ Endpoints
 Only an APPROVED request affects attendance (Phase 3 wires the report
 exclusion). Sick leave never decrements the annual balance.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, date, timedelta, timezone
+import io
 
 from app.database.connection import get_db_session
 from app.database.schema import (
@@ -395,3 +396,233 @@ def cancel_request(req_id: int, current=Depends(get_current_user)):
         r.status = "cancelled"
         db.commit()
         return {"ok": True, "status": "cancelled"}
+
+
+# ── Demande de congé PDF (A4, printable + signable) ────────────────────────
+@router.get("/leave/requests/{req_id}/pdf")
+def request_pdf(req_id: int, lang: str = Query("fr"),
+                current=Depends(get_current_user)):
+    """Render a single congé request as an A4 PDF for printing / signing."""
+    if not _can_view(current):
+        raise HTTPException(403, "Not authorized")
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
+    )
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    try:
+        from app.api.reports import _register_arabic_font_once, _shape_arabic, _has_arabic
+    except Exception:
+        _register_arabic_font_once = lambda: None
+        _shape_arabic = lambda s: s
+        _has_arabic = lambda s: False
+
+    with get_db_session() as db:
+        r = db.query(LeaveRequest).filter(LeaveRequest.id == req_id).first()
+        if not r:
+            raise HTTPException(404, "Request not found")
+        emp = db.query(Employee).filter(Employee.user_id == r.employee_user_id).first()
+        settings = db.query(AppSettings).first()
+        pdf_style   = getattr(settings, "pdf_style", None) or "style1"
+        client_name = (getattr(settings, "client_name", None) or "").strip()
+        default_annual = float(getattr(settings, "leave_default_annual_days", 18) or 18)
+        from app.database.schema import Company as _Co
+        _co = db.query(_Co.name).order_by(_Co.id).first()
+        company_name = _co[0] if _co else ""
+        yr = r.start_date.year
+        bal = (db.query(LeaveBalance)
+               .filter(LeaveBalance.employee_user_id == r.employee_user_id,
+                       LeaveBalance.year == yr).first())
+        balance = _balance_dict(db, bal, r.employee_user_id, yr, default_annual)
+        emp_name = emp.name if emp else r.employee_user_id
+        emp_dept = (emp.department.name if emp and emp.department else "—")
+        req = {
+            "id": r.id, "matricule": r.employee_user_id, "type": r.type, "status": r.status,
+            "start_date": r.start_date.date(), "end_date": r.end_date.date(),
+            "start_fraction": r.start_fraction, "end_fraction": r.end_fraction,
+            "working_days": float(r.working_days or 0), "reason": r.reason or "—",
+            "employee_signed_at": r.employee_signed_at, "approved_at": r.approved_at,
+        }
+
+    LBL = {
+        "fr": dict(
+            title="Demande de Congé", matricule="Matricule", name="Nom & Prénom",
+            dept="Département", type="Type de congé", period="Période",
+            days="Nombre de jours", reason="Motif",
+            balance="Solde de congés annuels", entitled="Droit", used="Pris",
+            remaining="Restant", sig_emp="Signature de l'employé(e)",
+            sig_hr="Signature / Approbation RH",
+            generated="Généré le", status="Statut", page="Page",
+            t_annual="Congé annuel", t_sick="Congé maladie", t_other="Autre",
+            f_am="(matin)", f_pm="(après-midi)",
+            s_pending="En attente", s_approved="Approuvé", s_rejected="Refusé",
+            s_cancelled="Annulé", signed="Signé le",
+            confidential="Document confidentiel — usage interne uniquement",
+        ),
+        "en": dict(
+            title="Leave Request", matricule="ID", name="Full name",
+            dept="Department", type="Leave type", period="Period",
+            days="Number of days", reason="Reason",
+            balance="Annual leave balance", entitled="Entitled", used="Used",
+            remaining="Remaining", sig_emp="Employee signature",
+            sig_hr="HR signature / approval",
+            generated="Generated", status="Status", page="Page",
+            t_annual="Annual leave", t_sick="Sick leave", t_other="Other",
+            f_am="(morning)", f_pm="(afternoon)",
+            s_pending="Pending", s_approved="Approved", s_rejected="Rejected",
+            s_cancelled="Cancelled", signed="Signed on",
+            confidential="Confidential document — internal use only",
+        ),
+        "ar": dict(
+            title="طلب عطلة", matricule="الرقم", name="الاسم الكامل",
+            dept="القسم", type="نوع العطلة", period="الفترة",
+            days="عدد الأيام", reason="السبب",
+            balance="رصيد العطل السنوية", entitled="المستحق", used="المستهلك",
+            remaining="المتبقي", sig_emp="توقيع الموظف",
+            sig_hr="توقيع / موافقة الموارد البشرية",
+            generated="تم الإنشاء في", status="الحالة", page="صفحة",
+            t_annual="عطلة سنوية", t_sick="عطلة مرضية", t_other="أخرى",
+            f_am="(صباحاً)", f_pm="(مساءً)",
+            s_pending="قيد الانتظار", s_approved="موافَق عليه", s_rejected="مرفوض",
+            s_cancelled="ملغى", signed="وُقّع في",
+            confidential="وثيقة سرية — للاستخدام الداخلي فقط",
+        ),
+    }
+    L = LBL.get(lang, LBL["fr"])
+
+    def _tx(s):
+        s = str(s)
+        if lang == "ar" and _has_arabic(s) and _register_arabic_font_once():
+            return _shape_arabic(s)
+        return s
+
+    def _frac(f):
+        return {"am": L["f_am"], "pm": L["f_pm"]}.get(f, "")
+
+    type_label = {"annual": L["t_annual"], "sick": L["t_sick"], "other": L["t_other"]}.get(req["type"], req["type"])
+    status_label = {"pending": L["s_pending"], "approved": L["s_approved"],
+                    "rejected": L["s_rejected"], "cancelled": L["s_cancelled"]}.get(req["status"], req["status"])
+
+    if pdf_style == "style2":
+        BRAND = colors.HexColor("#059669"); ALT = colors.HexColor("#ecfdf5")
+    else:
+        BRAND = colors.HexColor("#1e40af"); ALT = colors.HexColor("#f1f5f9")
+    ar_font = _register_arabic_font_once() if lang == "ar" else None
+    base_font = ar_font or "Helvetica"
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm,
+                            topMargin=18 * mm, bottomMargin=20 * mm,
+                            title=f"{L['title']} #{req['id']}", author=(company_name or "RTPointage"))
+    width, height = A4
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("DTitle", parent=styles["Title"], fontSize=18,
+                                 textColor=BRAND, spaceAfter=2, fontName=base_font)
+    sub_style = ParagraphStyle("DSub", parent=styles["Normal"], fontSize=10,
+                               textColor=colors.HexColor("#475569"), fontName=base_font)
+    label_style = ParagraphStyle("DLbl", parent=styles["Normal"], fontSize=9,
+                                 textColor=colors.HexColor("#64748b"), fontName=base_font)
+    val_style = ParagraphStyle("DVal", parent=styles["Normal"], fontSize=11,
+                               textColor=colors.HexColor("#0f172a"), fontName=base_font)
+
+    story = []
+    if company_name:
+        story.append(Paragraph(_tx(company_name), sub_style))
+    story.append(Paragraph(_tx(L["title"]) + f"  <font size=11 color='#94a3b8'>#{req['id']}</font>", title_style))
+    if client_name and client_name != company_name:
+        story.append(Paragraph(_tx(client_name), sub_style))
+    story.append(Spacer(1, 4 * mm))
+    story.append(HRFlowable(width="100%", thickness=0.6, color=BRAND, spaceAfter=5 * mm))
+
+    def kv(label, value):
+        return [Paragraph(_tx(label), label_style), Paragraph(_tx(value), val_style)]
+
+    period_str = f"{req['start_date'].isoformat()} {_frac(req['start_fraction'])}".strip()
+    if req["end_date"] != req["start_date"]:
+        period_str += f"  →  {req['end_date'].isoformat()} {_frac(req['end_fraction'])}".rstrip()
+
+    data = [
+        kv(L["name"], emp_name),
+        kv(L["matricule"], req["matricule"]),
+        kv(L["dept"], emp_dept),
+        kv(L["type"], type_label),
+        kv(L["period"], period_str),
+        kv(L["days"], f"{req['working_days']:g}"),
+        kv(L["status"], status_label),
+        kv(L["reason"], req["reason"]),
+    ]
+    info_tbl = Table(data, colWidths=[45 * mm, 110 * mm])
+    info_tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.25, colors.HexColor("#e2e8f0")),
+    ]))
+    story.append(info_tbl)
+    story.append(Spacer(1, 5 * mm))
+
+    if req["type"] == "annual":
+        b = balance
+        bal_data = [[
+            Paragraph(_tx(L["entitled"]), label_style),
+            Paragraph(_tx(L["used"]), label_style),
+            Paragraph(_tx(L["remaining"]), label_style),
+        ], [
+            Paragraph(f"{b['entitled_days'] + b['carried_over']:g}", val_style),
+            Paragraph(f"{b['used_days']:g}", val_style),
+            Paragraph(f"<b>{b['remaining_days']:g}</b>", val_style),
+        ]]
+        bal_tbl = Table(bal_data, colWidths=[51 * mm, 52 * mm, 52 * mm])
+        bal_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), ALT),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(Paragraph(_tx(L["balance"]), label_style))
+        story.append(Spacer(1, 1.5 * mm))
+        story.append(bal_tbl)
+        story.append(Spacer(1, 8 * mm))
+    else:
+        story.append(Spacer(1, 4 * mm))
+
+    emp_sig_note = ""
+    if req["employee_signed_at"]:
+        emp_sig_note = f"<font size=8 color='#16a34a'>{L['signed']} {req['employee_signed_at'].strftime('%Y-%m-%d %H:%M')}</font>"
+    hr_sig_note = ""
+    if req["approved_at"]:
+        hr_sig_note = f"<font size=8 color='#16a34a'>{req['approved_at'].strftime('%Y-%m-%d %H:%M')}</font>"
+
+    sig_data = [[
+        Paragraph(_tx(L["sig_emp"]), label_style),
+        Paragraph(_tx(L["sig_hr"]), label_style),
+    ], [
+        Paragraph(emp_sig_note or "&nbsp;", val_style),
+        Paragraph(hr_sig_note or "&nbsp;", val_style),
+    ]]
+    sig_tbl = Table(sig_data, colWidths=[77 * mm, 78 * mm], rowHeights=[8 * mm, 22 * mm])
+    sig_tbl.setStyle(TableStyle([
+        ("BOX", (0, 1), (0, 1), 0.5, colors.HexColor("#94a3b8")),
+        ("BOX", (1, 1), (1, 1), 0.5, colors.HexColor("#94a3b8")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(sig_tbl)
+
+    def _foot(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#94a3b8"))
+        canvas.drawCentredString(width / 2, 12 * mm,
+                                 f"{L['confidential']}   |   {L['generated']} {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_foot, onLaterPages=_foot)
+    buf.seek(0)
+    fname = f"demande_conge_{req['matricule']}_{req['start_date'].isoformat()}.pdf"
+    return Response(content=buf.read(), media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
