@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, Float, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, timezone
@@ -252,6 +252,14 @@ class AppSettings(Base):
     # (EmployeeSchedule → DepartmentSchedule fallback).
     lateness_module_enabled = Column(Boolean, default=False, nullable=False, server_default='false')
 
+    # Leave / Congés module settings
+    # leave_weekend_counts: when computing a congé span, do Sat/Sun count as
+    #   leave days? Default False (weekends are free, common in Morocco admin).
+    # leave_default_annual_days: the default annual entitlement seeded for a
+    #   new LeaveBalance row when HR hasn't set one explicitly.
+    leave_weekend_counts      = Column(Boolean, default=False, nullable=False, server_default='false')
+    leave_default_annual_days = Column(Float, default=18.0, nullable=False, server_default='18')
+
     # Branding (shown on login + sidebar)
     app_name    = Column(String(100), nullable=True, default='RTPointage')
     client_name = Column(String(255), nullable=True)  # The customer org using this install
@@ -469,6 +477,66 @@ class AttendanceDayResolution(Base):
     note        = Column(Text, nullable=True)
     resolved_by = Column(Integer, ForeignKey('users.id'), nullable=True)
     resolved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class LeaveBalance(Base):
+    """Annual leave entitlement for one employee in one year.
+
+    Keyed by matricule (user_id) so it's device-agnostic in shared mode.
+    'Used' days are NOT stored here — they're computed from approved annual
+    leave_requests in the year, so the balance is always consistent with the
+    request history (single source of truth). Sick leave is tracked
+    separately and never draws from this balance.
+    """
+    __tablename__ = 'leave_balances'
+    __table_args__ = (
+        UniqueConstraint('employee_user_id', 'year', name='uq_leave_balance_user_year'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_user_id = Column(String, nullable=False, index=True)   # matricule
+    year = Column(Integer, nullable=False, index=True)
+    entitled_days = Column(Float, nullable=False, default=18.0, server_default='18')
+    carried_over  = Column(Float, nullable=False, default=0.0, server_default='0')
+    note = Column(Text, nullable=True)
+    updated_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+
+class LeaveRequest(Base):
+    """A demande de congé. Created by HR or a reporting user, optionally
+    signed by the employee (portal), then approved by an HR-congé role.
+
+    Only an APPROVED request affects attendance: its days are excluded from
+    'Absent' and from lateness, and shown in a dedicated Congés section.
+
+    Half-day support: the first and last day of the range each carry a
+    fraction ('full' | 'am' | 'pm'). For a single-day request, start_date ==
+    end_date and start_fraction governs. working_days is the chargeable
+    amount, computed at save time honouring the weekend-counts setting and
+    the half-day fractions.
+    """
+    __tablename__ = 'leave_requests'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    employee_user_id = Column(String, nullable=False, index=True)   # matricule
+    type = Column(String(10), nullable=False, default='annual')      # annual | sick | other
+    start_date = Column(DateTime, nullable=False, index=True)
+    end_date   = Column(DateTime, nullable=False, index=True)
+    start_fraction = Column(String(4), nullable=False, default='full')  # full | am | pm
+    end_fraction   = Column(String(4), nullable=False, default='full')  # full | am | pm
+    working_days = Column(Float, nullable=False, default=0.0)            # chargeable days
+    reason = Column(Text, nullable=True)
+    # pending → approved | rejected | cancelled
+    status = Column(String(12), nullable=False, default='pending', index=True)
+    certificate_path = Column(String(500), nullable=True)   # optional sick-leave doc
+    created_by  = Column(Integer, ForeignKey('users.id'), nullable=True)
+    created_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    employee_signed_at = Column(DateTime, nullable=True)    # set when employee signs via portal
+    approved_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    reject_reason = Column(Text, nullable=True)
 
 
 class Anomaly(Base):

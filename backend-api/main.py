@@ -161,6 +161,55 @@ async def lifespan(app: FastAPI):
             """))
             conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_day_resolution_user ON attendance_day_resolution(user_id)"))
             conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_day_resolution_date ON attendance_day_resolution(date)"))
+            # ── Leave / Congés module ──────────────────────────────────────
+            conn.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS leave_balances (
+                    id BIGSERIAL PRIMARY KEY,
+                    employee_user_id VARCHAR NOT NULL,
+                    year INTEGER NOT NULL,
+                    entitled_days DOUBLE PRECISION NOT NULL DEFAULT 18,
+                    carried_over  DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    note TEXT,
+                    updated_by INTEGER REFERENCES users(id),
+                    updated_at TIMESTAMP DEFAULT now(),
+                    CONSTRAINT uq_leave_balance_user_year UNIQUE (employee_user_id, year)
+                )
+            """))
+            conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_leave_balance_user ON leave_balances(employee_user_id)"))
+            conn.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS leave_requests (
+                    id BIGSERIAL PRIMARY KEY,
+                    employee_user_id VARCHAR NOT NULL,
+                    type VARCHAR(10) NOT NULL DEFAULT 'annual',
+                    start_date TIMESTAMP NOT NULL,
+                    end_date   TIMESTAMP NOT NULL,
+                    start_fraction VARCHAR(4) NOT NULL DEFAULT 'full',
+                    end_fraction   VARCHAR(4) NOT NULL DEFAULT 'full',
+                    working_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    reason TEXT,
+                    status VARCHAR(12) NOT NULL DEFAULT 'pending',
+                    certificate_path VARCHAR(500),
+                    created_by  INTEGER REFERENCES users(id),
+                    created_at  TIMESTAMP NOT NULL DEFAULT now(),
+                    employee_signed_at TIMESTAMP,
+                    approved_by INTEGER REFERENCES users(id),
+                    approved_at TIMESTAMP,
+                    reject_reason TEXT
+                )
+            """))
+            conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_leave_req_user ON leave_requests(employee_user_id)"))
+            conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_leave_req_status ON leave_requests(status)"))
+            conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_leave_req_start ON leave_requests(start_date)"))
+            # Leave permissions: request (create demandes) + manage (approve, balances)
+            conn.execute(sa_text("""
+                INSERT INTO permissions (code, description) VALUES
+                    ('leave.request', 'Create / view congé requests for employees'),
+                    ('leave.manage',  'Approve congés, manage balances (HR-congé role)')
+                ON CONFLICT (code) DO NOTHING
+            """))
+            # Leave settings: do Sat/Sun count as congé days when computing span?
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_weekend_counts BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_default_annual_days DOUBLE PRECISION NOT NULL DEFAULT 18"))
             # Ensure the 'reports.hours' permission exists so admins can assign it
             # to a role (e.g. "RH Reporting logs") that may view computed-hours
             # columns (Total worked / Overtime / Late / Early). Plain reporting
