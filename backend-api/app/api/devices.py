@@ -983,18 +983,32 @@ async def _sync_attendance_locked(
     if start_datetime:
         sd = _parse_iso_naive(start_datetime)
         if sd is not None:
-            # Out-of-order writes guard — mirrors sync_service._SYNC_OVERLAP.
+            # Out-of-order writes guard.
+            #
             # ZKTeco devices buffer punches and DO NOT always flush them in
-            # chronological order: a punch at 07:30 can become visible AFTER
-            # a 07:52 punch is already stored. The today-page "Sync
-            # pointages" button computes start_datetime from the latest
-            # stored timestamp on the device, so a strict `timestamp < cutoff`
-            # filter would silently drop the late-arriving 07:30 forever.
-            # Rewinding 6 h matches the regular sync's overlap window and
-            # the existing existing_set duplicate check handles the
-            # already-stored rows inside the overlap.
+            # chronological order: a punch made at 07:30 can become visible
+            # on the device AFTER a 13:41 punch is already stored. The
+            # today-page "Sync pointages" button computes start_datetime
+            # from the LATEST stored timestamp on the device, so a strict
+            # `timestamp < cutoff` filter would silently drop the
+            # late-arriving 07:30 forever.
+            #
+            # A flat 6 h rewind (sync_service._SYNC_OVERLAP) is NOT enough:
+            # once the device's newest stored punch is an afternoon one
+            # (e.g. 13:41), 13:41 − 6 h = 07:41 still drops a 07:30 morning
+            # punch. So we floor the cutoff at the START OF THE DAY of the
+            # watermark as well, and take whichever reaches further back:
+            #   • start-of-day  → guarantees EVERY same-day punch is caught
+            #   • watermark−6h  → adds grace across the midnight boundary
+            #                      when the watermark itself is just after
+            #                      midnight (e.g. 02:00 catches 20:00 prev day)
+            # The device fetch returns all records regardless of this cutoff;
+            # it only governs which fetched rows are considered, and the
+            # existing_set check dedupes the ones already stored — so the
+            # wider window costs O(1) lookups, never duplicate inserts.
             from app.services.sync_service import _SYNC_OVERLAP as _OL
-            cutoff_date = sd - _OL                 # inclusive lower bound (timestamp < cutoff is skipped)
+            _start_of_day = sd.replace(hour=0, minute=0, second=0, microsecond=0)
+            cutoff_date = min(sd - _OL, _start_of_day)  # inclusive lower bound (timestamp < cutoff is skipped)
     if end_datetime:
         ed = _parse_iso_naive(end_datetime)
         if ed is not None:
