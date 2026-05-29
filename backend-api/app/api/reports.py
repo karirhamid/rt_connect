@@ -147,6 +147,13 @@ _PDF_LABELS = {
         "absentees_subtitle": "Pour la période sélectionnée",
         "absentees_count": "absent(s)",
         "absentees_empty": "Tous les employés ont pointé pendant la période.",
+        "conges_title": "Congés",
+        "conges_subtitle": "Sur la période sélectionnée",
+        "conges_count": "en congé",
+        "leave_type_col": "Type",
+        "leave_annual": "Congé",
+        "leave_sick": "Congé maladie",
+        "leave_mixed": "Congé",
         "mode_simple": "Mode Simple",
         "mode_strict": "Mode Strict",
         "swipes": "Pointages",
@@ -201,6 +208,13 @@ _PDF_LABELS = {
         "absentees_subtitle": "For the selected period",
         "absentees_count": "absent",
         "absentees_empty": "All employees punched during the period.",
+        "conges_title": "Leave",
+        "conges_subtitle": "For the selected period",
+        "conges_count": "on leave",
+        "leave_type_col": "Type",
+        "leave_annual": "Leave",
+        "leave_sick": "Sick leave",
+        "leave_mixed": "Leave",
         "mode_simple": "Simple Mode",
         "mode_strict": "Strict Mode",
         "swipes": "Swipes",
@@ -255,6 +269,13 @@ _PDF_LABELS = {
         "absentees_subtitle": "خلال الفترة المحددة",
         "absentees_count": "غائب(ون)",
         "absentees_empty": "جميع الموظفين قاموا بتسجيل حضورهم خلال الفترة.",
+        "conges_title": "العطل",
+        "conges_subtitle": "خلال الفترة المحددة",
+        "conges_count": "في عطلة",
+        "leave_type_col": "النوع",
+        "leave_annual": "عطلة",
+        "leave_sick": "عطلة مرضية",
+        "leave_mixed": "عطلة",
         "mode_simple": "الوضع البسيط",
         "mode_strict": "الوضع الصارم",
         "swipes": "تسجيلات",
@@ -1381,27 +1402,21 @@ def export_attendance_pdf(
                     return not _dept_off[(e.department_id, wd)]
                 return True  # no schedule → assume working
 
-            # Expected-to-work per logical person (OR across their device rows)
-            _expected = {}
-            for e in _absent_emps:
-                key = e.user_id if shared else e.id
-                works = any(_works_on(e, d.weekday()) for d in _working_dates) if _working_dates else False
-                _expected[key] = _expected.get(key, False) or works
+            # Approved leave covering the period → move on-leave employees out
+            # of 'Absent' into a Congés section, and don't count their congé
+            # days as absences.
+            from app.api.leave import approved_leave_days as _ald
+            _leave_days = _ald(_absdb, _sd, _ed) if (_sd and _ed) else {}
 
-            # DEDUPE — in shared mode the same person can be registered on
-            # multiple devices (one Employee row per device), so we keep only
-            # ONE row per logical person. Sort by user_id (numeric if possible)
-            # so the list is stable and easy to scan.
-            _seen = set()
-            _dedup_data = []
+            # Per logical person: the set of expected (scheduled, non-holiday)
+            # working dates in the period, unioned across device aliases.
+            _exp_dates = {}   # key -> set(date)
+            _key_meta = {}    # key -> {name, user_id, department}
             for e in _absent_emps:
                 key = e.user_id if shared else e.id
-                if key in _seen:
-                    continue
-                if not _expected.get(key, True):
-                    continue  # off the whole period — not absent
-                _seen.add(key)
-                _dedup_data.append({
+                ds = {d for d in _working_dates if _works_on(e, d.weekday())}
+                _exp_dates.setdefault(key, set()).update(ds)
+                _key_meta.setdefault(key, {
                     "name":       e.name or "—",
                     "user_id":    str(e.user_id or ""),
                     "department": (e.department.name if e.department else "—"),
@@ -1410,10 +1425,33 @@ def export_attendance_pdf(
             def _sort_key(d):
                 try:    return (0, int(d["user_id"]))
                 except: return (1, d["user_id"])
-            _absent_data = sorted(_dedup_data, key=_sort_key)
+
+            # Classify: if EVERY expected working day is an approved leave day,
+            # the person is on congé (not absent). If any expected day is
+            # uncovered and they didn't punch, they're genuinely absent.
+            _absent_dedup, _conge_dedup = [], []
+            for key, exp in _exp_dates.items():
+                if not exp:
+                    continue  # off the whole period — neither absent nor congé
+                meta = _key_meta[key]
+                uid = meta["user_id"]
+                covered = {d for d in exp if (uid, d) in _leave_days}
+                if covered and covered == exp:
+                    _types = {_leave_days[(uid, d)] for d in covered}
+                    meta = dict(meta)
+                    meta["leave_type"] = ("sick" if _types == {"sick"}
+                                          else "annual" if _types == {"annual"}
+                                          else "mixed")
+                    _conge_dedup.append(meta)
+                else:
+                    _absent_dedup.append(meta)
+
+            _absent_data = sorted(_absent_dedup, key=_sort_key)
+            _conge_data  = sorted(_conge_dedup, key=_sort_key)
     except Exception as _e:
         logger.warning(f"Could not compute absentees list: {_e}")
         _absent_data = []
+        _conge_data = []
 
     if flat_rows and _absent_data:
         # Start the absentees on a new page so the main attendance table stays
@@ -1486,6 +1524,57 @@ def export_attendance_pdf(
             _abs_rows.append(row_cells)
 
         story.append(_make_table(_abs_headers, _abs_rows, col_widths=_abs_widths))
+
+    # ── Congés section (employees on approved leave for the period) ─────
+    # These were pulled OUT of the absentees list above — they didn't punch
+    # because they're on congé, not absent. Shown with their leave type.
+    if flat_rows and _conge_data:
+        _conge_type_label = {
+            "annual": L.get("leave_annual", "Congé"),
+            "sick":   L.get("leave_sick", "Congé maladie"),
+            "mixed":  L.get("leave_mixed", "Congé"),
+        }
+        story.append(Spacer(1, 6 * mm))
+        story.append(Paragraph(
+            f"<b>{L.get('conges_title', 'Congés')}</b>",
+            ParagraphStyle("CongTitle", parent=title_style, fontSize=16, spaceAfter=2),
+        ))
+        story.append(Paragraph(
+            f"{L.get('conges_subtitle', 'Sur la période sélectionnée')}  &nbsp; |  &nbsp; "
+            f"<b>{len(_conge_data)}</b> {L.get('conges_count', 'en congé')}",
+            subtitle_style,
+        ))
+        story.append(Spacer(1, 3 * mm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_COLOR, spaceAfter=4 * mm))
+
+        _cg_header = [L["emp_id"], L["employee"], L["department"], L.get("leave_type_col", "Type")]
+        _cg_widths = [16 * mm, 60 * mm, 40 * mm, 40 * mm]
+        _cg_data = [_cg_header]
+        for d in _conge_data:
+            _cg_data.append([
+                d["user_id"], d["name"], d["department"],
+                _conge_type_label.get(d.get("leave_type", "annual"), L.get("leave_annual", "Congé")),
+            ])
+        _cg_tbl = Table(_cg_data, colWidths=_cg_widths, repeatRows=1)
+        _cg_bg = HEADER_BG if pdf_style != 'style2' else colors.white
+        _cg_fg = HEADER_FG if pdf_style != 'style2' else BRAND_COLOR
+        _cg_cmds = [
+            ("TEXTCOLOR", (0, 0), (-1, 0), _cg_fg),
+            ("FONTNAME",  (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",  (0, 0), (-1, -1), 9),
+            ("ALIGN",     (0, 0), (0, -1), "CENTER"),
+            ("ALIGN",     (3, 0), (3, -1), "CENTER"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ALT_ROW]),
+            ("LINEBELOW", (0, 0), (-1, 0), 1, BRAND_COLOR),
+            ("GRID",      (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+            ("VALIGN",    (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]
+        if pdf_style != 'style2':
+            _cg_cmds.insert(0, ("BACKGROUND", (0, 0), (-1, 0), _cg_bg))
+        _cg_tbl.setStyle(TableStyle(_cg_cmds))
+        story.append(_cg_tbl)
 
     # ── Footer ─────────────────────────────────────────────────────────
     story.append(Spacer(1, 6 * mm))
@@ -1982,12 +2071,28 @@ def _compute_ranking(start_dt: datetime, end_dt: datetime,
                 pks = db.query(DBEmployee.id).filter(DBEmployee.user_id == uid).all()
                 uid_to_pks[uid] = [pk[0] for pk in pks]
 
+        # 2b) Approved-leave days are not "worked" and never carry retard —
+        #     skip them entirely (the employee was on congé, not late). The
+        #     leave map is keyed by matricule (user_id); in shared mode w.eid
+        #     IS the matricule, in separate mode it's the Employee PK so map it.
+        from app.api.leave import approved_leave_days as _ald
+        _leave_days = _ald(db, start_dt.date(), end_dt.date())
+        _eid_to_uid = {}
+        if not shared:
+            _ids = {w.eid for w in worked}
+            if _ids:
+                _eid_to_uid = {e.id: e.user_id for e in
+                               db.query(DBEmployee).filter(DBEmployee.id.in_(_ids)).all()}
+
         # 3) Accumulate lateness per employee.
         agg: dict = {}
         for w in worked:
             day_date = w.day if hasattr(w.day, 'isoformat') else None
             if not day_date:
                 continue
+            _matricule = str(w.eid) if shared else _eid_to_uid.get(w.eid)
+            if _matricule and (_matricule, day_date) in _leave_days:
+                continue  # on approved congé that day — excluded from lateness
             if shared:
                 all_pks = uid_to_pks.get(w.eid, [])
                 pk = all_pks[0] if all_pks else None

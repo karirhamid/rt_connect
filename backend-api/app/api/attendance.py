@@ -122,11 +122,27 @@ async def expected_working(
     # If any alias is working, the person is working
     off_ids -= working_ids
 
+    # Employees on approved leave today are NOT expected to work — pull them
+    # out of the expected-working count so they don't inflate the "absent"
+    # figure on the Today page. Keyed by matricule; map PKs in separate mode.
+    from app.api.leave import approved_leave_days
+    leave_today = approved_leave_days(db, day, day)  # {(user_id, date): type}
+    on_leave_matricules = {uid for (uid, d) in leave_today.keys() if d == day}
+    if on_leave_matricules:
+        if shared:
+            working_ids -= on_leave_matricules
+        else:
+            # separate mode keys are Employee.id — drop those whose matricule is on leave
+            _id_to_uid = {e.id: e.user_id for e in employees}
+            working_ids = {k for k in working_ids
+                           if _id_to_uid.get(k) not in on_leave_matricules}
+
     return {
         "date": day.isoformat(),
         "weekday": weekday,
         "expected_working": len(working_ids),
         "day_off": len(off_ids),
+        "on_leave": len(on_leave_matricules),
         "holiday": False,
     }
 

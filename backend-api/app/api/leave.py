@@ -107,6 +107,31 @@ def compute_working_days(start: date, end: date,
     return max(0.0, total)
 
 
+def approved_leave_days(db, start: date, end: date) -> dict:
+    """Return {(user_id, date): type} for every calendar day covered by an
+    APPROVED leave request overlapping [start, end].
+
+    Used by reports + the Today page to (a) move on-leave employees out of
+    the 'Absent' list into a Congés section and (b) skip their congé days in
+    the lateness ranking. Covers every calendar day in the request range
+    (weekends included — they're irrelevant for absent-suppression). The
+    balance-charging 'working_days' is a separate, half-day-aware figure.
+    """
+    rows = (db.query(LeaveRequest)
+            .filter(LeaveRequest.status == "approved",
+                    LeaveRequest.start_date <= datetime.combine(end, datetime.max.time()),
+                    LeaveRequest.end_date >= datetime.combine(start, datetime.min.time()))
+            .all())
+    out: dict = {}
+    for r in rows:
+        d = max(r.start_date.date(), start)
+        last = min(r.end_date.date(), end)
+        while d <= last:
+            out[(r.employee_user_id, d)] = r.type
+            d += timedelta(days=1)
+    return out
+
+
 def _annual_used(db, user_id: str, year: int) -> float:
     """Sum of approved ANNUAL leave working_days in the year for this user."""
     y0 = datetime(year, 1, 1)
