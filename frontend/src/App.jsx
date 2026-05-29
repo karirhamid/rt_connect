@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { LayoutDashboard, Settings, Menu, HardDrive, Building2, Clock, Users, Calendar, UserCog, ChevronLeft, ChevronRight, Wrench, BarChart3, ArrowLeftRight, CalendarDays, ShieldCheck, FileText, AlertTriangle, Download } from 'lucide-react';
+import { LayoutDashboard, Settings, Menu, HardDrive, Building2, Clock, Users, Calendar, UserCog, ChevronLeft, ChevronRight, Wrench, BarChart3, ArrowLeftRight, CalendarDays, ShieldCheck, FileText, AlertTriangle, Download, ClipboardCheck } from 'lucide-react';
 import { useState, useEffect, useLayoutEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import Dashboard from './pages/Dashboard';
@@ -17,6 +17,7 @@ import RolesManagement from './pages/RolesManagement';
 import Maintenance from './pages/Maintenance';
 import AuditLog from './pages/AuditLog';
 import AnomalyInbox from './pages/AnomalyInbox';
+import PunchReview from './pages/PunchReview';
 import PayrollExport from './pages/PayrollExport';
 import PortalLogin from './pages/PortalLogin';
 import PortalHome from './pages/PortalHome';
@@ -97,7 +98,7 @@ function AppContent() {
         { name: t('employees'), href: '/employees', icon: Users },
         { name: t('todaysAttendance'), href: '/attendance/today', icon: Clock },
         { name: t('reports') || 'Reports', href: '/reports', icon: BarChart3 },
-        { name: t('anomalyInbox') || 'Anomalies', href: '/anomalies', icon: AlertTriangle, badgeKey: 'anomalies' },
+        { name: t('reviewTitle') || 'Validation des pointages', href: '/attendance/validation', icon: ClipboardCheck },
         { name: t('payrollExport') || 'Export Paie', href: '/payroll-export', icon: Download },
       ],
     },
@@ -426,6 +427,9 @@ function AppContent() {
             <Route path="/settings/bulk-assign" element={<ProtectedRoute perm="shifts.manage"><BulkShiftAssignment /></ProtectedRoute>} />
             <Route path="/settings/maintenance" element={<ProtectedRoute perm="roles.manage"><Maintenance /></ProtectedRoute>} />
             <Route path="/settings/audit-log" element={<ProtectedRoute perm="roles.manage"><AuditLog /></ProtectedRoute>} />
+            {/* Punch validation replaced the Anomalies inbox in the HR menu.
+                /anomalies route kept for any old bookmark; not in the menu. */}
+            <Route path="/attendance/validation" element={<ProtectedRoute anyOf={['attendance.read', ...MANAGER_PERMS]}><PunchReview /></ProtectedRoute>} />
             <Route path="/anomalies" element={<ProtectedRoute anyOf={MANAGER_PERMS}><AnomalyInbox /></ProtectedRoute>} />
             <Route path="/payroll-export" element={<ProtectedRoute anyOf={MANAGER_PERMS}><PayrollExport /></ProtectedRoute>} />
           </Routes>
