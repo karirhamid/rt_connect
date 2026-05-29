@@ -23,6 +23,7 @@ from app.api.audit import router as audit_router
 from app.api.anomalies import router as anomalies_router
 from app.api.corrections import router as corrections_router
 from app.api.payroll_export import router as payroll_export_router
+from app.api.leave import router as leave_router
 from app.api.employee_portal import router as employee_portal_router
 from app.services.portal_db_setup import ensure_portal_role
 from app.database import init_db
@@ -594,6 +595,7 @@ app.include_router(audit_router, prefix="/api", tags=["Audit"])
 app.include_router(anomalies_router, prefix="/api", tags=["Anomalies"])
 app.include_router(corrections_router, prefix="/api", tags=["Corrections"])
 app.include_router(payroll_export_router, prefix="/api", tags=["Payroll Export"])
+app.include_router(leave_router, prefix="/api", tags=["Leave"])
 app.include_router(employee_portal_router, prefix="/api", tags=["Employee Portal"])
 
 
