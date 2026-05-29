@@ -2045,10 +2045,9 @@ def lateness_ranking_pdf(
     emp_ids = _parse_employee_ids(employee_ids)
     rows, _ = _compute_ranking(start_dt, end_dt, department_id, device_id, emp_ids)
 
-    # Branding + style preference — mirrors the main attendance PDF so the
-    # lateness report doesn't look like a foreign document. company_name
-    # drives the document title and the visible header; pdf_style picks the
-    # brand palette (style1 = navy blue, style2 = emerald).
+    # Branding + style preference — mirrors the main attendance PDF (style2
+    # = emerald with a top bar; style1 = navy without). company_name drives
+    # the document title and the visible header.
     from app.database.schema import AppSettings as _AS
     with get_db_session() as db:
         _settings = db.query(_AS).first()
@@ -2063,36 +2062,45 @@ def lateness_ranking_pdf(
             title="Classement des retards",
             subtitle="Récapitulatif par employé sur la période",
             period="Période", generated="Généré le",
+            total_evaluated="Total employés évalués",
+            total_offenders="Employés en retard",
             rank="#", employee="Employé(e)", department="Département",
             late_days="Jours en retard", worked_days="Jours travaillés",
             total_late="Total retard", avg_late="Moyenne / retard",
             max_late="Plus gros retard",
             empty="Aucun retard détecté sur la période.",
             summary_total="Total cumulé", summary_offenders="Employés concernés",
+            confidential="Document confidentiel — usage interne uniquement",
             page="Page",
         ),
         "en": dict(
             title="Lateness ranking",
             subtitle="Per-employee summary over the period",
             period="Period", generated="Generated",
+            total_evaluated="Total employees evaluated",
+            total_offenders="Employees late",
             rank="#", employee="Employee", department="Department",
             late_days="Late days", worked_days="Worked days",
             total_late="Total late", avg_late="Avg per late day",
             max_late="Max late",
             empty="No lateness recorded for the period.",
             summary_total="Cumulative total", summary_offenders="Employees concerned",
+            confidential="Confidential document — internal use only",
             page="Page",
         ),
         "ar": dict(
             title="ترتيب التأخر",
             subtitle="ملخص لكل موظف خلال الفترة",
             period="الفترة", generated="تم الإنشاء في",
+            total_evaluated="مجموع الموظفين الذين تم تقييمهم",
+            total_offenders="الموظفون المتأخرون",
             rank="#", employee="الموظف", department="القسم",
             late_days="أيام التأخر", worked_days="أيام العمل",
             total_late="إجمالي التأخر", avg_late="متوسط التأخر",
             max_late="أكبر تأخر",
             empty="لا توجد حالات تأخر مسجلة في هذه الفترة.",
             summary_total="المجموع التراكمي", summary_offenders="عدد الموظفين",
+            confidential="وثيقة سرية — للاستخدام الداخلي فقط",
             page="صفحة",
         ),
     }
@@ -2104,7 +2112,7 @@ def lateness_ranking_pdf(
         h, r = divmod(m, 60)
         return f"{h}h {r:02d}m" if h else f"{r}m"
 
-    # ── Palette (matches export_attendance_pdf) ────────────────────────
+    # ── Palette: exact match with export_attendance_pdf ──────────────────
     if pdf_style == 'style2':
         BRAND_COLOR = colors.HexColor("#059669")   # emerald
         HEADER_BG   = colors.HexColor("#065f46")
@@ -2115,8 +2123,6 @@ def lateness_ranking_pdf(
         ALT_ROW     = colors.HexColor("#f1f5f9")
     HEADER_FG  = colors.white
     LATE_COLOR = colors.HexColor("#d97706")        # amber for late totals
-    MUTED_FG   = colors.HexColor("#475569")
-    GRID_COLOR = colors.HexColor("#e2e8f0")
 
     _period_str = f"{start_dt.date().isoformat()} – {end_dt.date().isoformat()}"
     _doc_title  = " — ".join(x for x in [(company_name or "RTPointage"),
@@ -2131,44 +2137,52 @@ def lateness_ranking_pdf(
         author=(company_name or "RTPointage"),
         subject=L["title"],
     )
+    width, height = A4
 
+    # ── Styles: identical names + parents as export_attendance_pdf ──────
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("RnkTitle", parent=styles["Title"],
-                                 fontSize=18, textColor=BRAND_COLOR, spaceAfter=2)
-    section_style = ParagraphStyle("RnkSection", parent=styles["Heading2"],
-                                   fontSize=14, textColor=BRAND_COLOR, spaceBefore=2)
-    subtitle_style = ParagraphStyle("RnkSubtitle", parent=styles["Normal"],
-                                    fontSize=10, textColor=MUTED_FG, spaceAfter=2)
-    summary_style = ParagraphStyle("RnkSummary", parent=styles["Normal"],
-                                   fontSize=10, alignment=TA_RIGHT,
-                                   textColor=MUTED_FG)
-    empty_style = ParagraphStyle("RnkEmpty", parent=styles["Normal"],
-                                 fontSize=12, alignment=TA_CENTER,
-                                 textColor=colors.HexColor("#94a3b8"))
+    title_style    = ParagraphStyle("PDFTitle", parent=styles["Title"],
+                                    fontSize=18, textColor=BRAND_COLOR, spaceAfter=2)
+    subtitle_style = ParagraphStyle("PDFSub", parent=styles["Normal"],
+                                    fontSize=10, textColor=colors.HexColor("#475569"),
+                                    spaceAfter=2)
+    footer_style   = ParagraphStyle("PDFFooter", parent=styles["Normal"],
+                                    fontSize=7, textColor=colors.HexColor("#94a3b8"),
+                                    alignment=TA_CENTER)
 
-    # ── Header: company name, title, period meta line (same shape as the
-    #    main attendance PDF) ───────────────────────────────────────────
     story: list = []
+
+    # ── Report header (same shape as the main PDF) ─────────────────────
     if company_name:
         story.append(Paragraph(company_name, title_style))
     story.append(Paragraph(
         f"<b>{L['title']}</b>  —  {L['subtitle']}",
-        section_style,
+        ParagraphStyle("RT", parent=styles["Heading2"], fontSize=14,
+                       textColor=BRAND_COLOR),
     ))
-    _meta_bits = [
-        f"{L['period']} : <b>{_period_str}</b>",
-        f"{L['generated']} {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+    meta = [
+        f"<b>{L['period']}:</b> {_period_str}",
+        f"<b>{L['generated']}:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}",
     ]
     if client_name and client_name != company_name:
-        _meta_bits.insert(0, client_name)
-    story.append(Paragraph("  &nbsp; |  &nbsp; ".join(_meta_bits), subtitle_style))
+        meta.insert(0, f"<b>{client_name}</b>")
+    story.append(Paragraph("  &nbsp; |  &nbsp; ".join(meta), subtitle_style))
+    summary_meta = (
+        f"<b>{L['total_evaluated']}:</b> {len(rows)}  &nbsp; |  &nbsp; "
+        f"<b>{L['total_offenders']}:</b> {sum(1 for r in rows if r['late_days_count'] > 0)}"
+    )
+    story.append(Paragraph(summary_meta, subtitle_style))
+
     story.append(Spacer(1, 4 * mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=BRAND_COLOR,
                             spaceAfter=4 * mm))
 
     if not rows:
         story.append(Spacer(1, 20 * mm))
-        story.append(Paragraph(L["empty"], empty_style))
+        story.append(Paragraph(L["empty"],
+                               ParagraphStyle("Empty", parent=styles["Normal"],
+                                              fontSize=12, alignment=TA_CENTER,
+                                              textColor=colors.HexColor("#94a3b8"))))
     else:
         header = [L["rank"], L["employee"], L["department"],
                   L["late_days"], L["worked_days"],
@@ -2186,32 +2200,61 @@ def lateness_ranking_pdf(
                 _fmt_min(r["max_late_minutes"]),
             ])
         col_widths = [10*mm, 50*mm, 35*mm, 22*mm, 22*mm, 22*mm, 22*mm, 22*mm]
+        # Scale to printable width to fill the page same as the main PDF
+        _printable_w = width - 2 * 18 * mm
+        _natural_w = sum(col_widths)
+        if _natural_w > 0:
+            col_widths = [w * (_printable_w / _natural_w) for w in col_widths]
         tbl = Table(data, colWidths=col_widths, repeatRows=1)
-        tbl.setStyle(TableStyle([
-            # Header row — branded background, white text, bold (like main PDF)
-            ("BACKGROUND",       (0, 0), (-1, 0), HEADER_BG),
-            ("TEXTCOLOR",        (0, 0), (-1, 0), HEADER_FG),
-            ("FONTNAME",         (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",         (0, 0), (-1, 0), 9),
-            ("ALIGN",            (0, 0), (-1, 0), "CENTER"),
-            ("LINEBELOW",        (0, 0), (-1, 0), 1.5, BRAND_COLOR),
-            # Body
-            ("FONTSIZE",         (0, 1), (-1, -1), 9),
-            ("ALIGN",            (0, 1), (0, -1), "CENTER"),     # rank
-            ("ALIGN",            (1, 1), (2, -1), "LEFT"),       # name + dept
-            ("ALIGN",            (3, 1), (-1, -1), "CENTER"),    # numeric cols
-            ("TEXTCOLOR",        (5, 1), (5, -1), LATE_COLOR),   # total retard col
-            ("FONTNAME",         (5, 1), (5, -1), "Helvetica-Bold"),
-            ("ROWBACKGROUNDS",   (0, 1), (-1, -1), [colors.white, ALT_ROW]),
-            ("GRID",             (0, 0), (-1, -1), 0.25, GRID_COLOR),
-            ("BOX",              (0, 0), (-1, -1), 0.75, BRAND_COLOR),
-            ("LINEBELOW",        (0, -1), (-1, -1), 0.75, BRAND_COLOR),
-            ("VALIGN",           (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING",      (0, 0), (-1, -1), 5),
-            ("RIGHTPADDING",     (0, 0), (-1, -1), 5),
-            ("TOPPADDING",       (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING",    (0, 0), (-1, -1), 5),
-        ]))
+
+        # Two-style table treatment — same branching as _make_table in the
+        # main PDF, so style2 looks clean (no solid header bg) and style1
+        # uses a filled HEADER_BG band.
+        if pdf_style == 'style2':
+            cmds = [
+                ("TEXTCOLOR",    (0, 0), (-1, 0), BRAND_COLOR),
+                ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE",     (0, 0), (-1, 0), 8),
+                ("BOTTOMPADDING",(0, 0), (-1, 0), 6),
+                ("TOPPADDING",   (0, 0), (-1, 0), 6),
+                ("LINEABOVE",    (0, 0), (-1, 0), 1.5, BRAND_COLOR),
+                ("LINEBELOW",    (0, 0), (-1, 0), 1.5, BRAND_COLOR),
+                ("FONTSIZE",     (0, 1), (-1, -1), 8),
+                ("TOPPADDING",   (0, 1), (-1, -1), 4),
+                ("BOTTOMPADDING",(0, 1), (-1, -1), 4),
+                ("LINEBELOW",    (0, -1), (-1, -1), 0.75, BRAND_COLOR),
+                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+            ]
+            if len(data) > 2:
+                cmds.append(("LINEBELOW", (0, 1), (-1, -2), 0.25,
+                             colors.HexColor("#d1d5db")))
+        else:
+            cmds = [
+                ("BACKGROUND",   (0, 0), (-1, 0), HEADER_BG),
+                ("TEXTCOLOR",    (0, 0), (-1, 0), HEADER_FG),
+                ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE",     (0, 0), (-1, 0), 8),
+                ("BOTTOMPADDING",(0, 0), (-1, 0), 6),
+                ("TOPPADDING",   (0, 0), (-1, 0), 6),
+                ("LINEBELOW",    (0, 0), (-1, 0), 1, BRAND_COLOR),
+                ("FONTSIZE",     (0, 1), (-1, -1), 8),
+                ("TOPPADDING",   (0, 1), (-1, -1), 3),
+                ("BOTTOMPADDING",(0, 1), (-1, -1), 3),
+                ("LINEBELOW",    (0, -1), (-1, -1), 0.5, BRAND_COLOR),
+                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                 [colors.white, ALT_ROW]),
+            ]
+        # Column alignment + amber emphasis on the Total retard column,
+        # same for both styles.
+        cmds.extend([
+            ("ALIGN",     (0, 1), (0, -1), "CENTER"),     # rank
+            ("ALIGN",     (1, 1), (2, -1), "LEFT"),       # name + dept
+            ("ALIGN",     (3, 1), (-1, -1), "CENTER"),    # numeric cols
+            ("TEXTCOLOR", (5, 1), (5, -1), LATE_COLOR),   # Total retard
+            ("FONTNAME",  (5, 1), (5, -1), "Helvetica-Bold"),
+        ])
+        tbl.setStyle(TableStyle(cmds))
         story.append(tbl)
         story.append(Spacer(1, 4 * mm))
 
@@ -2221,20 +2264,35 @@ def lateness_ranking_pdf(
             f"<b>{L['summary_total']} :</b> "
             f"<font color=\"#{LATE_COLOR.hexval()[2:]}\"><b>{_fmt_min(total_minutes)}</b></font>"
             f"  &nbsp; &bull; &nbsp; <b>{L['summary_offenders']} :</b> {offenders}",
-            summary_style,
+            ParagraphStyle("RnkSummary", parent=subtitle_style,
+                           alignment=TA_RIGHT),
         ))
 
-    # ── Footer with page number (same idea as the main PDF) ─────────────
-    def _on_page(canvas, _doc):
-        canvas.saveState()
-        canvas.setFont("Helvetica", 8)
-        canvas.setFillColor(MUTED_FG)
-        footer_y = 12 * mm
-        canvas.drawCentredString(A4[0] / 2, footer_y,
-                                 f"{L['page']} {_doc.page}")
-        canvas.restoreState()
+    # ── Footer (same shape as the main attendance PDF) ─────────────────
+    story.append(Spacer(1, 6 * mm))
+    story.append(HRFlowable(width="100%", thickness=0.3,
+                            color=colors.HexColor("#cbd5e1"),
+                            spaceBefore=2 * mm))
+    story.append(Paragraph(L["confidential"], footer_style))
 
-    doc.build(story, onFirstPage=_on_page, onLaterPages=_on_page)
+    # Page footer + style2 top bar — identical callback to the main PDF
+    def _page_footer(canvas_obj, doc_obj):
+        canvas_obj.saveState()
+        canvas_obj.setFont("Helvetica", 7)
+        canvas_obj.setFillColor(colors.HexColor("#94a3b8"))
+        canvas_obj.drawRightString(
+            width - 18 * mm, 12 * mm,
+            f"{L['page']} {doc_obj.page}",
+        )
+        if pdf_style == 'style2':
+            # The distinctive emerald top bar that brands every page.
+            canvas_obj.setStrokeColor(BRAND_COLOR)
+            canvas_obj.setLineWidth(2)
+            canvas_obj.line(18 * mm, height - 10 * mm,
+                            width - 18 * mm, height - 10 * mm)
+        canvas_obj.restoreState()
+
+    doc.build(story, onFirstPage=_page_footer, onLaterPages=_page_footer)
     buf.seek(0)
     filename = f"lateness_ranking_{start_dt.date().isoformat()}_{end_dt.date().isoformat()}.pdf"
     return Response(
