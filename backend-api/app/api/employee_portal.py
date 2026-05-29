@@ -26,6 +26,15 @@ from app.services.punch_classifier import get_employee_day_summary
 router = APIRouter()
 
 
+# Brute-force protection — after MAX_PORTAL_ATTEMPTS consecutive failed
+# passwords for a matricule, the row(s) are locked for PORTAL_LOCKOUT_MINUTES.
+# Conservative defaults — same shape as most banking portals. Tunable later
+# via env if anyone hits the lockout in normal use.
+import os as _os
+MAX_PORTAL_ATTEMPTS    = int(_os.getenv('MAX_PORTAL_ATTEMPTS', '5'))
+PORTAL_LOCKOUT_MINUTES = int(_os.getenv('PORTAL_LOCKOUT_MINUTES', '15'))
+
+
 def _first_name(full_name: str) -> str:
     """Return the first word of the full name, normalized for compare."""
     if not full_name:
@@ -67,6 +76,11 @@ def reset_portal_password(employee_id: int, current=Depends(get_current_user)):
         for e in rows:
             e.portal_pin_hash = None
             e.portal_must_change_password = True
+            # Admin reset also clears any brute-force lockout — without this
+            # the employee would be told 'invalid credentials' even with the
+            # fresh first-name password.
+            e.portal_failed_attempts = 0
+            e.portal_locked_until = None
         db.commit()
         return {"ok": True, "employee_id": employee_id, "initial_password_hint": _first_name(emp.name)}
 
@@ -86,6 +100,17 @@ def portal_login(body: dict):
 
     Accepts JSON keys `password` OR legacy `pin`.
     Initial password = first name (case-insensitive) when portal_pin_hash is null.
+
+    Brute-force protection (added 2026-05-29 from the security audit):
+      • Each wrong password increments `portal_failed_attempts` on every
+        row for that matricule (shared mode replicates the matricule
+        across devices — keeping the counter per row keeps the writes
+        local to the candidates and lets the lockout block ANY of them).
+      • After MAX_PORTAL_ATTEMPTS consecutive failures, portal_locked_until
+        is set to now + PORTAL_LOCKOUT_MINUTES. While that time is in the
+        future the endpoint returns 429 with a Retry-After header instead
+        of even checking the password.
+      • A successful login (or admin /portal-reset) zeroes both columns.
     """
     _require_portal_enabled()
     matricule = (body.get("matricule") or "").strip()
@@ -96,11 +121,31 @@ def portal_login(body: dict):
     with get_portal_db_session() as db:
         cands = db.query(Employee).filter(Employee.user_id == matricule).all()
         if not cands:
+            # Same 401 + generic message as a bad password — don't reveal
+            # whether the matricule exists. No counter to bump.
             raise HTTPException(401, "Invalid credentials")
 
         # Reject if every alias is disabled
         if all(bool(getattr(e, 'portal_disabled', False)) for e in cands):
             raise HTTPException(403, "Portal access disabled for this employee.")
+
+        # ── Lockout check (before we even touch the password) ─────────────
+        # If ANY of the candidate rows is currently locked, refuse the
+        # whole matricule. Use a naive UTC datetime to match the column.
+        now_naive = datetime.utcnow()
+        locked_rows = [e for e in cands
+                       if e.portal_locked_until and e.portal_locked_until > now_naive]
+        if locked_rows:
+            until = max(e.portal_locked_until for e in locked_rows)
+            retry_sec = max(1, int((until - now_naive).total_seconds()))
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Trop de tentatives. Réessayez dans "
+                    f"{retry_sec // 60}m {retry_sec % 60:02d}s."
+                ),
+                headers={"Retry-After": str(retry_sec)},
+            )
 
         matched = None
         is_initial = False
@@ -120,7 +165,21 @@ def portal_login(body: dict):
                     break
 
         if not matched:
+            # ── Failure path: bump counter, lock if threshold crossed ────
+            for e in cands:
+                e.portal_failed_attempts = int(e.portal_failed_attempts or 0) + 1
+                if e.portal_failed_attempts >= MAX_PORTAL_ATTEMPTS:
+                    e.portal_locked_until = now_naive + timedelta(minutes=PORTAL_LOCKOUT_MINUTES)
+                    e.portal_failed_attempts = 0  # reset for the next round
+            db.commit()
             raise HTTPException(401, "Invalid credentials")
+
+        # ── Success: zero the counter on EVERY alias for this matricule ──
+        for e in cands:
+            if e.portal_failed_attempts or e.portal_locked_until:
+                e.portal_failed_attempts = 0
+                e.portal_locked_until    = None
+        db.commit()
 
         must_change = bool(getattr(matched, 'portal_must_change_password', True)) or is_initial
 

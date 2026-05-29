@@ -104,6 +104,15 @@ class Employee(Base):
 
     # Per-employee opt-out of the portal (admin can disable for a single user).
     portal_disabled = Column(Boolean, default=False, nullable=False, server_default='false')
+
+    # Brute-force protection on /portal/login. portal_failed_attempts counts
+    # consecutive wrong passwords; after MAX_PORTAL_ATTEMPTS the row is
+    # 'locked' by setting portal_locked_until to now + PORTAL_LOCKOUT_MINUTES.
+    # While locked, the login endpoint returns 429 with the remaining seconds.
+    # A successful login (or admin /portal-reset) clears both fields.
+    portal_failed_attempts = Column(Integer, default=0, nullable=False,
+                                    server_default='0')
+    portal_locked_until = Column(DateTime, nullable=True)
     hire_date = Column(DateTime, nullable=True)
     birth_date = Column(DateTime, nullable=True)
     gender = Column(String(10), nullable=True)

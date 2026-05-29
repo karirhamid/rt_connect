@@ -69,10 +69,16 @@ def ensure_portal_role() -> None:
                         "app_settings", "daily_shift_records", "devices"):
                 conn.execute(sa_text(f'GRANT SELECT ON {tbl} TO "{PORTAL_USER}"'))
 
-            # Column-level UPDATE for password change only
+            # Column-level UPDATE: just the four columns the portal needs to
+            # write. portal_pin_hash + portal_must_change_password for the
+            # password-change flow; portal_failed_attempts + portal_locked_until
+            # for the brute-force protection counter. Every other column on
+            # the employees table stays read-only for portal_user.
             conn.execute(sa_text(
-                f'GRANT UPDATE (portal_pin_hash, portal_must_change_password) '
-                f'ON employees TO "{PORTAL_USER}"'
+                f'GRANT UPDATE ('
+                f'portal_pin_hash, portal_must_change_password, '
+                f'portal_failed_attempts, portal_locked_until'
+                f') ON employees TO "{PORTAL_USER}"'
             ))
 
             # Default privileges for FUTURE tables = no access (Postgres default,
