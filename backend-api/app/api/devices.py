@@ -983,7 +983,18 @@ async def _sync_attendance_locked(
     if start_datetime:
         sd = _parse_iso_naive(start_datetime)
         if sd is not None:
-            cutoff_date = sd                       # inclusive lower bound (timestamp < cutoff is skipped)
+            # Out-of-order writes guard — mirrors sync_service._SYNC_OVERLAP.
+            # ZKTeco devices buffer punches and DO NOT always flush them in
+            # chronological order: a punch at 07:30 can become visible AFTER
+            # a 07:52 punch is already stored. The today-page "Sync
+            # pointages" button computes start_datetime from the latest
+            # stored timestamp on the device, so a strict `timestamp < cutoff`
+            # filter would silently drop the late-arriving 07:30 forever.
+            # Rewinding 6 h matches the regular sync's overlap window and
+            # the existing existing_set duplicate check handles the
+            # already-stored rows inside the overlap.
+            from app.services.sync_service import _SYNC_OVERLAP as _OL
+            cutoff_date = sd - _OL                 # inclusive lower bound (timestamp < cutoff is skipped)
     if end_datetime:
         ed = _parse_iso_naive(end_datetime)
         if ed is not None:
