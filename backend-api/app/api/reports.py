@@ -2289,16 +2289,10 @@ def lateness_ranking_pdf(
         tbl.setStyle(TableStyle(cmds))
         story.append(tbl)
         story.append(Spacer(1, 4 * mm))
-
-        total_minutes = sum(r["total_late_minutes"] for r in rows)
-        offenders     = sum(1 for r in rows if r["late_days_count"] > 0)
-        story.append(Paragraph(
-            f"<b>{L['summary_total']} :</b> "
-            f"<font color=\"#{LATE_COLOR.hexval()[2:]}\"><b>{_fmt_min(total_minutes)}</b></font>"
-            f"  &nbsp; &bull; &nbsp; <b>{L['summary_offenders']} :</b> {offenders}",
-            ParagraphStyle("RnkSummary", parent=subtitle_style,
-                           alignment=TA_RIGHT),
-        ))
+        # No 'Total cumulé' line: the whole point of this report is to
+        # rank each employee on their OWN total retard. Summing across
+        # different people gives a meaningless figure. The per-employee
+        # totals already live in the rightmost column of the table.
 
     # ── Footer (same shape as the main attendance PDF) ─────────────────
     story.append(Spacer(1, 6 * mm))

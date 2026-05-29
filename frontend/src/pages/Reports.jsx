@@ -39,7 +39,6 @@ export default function Reports() {
   // the ranking endpoint and the PDF button for the ranking PDF.
   const [reportType, setReportType] = useState('normal'); // normal | with_lateness | lateness_only
   const [latenessRanking, setLatenessRanking] = useState([]);
-  const [latenessSummary, setLatenessSummary] = useState({ total: 0, offenders: 0 });
   // Multi-employee chip picker — applies to all three report types.
   const [employeesAll, setEmployeesAll] = useState([]); // [{ id, user_id, name, ... }]
   const [selectedEmployees, setSelectedEmployees] = useState([]); // matricules (user_id strings)
@@ -127,10 +126,6 @@ export default function Reports() {
         }
         const data = await resp.json();
         setLatenessRanking(data.ranking || []);
-        setLatenessSummary({
-          total: data.total_late_minutes_all || 0,
-          offenders: (data.ranking || []).filter(r => r.late_days_count > 0).length,
-        });
         setRecords([]); setSummary([]);
         setActiveTab('summary');  // tab bar is hidden in this mode; reset for next time
         return;
@@ -727,14 +722,9 @@ export default function Reports() {
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="bg-gray-50 border-t">
-                  <tr className="text-sm font-medium text-gray-700">
-                    <td className="px-4 py-3" colSpan={5}>
-                      {t('latenessTotalLabel') || 'Total cumulé'} — {latenessSummary.offenders} {t('latenessOffenders') || 'employé(s) concerné(s)'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-amber-700 font-bold">{fmtLateMin(latenessSummary.total)}</td>
-                  </tr>
-                </tfoot>
+                {/* No cumulative total row: summing retard across distinct
+                    employees is meaningless. Each row already shows that
+                    person's own total in the rightmost column. */}
               </table>
             </div>
           )}
