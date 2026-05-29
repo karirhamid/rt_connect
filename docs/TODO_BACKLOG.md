@@ -13,6 +13,40 @@ same reason: anything left open belongs in one list.
 
 ---
 
+## DECISIONS — 2026-05-29 (client review)
+
+The client went through every item. Verdicts, to drive the build order:
+
+| Item | Verdict |
+|---|---|
+| A. Night shifts | **Defer** — revisit later; no night staff right now. |
+| B. Leave / congés | **BUILD — high priority.** Full module with HR approval workflow + employee portal signing. Detailed spec captured in § B below. |
+| C. Holiday premium | **Drop** — not needed for this project. |
+| D. Split shifts | **Drop** — no split-shift staff. |
+| E. Lateness grace | **BUILD — parametrable.** Must be a Settings value the client can change per site, NOT hard-coded. Default keeps today's strict (0 min) behaviour. |
+| F. Email on holidays | **Keep sending.** If anyone punched (la garde), show those punches; if nobody did, send a clean PDF naming the holiday. Mostly current behaviour — just verify the empty-but-holiday case renders well. |
+| G. Dept history | **Drop** — not relevant for this client. |
+| H. Shared-mode schedule conflict | **My recommendation: earliest `work_start` wins** (strictest = safest for lateness; a cloned device row can never make someone look *less* late). Cheap, deterministic, no UI. Will implement that unless you object. |
+| I. Portal brute-force | ✅ **DONE** — commit 2e502f1. |
+| J. Backup key rotation | **BUILD — safest option.** Warn the admin on decrypt failure AND store a key fingerprint so a rotated key is detected proactively, not after a silent backup failure. |
+| K. PDF N+1 | **BUILD — fix proactively.** Pre-load day summaries; pure perf, no output change. |
+
+Plus a NEW feature requested the same day:
+
+| New | Punch-review / entrée-sortie override table — see § NEW below. **Design first, then build.** |
+
+Suggested build order (smallest-risk / highest-value first):
+1. **K** (perf, pure refactor, no behaviour change) — quick win.
+2. **NEW punch-review override** (fixes the recurring multi-punch ambiguity the client keeps hitting).
+3. **E** (parametrable grace — small, self-contained).
+4. **J** (backup key safety — small, security).
+5. **B** (congés — large, its own milestone).
+6. **F** (verify/adjust holiday-email empty case — small).
+7. **H** (tie-break rule — tiny, fold into any classifier change).
+8. **A** (night shifts — when night staff actually exist).
+
+---
+
 ## A. Night shifts crossing midnight
 
 **Status:** broken silently — currently produces `total_minutes = 0`.
@@ -377,3 +411,184 @@ For each item:
 
 Last audit pass: **May 28 2026** — see commit `5a16a42` for the fixes
 that already shipped.
+
+---
+
+# NEW. Punch review / entrée-sortie override ("Validation des pointages")
+
+**Requested:** 2026-05-29. **Status:** design — build after approval.
+
+## The problem it solves
+
+Biometric devices record a punch every time someone presents a finger, with
+no reliable in/out flag. When an employee punches **3+ times in a day**
+(e.g. 07:00, 13:00, 15:57) the auto-detection can pick the wrong pair, or —
+as seen with Ikram — tag every afternoon punch as "exit" and leave the
+entrée blank. The immediate display bug (entrée blank) was fixed in commit
+6af0d2d by falling back to first/last. But the client wants a **manual
+review surface** so a human can decide, for any ambiguous day, exactly which
+punch is the entrée and which is the sortie — and have that choice flow into
+the reports, the Today page, and the lateness math.
+
+## Design (approved approach: per-day override, keeps all punches)
+
+### Data model — new table `attendance_day_resolution`
+```
+id                  PK
+user_id             matricule (logical person — works in shared mode where
+                    one person has several Employee rows across devices)
+date                DATE
+entry_attendance_id FK attendance.id, nullable  (the punch chosen as entrée)
+exit_attendance_id  FK attendance.id, nullable  (the punch chosen as sortie)
+resolved_by         users.id
+resolved_at         TIMESTAMP
+note                TEXT nullable
+UNIQUE(user_id, date)
+```
+Why store the chosen punch IDs (not just times): keeps a precise audit trail
+and survives re-sync. Why `user_id` not `employee_id`: the override is per
+logical person per day, device-agnostic.
+
+### Single integration point
+`get_employee_day_summary()` gains a first step: look up a resolution for
+(user_id, date). If found, force entry_time / exit_time from the chosen
+punches and recompute total/late/overtime from them. Because the report
+display (after fix 6af0d2d) already prefers the summary's entry+exit when
+BOTH are present, and the Today page + lateness all flow through this same
+function, the override automatically takes effect EVERYWHERE with no other
+code change. That's the key to "must not impact other features" — when no
+resolution row exists, behaviour is byte-for-byte unchanged.
+
+### "Needs review" detection
+A (person, day) qualifies when it has **>=3 effective punches** (after the
+existing double-tap merge). Simple, matches the client's words ("more than
+2 times in different timing"). Already-resolved days show a check badge.
+
+### API
+```
+GET  /api/attendance/review?start=&end=&employee_ids=
+       -> list of {user_id, name, date, punches:[{id,time}], resolution?}
+       for days with >=3 effective punches in range.
+POST /api/attendance/review
+       body {user_id, date, entry_attendance_id, exit_attendance_id, note}
+       -> upsert the resolution. Validates both IDs are that person's
+         punches on that date.
+DELETE /api/attendance/review/{user_id}/{date}
+       -> remove the override (revert to auto-detection).
+```
+Gate behind an existing manager permission (e.g. `attendance.write` /
+`corrections.write`) — confirm which.
+
+### UI
+A "Validation des pointages" panel (below the Reports page as the client
+asked, or its own route — TBD). Per ambiguous row: the day's punches shown
+as a timeline with two selectors (Entrée / Sortie). Save writes the
+override; the row gets a check; the figure is immediately reflected on
+re-generating the report and on the Today page.
+
+### Simpler alternative considered (and why not)
+Could reuse the existing **corrections/void** feature: void the middle
+punch so first/last = entry/exit. Rejected because (a) it hides the fact the
+person badged 3x, (b) worse UX than a pick-entry/pick-exit table, (c) the
+client explicitly described a review table. The override keeps every punch
+visible and just *designates* entry/exit — data-honest.
+
+### Phasing
+1. Table + migration + override lookup in get_employee_day_summary + the
+   three endpoints. (Backend only — already testable via API.)
+2. Frontend review panel.
+
+### Must-not-break checklist
+- No resolution row -> identical output to today.
+- Override only changes the designated entry/exit + derived figures for
+  that one (person, day).
+- Re-sync never deletes a resolution (it references punch IDs that persist).
+
+---
+
+# B (detailed). Leave / Congés module — client spec (2026-05-29)
+
+**Status:** BUILD, high priority, its own milestone. Captured from the
+client so nothing is lost.
+
+## Roles & workflow
+- A new **HR-congé role** is created that manages congés for ALL employees.
+- **Reporting-user role** AND HR can *create* a congé request (demande) for
+  an employee — but creating it does NOT make it take effect; it needs
+  **approval by the HR-congé role**.
+- Each employee has a **congé balance table**: e.g. 18 days/year (or more),
+  set by HR. Tracks days available, days used, reset cycle, and full history
+  (including congé maladie / sick leave).
+- Creating a demande: choose the employee + the période (date range) ->
+  generates an **A4 PDF demande de congé** that can be printed and signed by
+  the employee. OR, if the portal is enabled, the employee logs into their
+  portal, sees their balance + history, sees the demande created for them,
+  and **signs it electronically**. Once signed it returns to HR flagged
+  "signed by employee", and HR approves it.
+- On approval: that period no longer counts the employee as **absent**;
+  instead it shows in a separate **congé table**, and **no retard is
+  computed** for those days.
+
+## Employee portal additions
+- See their congé balance (total / used / remaining / reset date).
+- See full history: all congés + congés maladie.
+- See demandes created for them; sign them.
+
+## Settings (parametrable)
+- Whether **Saturday/Sunday count** as congé days or not when computing the
+  span of a leave.
+- The demande-de-congé module adds **one day by default** (clarify with
+  client what this means exactly before building).
+
+## Rough data model (to refine at build time)
+```
+leave_balances(employee_user_id, year, entitled_days, carried_over, ...)
+leave_requests(id, employee_user_id, type[annual|sick|other],
+               start_date, end_date, working_days, status[draft|
+               pending_employee_sign|signed|approved|rejected],
+               created_by, approved_by, employee_signed_at, approved_at,
+               reason, pdf_path?, ...)
+```
+Reports: a (person, day) covered by an approved leave_request is excluded
+from "Absent" and from lateness, and listed in a dedicated Congés section.
+
+## Open questions for the client before building
+1. Sick leave (congé maladie): does it draw from the same balance or a
+   separate one? Require a certificate upload?
+2. "Adds one day by default" — default to a 1-day request, or always +1 to
+   every request span? Need clarification.
+3. Half-day congés — needed?
+4. Who can create the HR-congé role / assign it — super admin only?
+
+---
+
+# E (detailed). Parametrable lateness grace
+
+Client wants the grace period to be a **Settings value**, not hard-coded,
+changeable per site. Plan: add `late_grace_minutes` to AppSettings (default
+0 = current strict behaviour), surface it in Settings -> Général, and apply
+`late = max(0, raw_late - grace)` inside get_employee_day_summary. The
+existing per-shift `shift_timings.late_grace_minutes` can stay as an
+optional override on top later if needed.
+
+---
+
+# J (detailed). Backup key-rotation safety
+
+Do BOTH (client said "safest"):
+1. `decrypt_secret` returns a typed failure (None) instead of "" so the
+   caller can tell "decryption failed" from "empty password".
+2. Store a short fingerprint (first 8 hex of SHA256 of the active key)
+   alongside each encrypted blob. On backup, if the stored fingerprint
+   doesn't match the current key's, surface a clear admin warning
+   ("BACKUP_ENC_KEY changed — re-enter SMB password") instead of silently
+   attempting auth with an empty password.
+
+---
+
+# K (detailed). PDF generator N+1
+
+Pre-load every (employee, day) summary in ONE grouped pass before the row
+loop instead of calling get_employee_day_summary per row. Pure performance;
+output identical. Verify a before/after byte-diff of a multi-row PDF is
+empty.
