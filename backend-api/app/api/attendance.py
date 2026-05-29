@@ -10,8 +10,9 @@ from app.database.schema import (
     Department as DBDepartment,
     Company as DBCompany,
     AppSettings as DBAppSettings,
+    AttendanceDayResolution as DBDayResolution,
 )
-from app.core.security import get_current_user
+from app.core.security import get_current_user, user_has_permission
 import logging
 
 # Every endpoint under /api/attendance/* requires a valid bearer token.
@@ -358,3 +359,204 @@ async def delete_attendance(
         logger.error(f"Error deleting attendance: {str(e)}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===========================================================================
+# Punch review / entrée-sortie override — "Validation des pointages"
+#
+# A reviewer designates which punches of an ambiguous day are the
+# entrée / sortie / break-out / break-in. The choice is stored per logical
+# person per day and overrides auto-detection everywhere (reports, Today,
+# lateness) via get_employee_day_summary — the single place that reads the
+# AttendanceDayResolution table. When no row exists, behaviour is unchanged.
+# ===========================================================================
+def _review_can_write(user) -> bool:
+    return (user_has_permission(user, "attendance.write")
+            or user_has_permission(user, "roles.manage")
+            or user_has_permission(user, "manage_users"))
+
+
+@router.get("/review")
+async def list_review(
+    target_date: Optional[str] = Query(None, description="Day YYYY-MM-DD, defaults to today"),
+    employee_id: Optional[str] = Query(None, description="Filter to one matricule (user_id)"),
+    db: Session = Depends(get_db),
+):
+    """Per-employee punches for a single day + any saved resolution.
+
+    Shows EVERY employee who punched that day (even a single punch), so the
+    reviewer can open any day and (re)designate entrée/sortie/break. Defaults
+    to today. In shared employee_mode a person's punches are merged across
+    devices under their matricule.
+    """
+    if target_date:
+        try:
+            day = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    else:
+        day = date.today()
+
+    day_start = datetime.combine(day, datetime.min.time())
+    day_end = datetime.combine(day, datetime.max.time())
+
+    settings = db.query(DBAppSettings).first()
+    shared = (getattr(settings, 'employee_mode', None) or 'shared') == 'shared'
+
+    q = (db.query(DBAttendance)
+         .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
+         .outerjoin(DBDepartment, DBEmployee.department_id == DBDepartment.id)
+         .filter(DBAttendance.timestamp >= day_start,
+                 DBAttendance.timestamp <= day_end,
+                 DBAttendance.voided_by_correction_id.is_(None),
+                 DBAttendance.approved.isnot(False)))
+    if employee_id:
+        q = q.filter(DBEmployee.user_id == employee_id)
+    rows = q.order_by(DBAttendance.timestamp.asc()).all()
+
+    # Group by logical person
+    groups: dict = {}
+    for r in rows:
+        key = r.employee.user_id if shared else str(r.employee_id)
+        g = groups.setdefault(key, {
+            "user_id": r.employee.user_id,
+            "employee_name": r.employee.name,
+            "department": (r.employee.department.name if r.employee.department else "-"),
+            "punches": [],
+        })
+        g["punches"].append({
+            "id": r.id,
+            "time": r.timestamp.strftime("%H:%M"),
+            "timestamp": r.timestamp.isoformat(),
+            "punch": r.punch,
+            "device_id": r.device_id,
+            "device_name": r.device.name if r.device else "?",
+        })
+
+    # Attach saved resolutions for the day
+    res_rows = (db.query(DBDayResolution)
+                .filter(func.date(DBDayResolution.date) == day).all())
+    res_by_user = {rr.user_id: rr for rr in res_rows}
+
+    out = []
+    for key, g in groups.items():
+        rr = res_by_user.get(g["user_id"])
+        g["resolution"] = None if rr is None else {
+            "entry_attendance_id":     rr.entry_attendance_id,
+            "break_out_attendance_id": rr.break_out_attendance_id,
+            "break_in_attendance_id":  rr.break_in_attendance_id,
+            "exit_attendance_id":      rr.exit_attendance_id,
+            "note": rr.note,
+            "resolved_at": rr.resolved_at.isoformat() if rr.resolved_at else None,
+        }
+        g["punch_count"] = len(g["punches"])
+        # A day with >=3 punches is the one most likely to need review.
+        g["needs_review"] = len(g["punches"]) >= 3
+        out.append(g)
+
+    out.sort(key=lambda x: (not x["needs_review"], x["employee_name"]))
+    return {"date": day.isoformat(), "employee_mode": "shared" if shared else "separate",
+            "count": len(out), "items": out}
+
+
+@router.post("/review")
+async def upsert_review(
+    payload: dict,
+    current=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create/replace the entrée-sortie override for one (matricule, day).
+
+    Body: { user_id, date (YYYY-MM-DD),
+            entry_attendance_id, break_out_attendance_id,
+            break_in_attendance_id, exit_attendance_id, note }
+    Each *_attendance_id may be null. All non-null IDs must be real punches
+    of that matricule on that date.
+    """
+    if not _review_can_write(current):
+        raise HTTPException(403, "Not authorized to validate punches")
+
+    user_id = (payload.get("user_id") or "").strip()
+    date_str = (payload.get("date") or "").strip()
+    if not user_id or not date_str:
+        raise HTTPException(400, "user_id and date are required")
+    try:
+        day = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
+
+    ids = {
+        "entry_attendance_id":     payload.get("entry_attendance_id"),
+        "break_out_attendance_id": payload.get("break_out_attendance_id"),
+        "break_in_attendance_id":  payload.get("break_in_attendance_id"),
+        "exit_attendance_id":      payload.get("exit_attendance_id"),
+    }
+
+    # Validate every non-null id is a punch of this matricule on this day.
+    day_start = datetime.combine(day, datetime.min.time())
+    day_end = datetime.combine(day, datetime.max.time())
+    valid_ids = {
+        a.id for a in (db.query(DBAttendance.id)
+                       .join(DBEmployee, DBAttendance.employee_id == DBEmployee.id)
+                       .filter(DBEmployee.user_id == user_id,
+                               DBAttendance.timestamp >= day_start,
+                               DBAttendance.timestamp <= day_end)
+                       .all())
+    }
+    for field, aid in ids.items():
+        if aid is not None and aid not in valid_ids:
+            raise HTTPException(400, f"{field}={aid} is not a punch of {user_id} on {day}")
+
+    uid = None
+    try:
+        uid = int(current.get("id")) if isinstance(current, dict) else getattr(current, "id", None)
+    except Exception:
+        uid = None
+
+    existing = (db.query(DBDayResolution)
+                .filter(DBDayResolution.user_id == user_id,
+                        func.date(DBDayResolution.date) == day).first())
+    if existing:
+        existing.entry_attendance_id     = ids["entry_attendance_id"]
+        existing.break_out_attendance_id = ids["break_out_attendance_id"]
+        existing.break_in_attendance_id  = ids["break_in_attendance_id"]
+        existing.exit_attendance_id      = ids["exit_attendance_id"]
+        existing.note        = payload.get("note")
+        existing.resolved_by = uid
+        existing.resolved_at = datetime.now()
+    else:
+        db.add(DBDayResolution(
+            user_id=user_id,
+            date=datetime.combine(day, datetime.min.time()),
+            entry_attendance_id     = ids["entry_attendance_id"],
+            break_out_attendance_id = ids["break_out_attendance_id"],
+            break_in_attendance_id  = ids["break_in_attendance_id"],
+            exit_attendance_id      = ids["exit_attendance_id"],
+            note=payload.get("note"),
+            resolved_by=uid,
+        ))
+    db.commit()
+    return {"ok": True, "user_id": user_id, "date": day.isoformat()}
+
+
+@router.delete("/review/{user_id}/{date_str}")
+async def delete_review(
+    user_id: str,
+    date_str: str,
+    current=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Remove the override for (matricule, day) — revert to auto-detection."""
+    if not _review_can_write(current):
+        raise HTTPException(403, "Not authorized to validate punches")
+    try:
+        day = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
+    existing = (db.query(DBDayResolution)
+                .filter(DBDayResolution.user_id == user_id,
+                        func.date(DBDayResolution.date) == day).first())
+    if existing:
+        db.delete(existing)
+        db.commit()
+    return {"ok": True, "user_id": user_id, "date": day.isoformat()}

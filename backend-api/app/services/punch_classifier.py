@@ -22,7 +22,7 @@ import hashlib
 import random
 import time as _time
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, text
+from sqlalchemy import and_, text, func
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 import logging
@@ -514,26 +514,57 @@ def get_employee_day_summary(
         )
     ).order_by(DBAttendance.timestamp.asc()).all()
 
-    classified = []
-    for p in punches:
-        cat = classify_punch(db, p.employee_id, p.timestamp)
-        classified.append({"time": p.timestamp.strftime("%H:%M"), "category": cat})
-
-    # Extract key entries
     entry_time = None
     break_out_time = None
     break_in_time = None
     exit_time = None
 
-    for c in classified:
-        if c["category"] == "entry" and entry_time is None:
-            entry_time = c["time"]
-        elif c["category"] == "break_out" and break_out_time is None:
-            break_out_time = c["time"]
-        elif c["category"] == "break_in" and break_in_time is None:
-            break_in_time = c["time"]
-        elif c["category"] in ("exit", "overtime_exit"):
-            exit_time = c["time"]  # last one wins
+    # Classify every punch (always — also used for the all_punches output).
+    classified = []
+    for p in punches:
+        cat = classify_punch(db, p.employee_id, p.timestamp)
+        classified.append({"time": p.timestamp.strftime("%H:%M"), "category": cat})
+
+    # ── Manual override ("Validation des pointages") ────────────────────
+    # If a reviewer designated the entry/exit/break punches for this person
+    # on this day, those choices WIN over auto-detection — and feed every
+    # downstream figure (total, late, overtime) plus the displayed
+    # Entrée/Sortie, because this function is the single source all of them
+    # read. When no override row exists, we fall through to the classifier
+    # exactly as before (purely additive — zero impact on unreviewed days).
+    _override = None
+    try:
+        from app.database.schema import AttendanceDayResolution, Employee as _Emp
+        _emp = db.query(_Emp).filter(_Emp.id == all_pks[0]).first()
+        _uid = _emp.user_id if _emp else None
+        if _uid:
+            _override = (db.query(AttendanceDayResolution)
+                         .filter(AttendanceDayResolution.user_id == _uid,
+                                 func.date(AttendanceDayResolution.date) == day)
+                         .first())
+    except Exception:
+        _override = None  # never let the override path break the summary
+
+    if _override is not None:
+        # Map the chosen attendance IDs to HH:MM from the day's punches.
+        _by_id = {p.id: p for p in punches}
+        def _ts(aid):
+            p = _by_id.get(aid) if aid else None
+            return p.timestamp.strftime("%H:%M") if p else None
+        entry_time     = _ts(_override.entry_attendance_id)
+        break_out_time = _ts(_override.break_out_attendance_id)
+        break_in_time  = _ts(_override.break_in_attendance_id)
+        exit_time      = _ts(_override.exit_attendance_id)
+    else:
+        for c in classified:
+            if c["category"] == "entry" and entry_time is None:
+                entry_time = c["time"]
+            elif c["category"] == "break_out" and break_out_time is None:
+                break_out_time = c["time"]
+            elif c["category"] == "break_in" and break_in_time is None:
+                break_in_time = c["time"]
+            elif c["category"] in ("exit", "overtime_exit"):
+                exit_time = c["time"]  # last one wins
 
     # Get schedule info (check all PKs for this person)
     record = None

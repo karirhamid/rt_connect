@@ -432,6 +432,45 @@ class AttendanceCorrection(Base):
     reason = Column(Text, nullable=False)
 
 
+class AttendanceDayResolution(Base):
+    """Manual entrée/sortie (+ optional lunch break) designation for one
+    logical person on one day — the "Validation des pointages" feature.
+
+    Biometric readers give no reliable in/out flag, so when someone punches
+    several times a day the auto-detection can pick the wrong pair. A
+    reviewer opens the day, designates which punches are the entry / exit /
+    break-out / break-in, and that choice overrides auto-detection in the
+    reports, the Today page and the lateness math — all of which flow
+    through get_employee_day_summary, the single place that consults this
+    table.
+
+    Keyed by `user_id` (matricule), NOT employee_id, because in shared mode
+    one person has several Employee rows across devices; the override is per
+    logical person per day. The chosen punches are referenced by
+    attendance.id so the designation survives re-sync and keeps a precise
+    audit trail. Any of the four punch columns may be NULL (e.g. a day with
+    no real break, or a forgot-to-clock-out day with no exit).
+
+    When NO row exists for (user_id, date), behaviour is exactly the
+    pre-feature auto-detection — the override is purely additive.
+    """
+    __tablename__ = 'attendance_day_resolution'
+    __table_args__ = (
+        UniqueConstraint('user_id', 'date', name='uq_day_resolution_user_date'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(String, nullable=False, index=True)   # matricule
+    date = Column(DateTime, nullable=False, index=True)     # day (00:00)
+    entry_attendance_id     = Column(Integer, ForeignKey('attendance.id', ondelete='SET NULL'), nullable=True)
+    break_out_attendance_id = Column(Integer, ForeignKey('attendance.id', ondelete='SET NULL'), nullable=True)
+    break_in_attendance_id  = Column(Integer, ForeignKey('attendance.id', ondelete='SET NULL'), nullable=True)
+    exit_attendance_id      = Column(Integer, ForeignKey('attendance.id', ondelete='SET NULL'), nullable=True)
+    note        = Column(Text, nullable=True)
+    resolved_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    resolved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 class Anomaly(Base):
     """Flagged punch / day with integrity issue, surfaces in anomaly inbox."""
     __tablename__ = 'anomalies'

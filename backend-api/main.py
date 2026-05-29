@@ -141,6 +141,26 @@ async def lifespan(app: FastAPI):
             # row for 15 min after MAX_PORTAL_ATTEMPTS consecutive failures.
             conn.execute(sa_text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS portal_failed_attempts INTEGER NOT NULL DEFAULT 0"))
             conn.execute(sa_text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS portal_locked_until TIMESTAMP"))
+            # Punch review / entrée-sortie override ("Validation des pointages").
+            # create_all below makes the table, but be explicit + idempotent so
+            # a partially-migrated DB self-heals.
+            conn.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS attendance_day_resolution (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id VARCHAR NOT NULL,
+                    date TIMESTAMP NOT NULL,
+                    entry_attendance_id     INTEGER REFERENCES attendance(id) ON DELETE SET NULL,
+                    break_out_attendance_id INTEGER REFERENCES attendance(id) ON DELETE SET NULL,
+                    break_in_attendance_id  INTEGER REFERENCES attendance(id) ON DELETE SET NULL,
+                    exit_attendance_id      INTEGER REFERENCES attendance(id) ON DELETE SET NULL,
+                    note TEXT,
+                    resolved_by INTEGER REFERENCES users(id),
+                    resolved_at TIMESTAMP NOT NULL DEFAULT now(),
+                    CONSTRAINT uq_day_resolution_user_date UNIQUE (user_id, date)
+                )
+            """))
+            conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_day_resolution_user ON attendance_day_resolution(user_id)"))
+            conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_day_resolution_date ON attendance_day_resolution(date)"))
             # Ensure the 'reports.hours' permission exists so admins can assign it
             # to a role (e.g. "RH Reporting logs") that may view computed-hours
             # columns (Total worked / Overtime / Late / Early). Plain reporting
