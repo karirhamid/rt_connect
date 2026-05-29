@@ -1295,6 +1295,15 @@ def export_attendance_pdf(
     # produced no punches at all during the period). Doesn't render anything
     # if the period had no records at all (the empty-state block above
     # already covers that case).
+    #
+    # CRITICAL: the absentees query must apply EVERY filter the main report
+    # used, otherwise picking one employee in the chip picker still surfaces
+    # everyone else as "absent" — which was the bug a user reported. Mirror
+    # the filter set built by _base_filters above:
+    #   • employee_id   (legacy single-matricule arg)
+    #   • employee_ids  (the new chip-picker CSV)
+    #   • employee_name (free-text contains match)
+    #   • device_id     (source device on the Employee row)
     try:
         with get_db_session() as _absdb:
             _absq = (_absdb.query(DBEmployee)
@@ -1303,6 +1312,10 @@ def export_attendance_pdf(
                 _absq = _absq.filter(DBEmployee.source_device_id == device_id)
             if employee_id:
                 _absq = _absq.filter(DBEmployee.user_id == employee_id)
+            if emp_ids:
+                _absq = _absq.filter(DBEmployee.user_id.in_(emp_ids))
+            if employee_name:
+                _absq = _absq.filter(DBEmployee.name.ilike(f"%{employee_name}%"))
             _all_emps = _absq.all()
 
             # Identify absent employees — employee_set is keyed by user_id in
