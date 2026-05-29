@@ -191,12 +191,27 @@ class DeviceSyncService:
 
                     # Incremental high-watermark filter.
                     # The watermark is the newest punch we've already stored, in the
-                    # SAME (device-local, naive) frame as the records. We re-scan a
-                    # small OVERLAP window before it so punches written slightly out
-                    # of order are never missed; the unique constraint + ON CONFLICT
-                    # dedupe anything in the overlap that's already stored.
+                    # SAME (device-local, naive) frame as the records. We re-scan
+                    # everything from the START OF THE WATERMARK'S DAY (or the
+                    # OVERLAP window before it, whichever reaches further back) so
+                    # punches written out of order are never missed; the unique
+                    # constraint + ON CONFLICT dedupe anything already stored.
+                    #
+                    # Why start-of-day and not just watermark − 6h: ZKTeco devices
+                    # flush their buffer out of order, so once an afternoon punch
+                    # (say 13:41) has advanced the watermark, a late-arriving 07:30
+                    # morning punch is >6h back and a flat 6h overlap would drop it
+                    # forever. Flooring at midnight guarantees every same-day punch
+                    # is reconsidered on each sync. This keeps the scheduled-report
+                    # auto-sync exactly as robust as the today-page Sync button
+                    # (see _sync_attendance_locked in api/devices.py — same logic).
+                    # Cost is unchanged: the device fetch already returns all
+                    # records; this only widens which fetched rows are considered,
+                    # and the dedupe makes re-considered rows O(1) no-ops.
                     if last_attendance_sync:
-                        cutoff = last_attendance_sync - _SYNC_OVERLAP
+                        _start_of_day = last_attendance_sync.replace(
+                            hour=0, minute=0, second=0, microsecond=0)
+                        cutoff = min(last_attendance_sync - _SYNC_OVERLAP, _start_of_day)
                         original_count = len(attendance_records)
                         attendance_records = [
                             rec for rec in attendance_records
@@ -205,7 +220,7 @@ class DeviceSyncService:
                         logger.info(
                             f"Incremental sync: {len(attendance_records)} candidate records "
                             f"out of {original_count} (watermark={last_attendance_sync}, "
-                            f"overlap={_SYNC_OVERLAP})"
+                            f"cutoff={cutoff})"
                         )
                     else:
                         logger.info(f"Initial sync: Processing all {len(attendance_records)} attendance records")
