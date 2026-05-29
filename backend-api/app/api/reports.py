@@ -2184,9 +2184,23 @@ def lateness_ranking_pdf(
                                               fontSize=12, alignment=TA_CENTER,
                                               textColor=colors.HexColor("#94a3b8"))))
     else:
-        header = [L["rank"], L["employee"], L["department"],
-                  L["late_days"], L["worked_days"],
-                  L["total_late"], L["avg_late"], L["max_late"]]
+        # Header cells as Paragraphs so long French labels ("Jours en
+        # retard", "Plus gros retard", "Moyenne / retard") wrap onto two
+        # lines instead of running into the neighbouring column. Same
+        # technique as _make_table in the main PDF (see line ~888).
+        if pdf_style == 'style2':
+            th_color = BRAND_COLOR
+        else:
+            th_color = HEADER_FG
+        th_style = ParagraphStyle(
+            "RnkTH", parent=styles["Normal"],
+            fontSize=8, leading=10, alignment=TA_CENTER,
+            fontName="Helvetica-Bold", textColor=th_color,
+        )
+        header = [Paragraph(f"<b>{lbl}</b>", th_style)
+                  for lbl in [L["rank"], L["employee"], L["department"],
+                              L["late_days"], L["worked_days"],
+                              L["total_late"], L["avg_late"], L["max_late"]]]
         data: list = [header]
         for i, r in enumerate(rows, start=1):
             data.append([
@@ -2199,7 +2213,10 @@ def lateness_ranking_pdf(
                 _fmt_min(r["avg_late_minutes"]),
                 _fmt_min(r["max_late_minutes"]),
             ])
-        col_widths = [10*mm, 50*mm, 35*mm, 22*mm, 22*mm, 22*mm, 22*mm, 22*mm]
+        # Widened the four numeric columns (was 22 each) so a wrapped
+        # two-line header fits cleanly. Total of all widths is still under
+        # the printable area; the auto-scale below stretches to fill.
+        col_widths = [10*mm, 44*mm, 30*mm, 24*mm, 24*mm, 24*mm, 26*mm, 24*mm]
         # Scale to printable width to fill the page same as the main PDF
         _printable_w = width - 2 * 18 * mm
         _natural_w = sum(col_widths)
