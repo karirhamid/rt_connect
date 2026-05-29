@@ -263,7 +263,14 @@ refuse to compute lateness until resolved"?
 
 ---
 
-## I. Portal-PIN brute force protection
+## I. Portal-PIN brute force protection — **DONE (commit 2e502f1, 2026-05-29)**
+
+**Status:** ✅ shipped — 5 failures → 15 min lockout, DB-tracked counter.
+Tuning via env: `MAX_PORTAL_ATTEMPTS`, `PORTAL_LOCKOUT_MINUTES`.
+
+---
+
+### (original entry, for context)
 
 **Status:** real security gap.
 
