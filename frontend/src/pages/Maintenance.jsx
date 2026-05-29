@@ -358,12 +358,10 @@ export default function Maintenance() {
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Header */}
+      {/* Header — matches the system style (Reports, etc.) */}
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight" style={{ letterSpacing: '-0.02em' }}>
-          {t('maintenance')}
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <h1 className="text-2xl font-semibold text-gray-900">{t('maintenance')}</h1>
+        <p className="text-sm text-gray-500">
           {t('maintenanceDesc') || 'Sauvegarde et restauration de la base de données (toutes les données + configuration).'}
         </p>
       </div>
@@ -402,14 +400,14 @@ export default function Maintenance() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
         {/* Create backup */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200/60 p-6">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center">
-              <Database className="w-5 h-5 text-slate-700" />
+            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+              <Database className="w-5 h-5 text-gray-700" />
             </div>
-            <h2 className="text-lg font-semibold text-slate-900">{t('createNewBackup') || 'Créer une sauvegarde'}</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{t('createNewBackup') || 'Créer une sauvegarde'}</h2>
           </div>
-          <p className="text-sm text-slate-600 mb-4">
+          <p className="text-sm text-gray-600 mb-4">
             {t('createBackupDesc') ||
               'Sauvegarde complète : schéma, données, configurations, utilisateurs. Compatible PostgreSQL 16+.'}
           </p>
@@ -417,8 +415,8 @@ export default function Maintenance() {
             onClick={handleCreateBackup}
             disabled={creating || !pgDumpAvailable}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
-                       bg-slate-900 text-white rounded-lg hover:bg-slate-800 active:bg-black
-                       disabled:bg-slate-300 disabled:cursor-not-allowed
+                       bg-primary-600 text-white rounded-lg hover:bg-primary-700 active:bg-primary-800
+                       disabled:bg-gray-300 disabled:cursor-not-allowed
                        transition-colors font-medium text-sm"
           >
             {creating ? <Loader className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -427,14 +425,14 @@ export default function Maintenance() {
         </div>
 
         {/* Upload + restore */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200/60 p-6">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center">
-              <FileUp className="w-5 h-5 text-slate-700" />
+            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+              <FileUp className="w-5 h-5 text-gray-700" />
             </div>
-            <h2 className="text-lg font-semibold text-slate-900">{t('restoreFromFile') || 'Restaurer depuis un fichier'}</h2>
+            <h2 className="text-lg font-semibold text-gray-900">{t('restoreFromFile') || 'Restaurer depuis un fichier'}</h2>
           </div>
-          <p className="text-sm text-slate-600 mb-4">
+          <p className="text-sm text-gray-600 mb-4">
             {t('restoreFromFileDesc') ||
               "Importer une sauvegarde .dump ou .json.gz d'un autre serveur. Remplace toutes les données."}
           </p>
@@ -449,8 +447,8 @@ export default function Maintenance() {
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
-                       border border-slate-300 text-slate-800 rounded-lg
-                       hover:bg-slate-50 active:bg-slate-100
+                       border border-gray-300 text-gray-800 rounded-lg
+                       hover:bg-gray-50 active:bg-gray-100
                        disabled:opacity-50 disabled:cursor-not-allowed
                        transition-colors font-medium text-sm"
           >
@@ -462,16 +460,16 @@ export default function Maintenance() {
       </div>
 
       {/* ── External backup storage (SMB / network share) ── */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 p-6 space-y-4">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200/60 p-6 space-y-4">
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-            <Server className="w-5 h-5 text-slate-700" />
+          <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0">
+            <Server className="w-5 h-5 text-gray-700" />
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-gray-900">
               {t('externalStorage') || 'Stockage externe'}
             </h2>
-            <p className="text-sm text-slate-500 mt-0.5">
+            <p className="text-sm text-gray-500 mt-0.5">
               {t('externalStorageDesc') ||
                 "Pousser automatiquement chaque sauvegarde vers un partage réseau. La copie locale est toujours conservée."}
             </p>
@@ -489,8 +487,8 @@ export default function Maintenance() {
               onClick={() => { setExtType(value); setStorageMsg(null); }}
               className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                 extType === value
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
               <Icon className="w-4 h-4" /> {label}
@@ -500,33 +498,33 @@ export default function Maintenance() {
 
         {/* SMB config form */}
         {extType === 'smb' && (
-          <div className="bg-slate-50 rounded-lg border border-slate-200 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
                 {t('smbServer') || 'Serveur'} *
               </label>
               <input value={smb.server} onChange={e => setSmb({ ...smb, server: e.target.value })}
                 placeholder="192.168.1.50 ou nas.local"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-gray-300 focus:border-gray-400" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
                 {t('smbShare') || 'Nom du partage'} *
               </label>
               <input value={smb.share} onChange={e => setSmb({ ...smb, share: e.target.value })}
                 placeholder="backups"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-gray-300 focus:border-gray-400" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
                 {t('smbUsername') || 'Utilisateur'} *
               </label>
               <input value={smb.username} onChange={e => setSmb({ ...smb, username: e.target.value })}
                 autoComplete="off"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-gray-300 focus:border-gray-400" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
                 {t('smbPassword') || 'Mot de passe'} *
               </label>
               <div className="relative">
@@ -534,28 +532,28 @@ export default function Maintenance() {
                   value={smb.password} onChange={e => setSmb({ ...smb, password: e.target.value })}
                   placeholder={smb.password.startsWith('••') ? (t('keepCurrentPassword') || 'Laisser pour conserver') : ''}
                   autoComplete="new-password"
-                  className="w-full px-3 py-2 pr-10 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
+                  className="w-full px-3 py-2 pr-10 text-sm border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-gray-300 focus:border-gray-400" />
                 <button type="button" onClick={() => setSmbShowPwd(v => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   {smbShowPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
-                {t('smbDomain') || 'Domaine'} <span className="text-slate-400">(optionnel)</span>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                {t('smbDomain') || 'Domaine'} <span className="text-gray-400">(optionnel)</span>
               </label>
               <input value={smb.domain} onChange={e => setSmb({ ...smb, domain: e.target.value })}
                 placeholder="WORKGROUP"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-gray-300 focus:border-gray-400" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">
+              <label className="block text-xs font-medium text-gray-600 mb-1">
                 {t('smbRemotePath') || 'Sous-dossier dans le partage'}
               </label>
               <input value={smb.remote_path} onChange={e => setSmb({ ...smb, remote_path: e.target.value })}
                 placeholder="rtpointage"
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-gray-300 focus:border-gray-400" />
             </div>
             <div className="sm:col-span-2">
               <button type="button" onClick={openBrowse}
@@ -563,7 +561,7 @@ export default function Maintenance() {
                 <FolderTree className="w-4 h-4" />
                 {t('smbBrowse') || 'Parcourir les dossiers du serveur'}
               </button>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-gray-400 mt-1">
                 {t('smbBrowseHint') || "Entrez le serveur + identifiants, puis parcourez les partages et dossiers pour choisir la destination."}
               </p>
             </div>
@@ -585,15 +583,15 @@ export default function Maintenance() {
         <div className="flex flex-wrap gap-2 justify-end">
           {extType === 'smb' && (
             <button onClick={testStorage} disabled={testingStorage}
-              className="inline-flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-800 rounded-lg
-                         hover:bg-slate-50 disabled:opacity-50 text-sm font-medium">
+              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-800 rounded-lg
+                         hover:bg-gray-50 disabled:opacity-50 text-sm font-medium">
               {testingStorage ? <Loader className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
               {t('testConnection') || 'Tester la connexion'}
             </button>
           )}
           <button onClick={saveStorage} disabled={savingStorage}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800
-                       disabled:bg-slate-300 text-sm font-medium">
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700
+                       disabled:bg-gray-300 text-sm font-medium">
             {savingStorage ? <Loader className="w-4 h-4 animate-spin" /> : null}
             {t('save') || 'Enregistrer'}
           </button>
@@ -601,16 +599,16 @@ export default function Maintenance() {
       </div>
 
       {/* ── Scheduled automatic backups ── */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
-        <div className="p-6 border-b border-slate-200/60 flex items-center justify-between">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200/60 overflow-hidden">
+        <div className="p-6 border-b border-gray-200/60 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">{t('autoBackupTitle') || 'Sauvegarde automatique'}</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <h2 className="text-lg font-semibold text-gray-900">{t('autoBackupTitle') || 'Sauvegarde automatique'}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
               {t('autoBackupDesc') || "Lance un pg_dump automatiquement et l'envoie vers la destination configurée."}
             </p>
           </div>
           <button type="button" onClick={() => setSchedule(s => ({ ...s, enabled: !s.enabled }))}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${schedule.enabled ? 'bg-primary-600' : 'bg-slate-300'}`}>
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${schedule.enabled ? 'bg-primary-600' : 'bg-gray-300'}`}>
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${schedule.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
         </div>
@@ -618,23 +616,23 @@ export default function Maintenance() {
         <div className="p-6 space-y-4">
           <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 ${schedule.enabled ? '' : 'opacity-50 pointer-events-none'}`}>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">{t('frequency') || 'Fréquence'}</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{t('frequency') || 'Fréquence'}</label>
               <select value={schedule.frequency} onChange={e => setSchedule({ ...schedule, frequency: e.target.value })}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white">
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
                 <option value="daily">{t('freqDaily') || 'Quotidienne'}</option>
                 <option value="weekly">{t('freqWeekly') || 'Hebdomadaire'}</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">{t('atTime') || 'Heure'}</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{t('atTime') || 'Heure'}</label>
               <input type="time" value={schedule.time} onChange={e => setSchedule({ ...schedule, time: e.target.value })}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white" />
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white" />
             </div>
             {schedule.frequency === 'weekly' && (
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">{t('dayOfWeek') || 'Jour'}</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{t('dayOfWeek') || 'Jour'}</label>
                 <select value={schedule.weekday} onChange={e => setSchedule({ ...schedule, weekday: parseInt(e.target.value) })}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white">
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
                   {[t('mon')||'Lundi', t('tue')||'Mardi', t('wed')||'Mercredi', t('thu')||'Jeudi', t('fri')||'Vendredi', t('sat')||'Samedi', t('sun')||'Dimanche'].map((d, i) => (
                     <option key={i} value={i}>{d}</option>
                   ))}
@@ -642,16 +640,16 @@ export default function Maintenance() {
               </div>
             )}
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">{t('retentionDays') || 'Rétention (jours)'}</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{t('retentionDays') || 'Rétention (jours)'}</label>
               <input type="number" min="0" max="3650" value={schedule.retention_days}
                 onChange={e => setSchedule({ ...schedule, retention_days: parseInt(e.target.value) || 0 })}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white" />
-              <p className="text-[11px] text-slate-400 mt-1">{t('retentionHint') || '0 = conserver tout (local)'}</p>
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white" />
+              <p className="text-[11px] text-gray-400 mt-1">{t('retentionHint') || '0 = conserver tout (local)'}</p>
             </div>
           </div>
 
           {schedule.last_run_at && (
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-gray-500">
               {t('lastRun') || 'Dernière exécution'} : {new Date(schedule.last_run_at).toLocaleString()}
             </p>
           )}
@@ -664,7 +662,7 @@ export default function Maintenance() {
 
           <div className="flex justify-end">
             <button onClick={saveSchedule} disabled={savingSchedule}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:bg-slate-300 text-sm font-medium">
+              className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:bg-gray-300 text-sm font-medium">
               {savingSchedule ? <Loader className="w-4 h-4 animate-spin" /> : null}
               {t('save') || 'Enregistrer'}
             </button>
@@ -673,18 +671,18 @@ export default function Maintenance() {
       </div>
 
       {/* Backups List Section */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200/60 overflow-hidden">
-        <div className="p-6 border-b border-slate-200/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200/60 overflow-hidden">
+        <div className="p-6 border-b border-gray-200/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">{t('availableBackups') || 'Sauvegardes disponibles'}</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <h2 className="text-lg font-semibold text-gray-900">{t('availableBackups') || 'Sauvegardes disponibles'}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
               {backups.length} {(t('files') || 'fichier(s)')} · {totalSize} MB {(t('total') || 'au total')}
             </p>
           </div>
           <button
             onClick={loadBackups}
             disabled={loading}
-            className="text-xs text-slate-600 hover:text-slate-900 inline-flex items-center gap-1 self-start"
+            className="text-xs text-gray-600 hover:text-gray-900 inline-flex items-center gap-1 self-start"
           >
             {loading ? <Loader className="w-3.5 h-3.5 animate-spin" /> : null}
             {t('refresh') || 'Actualiser'}
@@ -703,25 +701,25 @@ export default function Maintenance() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-slate-50/70 border-b border-slate-200/60">
+              <thead className="bg-gray-50/70 border-b border-gray-200/60">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">{t('filename') || 'Fichier'}</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider hidden sm:table-cell">{t('format') || 'Format'}</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider hidden md:table-cell">{t('created') || 'Créé le'}</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">{t('sizeLabel') || 'Taille'}</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">{t('actions') || 'Actions'}</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('filename') || 'Fichier'}</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden sm:table-cell">{t('format') || 'Format'}</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider hidden md:table-cell">{t('created') || 'Créé le'}</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('sizeLabel') || 'Taille'}</th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">{t('actions') || 'Actions'}</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-gray-100">
                 {backups.map((backup) => (
-                  <tr key={backup.filename} className="hover:bg-slate-50/60">
-                    <td className="px-6 py-3 text-sm text-slate-900 font-mono text-xs">{backup.filename}</td>
+                  <tr key={backup.filename} className="hover:bg-gray-50/60">
+                    <td className="px-6 py-3 text-sm text-gray-900 font-mono text-xs">{backup.filename}</td>
                     <td className="px-6 py-3 hidden sm:table-cell">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full uppercase tracking-wider ${
                           backup.format === 'pgdump'
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            : 'bg-gray-100 text-gray-600 border border-gray-200'
                         }`}>
                           {backup.format === 'pgdump' ? 'pg_dump' : 'legacy'}
                         </span>
@@ -733,14 +731,14 @@ export default function Maintenance() {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-3 text-sm text-slate-600 hidden md:table-cell">{formatDate(backup.created_at)}</td>
-                    <td className="px-6 py-3 text-sm text-slate-600">{formatBytes(backup.size_bytes)}</td>
+                    <td className="px-6 py-3 text-sm text-gray-600 hidden md:table-cell">{formatDate(backup.created_at)}</td>
+                    <td className="px-6 py-3 text-sm text-gray-600">{formatBytes(backup.size_bytes)}</td>
                     <td className="px-6 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => verifyBackup(backup.filename)}
                           disabled={verifyingFor === backup.filename}
-                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-md transition-colors disabled:opacity-50"
+                          className="p-2 text-gray-600 hover:bg-gray-100 rounded-md transition-colors disabled:opacity-50"
                           title={t('verifyBackup') || 'Vérifier l\'intégrité'}
                         >
                           {verifyingFor === backup.filename
@@ -749,7 +747,7 @@ export default function Maintenance() {
                         </button>
                         <button
                           onClick={() => handleDownload(backup.filename)}
-                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+                          className="p-2 text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
                           title={t('download') || 'Télécharger'}
                         >
                           <Download className="w-4 h-4" />
@@ -780,35 +778,35 @@ export default function Maintenance() {
 
       {/* Verify result modal */}
       {verifyResult && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
              onClick={() => setVerifyResult(null)}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full" onClick={e => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center gap-2">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-2">
               {verifyResult.valid
                 ? <CheckCircle className="w-5 h-5 text-emerald-600" />
                 : <AlertCircle className="w-5 h-5 text-red-600" />}
-              <h2 className="text-lg font-semibold text-slate-900">
+              <h2 className="text-lg font-semibold text-gray-900">
                 {verifyResult.valid
                   ? (t('verifyOk') || 'Sauvegarde valide')
                   : (t('verifyFail') || 'Sauvegarde corrompue')}
               </h2>
             </div>
             <div className="px-6 py-5 space-y-3">
-              <p className="font-mono text-xs text-slate-500 break-all">{verifyResult.filename}</p>
-              <p className="text-sm text-slate-700">{verifyResult.message}</p>
+              <p className="font-mono text-xs text-gray-500 break-all">{verifyResult.filename}</p>
+              <p className="text-sm text-gray-700">{verifyResult.message}</p>
               {verifyResult.valid && verifyResult.table_count > 0 && (
-                <div className="bg-slate-50 rounded-lg p-3 text-sm space-y-1">
-                  <div className="flex justify-between"><span className="text-slate-500">{t('tablesCount') || 'Tables'} :</span> <span className="font-semibold">{verifyResult.table_count}</span></div>
+                <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+                  <div className="flex justify-between"><span className="text-gray-500">{t('tablesCount') || 'Tables'} :</span> <span className="font-semibold">{verifyResult.table_count}</span></div>
                   {verifyResult.sequence_count > 0 && (
-                    <div className="flex justify-between"><span className="text-slate-500">{t('sequencesCount') || 'Séquences'} :</span> <span className="font-semibold">{verifyResult.sequence_count}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">{t('sequencesCount') || 'Séquences'} :</span> <span className="font-semibold">{verifyResult.sequence_count}</span></div>
                   )}
-                  <div className="flex justify-between"><span className="text-slate-500">{t('itemsCount') || 'Entrées totales'} :</span> <span className="font-semibold">{verifyResult.item_count}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">{t('itemsCount') || 'Entrées totales'} :</span> <span className="font-semibold">{verifyResult.item_count}</span></div>
                   {verifyResult.sample_tables?.length > 0 && (
-                    <div className="pt-2 border-t border-slate-200">
-                      <div className="text-xs text-slate-500 mb-1">{t('sampleTables') || 'Exemples de tables'} :</div>
+                    <div className="pt-2 border-t border-gray-200">
+                      <div className="text-xs text-gray-500 mb-1">{t('sampleTables') || 'Exemples de tables'} :</div>
                       <div className="flex flex-wrap gap-1">
                         {verifyResult.sample_tables.map(name => (
-                          <code key={name} className="text-[11px] bg-white border border-slate-200 px-1.5 py-0.5 rounded">{name}</code>
+                          <code key={name} className="text-[11px] bg-white border border-gray-200 px-1.5 py-0.5 rounded">{name}</code>
                         ))}
                       </div>
                     </div>
@@ -816,9 +814,9 @@ export default function Maintenance() {
                 </div>
               )}
             </div>
-            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl text-right">
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl text-right">
               <button onClick={() => setVerifyResult(null)}
-                className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium">
+                className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium">
                 {t('close') || 'Fermer'}
               </button>
             </div>
@@ -828,15 +826,15 @@ export default function Maintenance() {
 
       {/* Restore Confirmation Modal */}
       {showConfirmRestore && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full">
-            <div className="px-6 py-4 border-b border-slate-200">
-              <h2 className="text-lg font-semibold text-slate-900">{t('confirmRestore') || 'Confirmer la restauration'}</h2>
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">{t('confirmRestore') || 'Confirmer la restauration'}</h2>
             </div>
             <div className="px-6 py-5 space-y-4">
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-gray-600">
                 {t('confirmRestoreMsg') || 'Restaurer depuis :'}
-                <span className="font-mono font-semibold text-slate-900 ml-1 text-xs break-all">{selectedBackup}</span>
+                <span className="font-mono font-semibold text-gray-900 ml-1 text-xs break-all">{selectedBackup}</span>
               </p>
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                 <p className="text-sm text-amber-800">
@@ -845,18 +843,18 @@ export default function Maintenance() {
                 </p>
               </div>
             </div>
-            <div className="flex gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
+            <div className="flex gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl">
               <button
                 onClick={() => { setShowConfirmRestore(false); setSelectedBackup(null); }}
-                className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors font-medium text-sm"
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium text-sm"
               >
                 {t('cancel') || 'Annuler'}
               </button>
               <button
                 onClick={handleRestoreBackup}
                 disabled={restoring}
-                className="flex-1 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg
-                           disabled:bg-slate-400 transition-colors inline-flex items-center justify-center gap-2 font-medium text-sm"
+                className="flex-1 px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-lg
+                           disabled:bg-gray-400 transition-colors inline-flex items-center justify-center gap-2 font-medium text-sm"
               >
                 {restoring ? <Loader className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 {restoring ? (t('restoring') || 'Restauration…') : (t('restore') || 'Restaurer')}
@@ -868,65 +866,65 @@ export default function Maintenance() {
 
       {/* ── SMB folder explorer ── */}
       {browse && (
-        <div className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200/60 w-full max-w-lg overflow-hidden flex flex-col" style={{ maxHeight: '80vh' }}>
+        <div className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-gray-200/60 w-full max-w-lg overflow-hidden flex flex-col" style={{ maxHeight: '80vh' }}>
             <div className="flex items-center justify-between px-5 py-3 border-b">
               <div className="flex items-center gap-2 min-w-0">
                 <Server className="w-4 h-4 text-primary-600 shrink-0" />
-                <span className="text-sm font-semibold text-slate-800 truncate">
+                <span className="text-sm font-semibold text-gray-800 truncate">
                   {smb.server}{browse.share ? ` / ${browse.share}${browse.path ? '/' + browse.path : ''}` : ''}
                 </span>
               </div>
-              <button onClick={() => setBrowse(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+              <button onClick={() => setBrowse(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
 
             {/* Toolbar */}
-            <div className="flex items-center gap-2 px-5 py-2 border-b bg-slate-50 text-sm">
+            <div className="flex items-center gap-2 px-5 py-2 border-b bg-gray-50 text-sm">
               {browse.share ? (
-                <button onClick={browseUp} className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900">
+                <button onClick={browseUp} className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-900">
                   <ArrowLeft className="w-4 h-4" /> {browse.path ? (t('back') || 'Retour') : (t('smbShares') || 'Partages')}
                 </button>
               ) : (
-                <span className="text-slate-500">{t('smbSelectShare') || 'Sélectionnez un partage'}</span>
+                <span className="text-gray-500">{t('smbSelectShare') || 'Sélectionnez un partage'}</span>
               )}
             </div>
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-3">
               {browse.loading ? (
-                <div className="flex items-center justify-center py-10 text-slate-400">
+                <div className="flex items-center justify-center py-10 text-gray-400">
                   <Loader className="w-5 h-5 animate-spin" />
                 </div>
               ) : browse.error ? (
                 <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">{browse.error}</div>
               ) : !browse.share ? (
                 browse.shares.length === 0 ? (
-                  <div className="text-sm text-slate-400 text-center py-8">{t('smbNoShares') || 'Aucun partage listé. Saisissez le nom du partage manuellement.'}</div>
+                  <div className="text-sm text-gray-400 text-center py-8">{t('smbNoShares') || 'Aucun partage listé. Saisissez le nom du partage manuellement.'}</div>
                 ) : (
-                  <ul className="divide-y divide-slate-100">
+                  <ul className="divide-y divide-gray-100">
                     {browse.shares.map(sh => (
                       <li key={sh}>
                         <button onClick={() => browseShare(sh)}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 rounded-lg text-left text-sm">
+                          className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-left text-sm">
                           <FolderOpen className="w-4 h-4 text-amber-500 shrink-0" />
                           <span className="flex-1">{sh}</span>
-                          <ChevronRight className="w-4 h-4 text-slate-300" />
+                          <ChevronRight className="w-4 h-4 text-gray-300" />
                         </button>
                       </li>
                     ))}
                   </ul>
                 )
               ) : browse.folders.length === 0 ? (
-                <div className="text-sm text-slate-400 text-center py-8">{t('smbEmptyFolder') || 'Aucun sous-dossier ici.'}</div>
+                <div className="text-sm text-gray-400 text-center py-8">{t('smbEmptyFolder') || 'Aucun sous-dossier ici.'}</div>
               ) : (
-                <ul className="divide-y divide-slate-100">
+                <ul className="divide-y divide-gray-100">
                   {browse.folders.map(f => (
                     <li key={f}>
                       <button onClick={() => browseInto(f)}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 rounded-lg text-left text-sm">
-                        <Folder className="w-4 h-4 text-slate-400 shrink-0" />
+                        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg text-left text-sm">
+                        <Folder className="w-4 h-4 text-gray-400 shrink-0" />
                         <span className="flex-1">{f}</span>
-                        <ChevronRight className="w-4 h-4 text-slate-300" />
+                        <ChevronRight className="w-4 h-4 text-gray-300" />
                       </button>
                     </li>
                   ))}
@@ -936,7 +934,7 @@ export default function Maintenance() {
 
             {/* Footer */}
             <div className="flex items-center justify-end gap-2 px-5 py-3 border-t">
-              <button onClick={() => setBrowse(null)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">
+              <button onClick={() => setBrowse(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
                 {t('cancel') || 'Annuler'}
               </button>
               <button onClick={selectBrowseTarget} disabled={!browse.share}
