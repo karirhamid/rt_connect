@@ -94,6 +94,9 @@ function GeneralSettings() {
   const [pdfShowTotalWorked, setPdfShowTotalWorked] = useState(true);
   const [pdfShowHolidays, setPdfShowHolidays] = useState(true);
   const [latenessModuleEnabled, setLatenessModuleEnabled] = useState(false);
+  const [leaveCountSat, setLeaveCountSat] = useState(true);
+  const [leaveCountSun, setLeaveCountSun] = useState(false);
+  const [leaveDefaultDays, setLeaveDefaultDays] = useState(18);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [savingPdf, setSavingPdf] = useState(false);
 
@@ -386,6 +389,9 @@ function GeneralSettings() {
       setPdfShowTotalWorked(settings.pdf_show_total_worked !== undefined ? !!settings.pdf_show_total_worked : true);
       setPdfShowHolidays(settings.pdf_show_holidays !== undefined ? !!settings.pdf_show_holidays : true);
       setLatenessModuleEnabled(!!settings.lateness_module_enabled);
+      setLeaveCountSat(settings.leave_count_saturday !== undefined ? !!settings.leave_count_saturday : true);
+      setLeaveCountSun(!!settings.leave_count_sunday);
+      setLeaveDefaultDays(settings.leave_default_annual_days ?? 18);
     } catch (err) {
       console.error('Failed to load PDF settings:', err);
       showNotification('error', t('failedToLoadData'));
@@ -398,7 +404,7 @@ function GeneralSettings() {
     setSavingPdf(true);
     try {
       const settings = await api.getGeneralSettings();
-      await api.updateGeneralSettings({ ...settings, pdf_style: pdfStyle, pdf_show_overtime: pdfShowOvertime, pdf_show_total_worked: pdfShowTotalWorked, pdf_show_holidays: pdfShowHolidays, lateness_module_enabled: latenessModuleEnabled });
+      await api.updateGeneralSettings({ ...settings, pdf_style: pdfStyle, pdf_show_overtime: pdfShowOvertime, pdf_show_total_worked: pdfShowTotalWorked, pdf_show_holidays: pdfShowHolidays, lateness_module_enabled: latenessModuleEnabled, leave_count_saturday: leaveCountSat, leave_count_sunday: leaveCountSun, leave_default_annual_days: Number(leaveDefaultDays) });
       showNotification('success', t('settingsSaved'));
     } catch (err) {
       console.error('Failed to save PDF settings:', err);
@@ -1010,6 +1016,29 @@ function GeneralSettings() {
                           className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${latenessModuleEnabled ? 'translate-x-6' : 'translate-x-1'}`}
                         />
                       </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Congés — day-counting rules */}
+                <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200">
+                  <div className="mb-3">
+                    <h3 className="text-md font-semibold text-gray-900">{t('leaveSettingsTitle') || 'Congés — décompte des jours'}</h3>
+                    <p className="text-sm text-gray-600">{t('leaveSettingsDesc') || "Jours décomptés d'un congé. Lun–Ven comptent toujours ; les jours fériés ne comptent jamais."}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-6">
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" className="w-4 h-4 rounded text-primary-600" checked={leaveCountSat} onChange={e => setLeaveCountSat(e.target.checked)} />
+                      <span className="text-sm text-gray-800">{t('leaveCountSat') || 'Samedi compte'}</span>
+                    </label>
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" className="w-4 h-4 rounded text-primary-600" checked={leaveCountSun} onChange={e => setLeaveCountSun(e.target.checked)} />
+                      <span className="text-sm text-gray-800">{t('leaveCountSun') || 'Dimanche compte'}</span>
+                    </label>
+                    <div className="inline-flex items-center gap-2">
+                      <span className="text-sm text-gray-800">{t('leaveDefaultDays') || 'Droit annuel par défaut'}</span>
+                      <input type="number" step="0.5" min="0" className="w-20 border rounded-lg px-2 py-1 text-sm" value={leaveDefaultDays} onChange={e => setLeaveDefaultDays(e.target.value)} />
+                      <span className="text-sm text-gray-500">{t('days') || 'jours'}</span>
                     </div>
                   </div>
                 </div>

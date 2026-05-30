@@ -18,6 +18,7 @@ import Maintenance from './pages/Maintenance';
 import AuditLog from './pages/AuditLog';
 import AnomalyInbox from './pages/AnomalyInbox';
 import PunchReview from './pages/PunchReview';
+import Leave from './pages/Leave';
 import PayrollExport from './pages/PayrollExport';
 import PortalLogin from './pages/PortalLogin';
 import PortalHome from './pages/PortalHome';
@@ -99,6 +100,7 @@ function AppContent() {
         { name: t('todaysAttendance'), href: '/attendance/today', icon: Clock },
         { name: t('reports') || 'Reports', href: '/reports', icon: BarChart3 },
         { name: t('reviewTitle') || 'Validation des pointages', href: '/attendance/validation', icon: ClipboardCheck },
+        { name: t('leaveTitle') || 'Congés', href: '/leave', icon: CalendarDays },
         { name: t('payrollExport') || 'Export Paie', href: '/payroll-export', icon: Download },
       ],
     },
@@ -145,7 +147,7 @@ function AppContent() {
     const has = (p) => userPerms.has(p);
     sidebarSections = sidebarSections.filter(s => {
       if (s.key === 'main')        return true;
-      if (s.key === 'hr')          return has('attendance.read') || has('users.read');
+      if (s.key === 'hr')          return has('attendance.read') || has('users.read') || has('leave.request') || has('leave.manage');
       if (s.key === 'scheduling')  return has('shifts.manage');
       if (s.key === 'devices')     return has('devices.sync') || has('devices.manage');
       if (s.key === 'admin')       return has('users.read') || has('settings.manage');
@@ -431,6 +433,7 @@ function AppContent() {
             {/* Punch validation replaced the Anomalies inbox in the HR menu.
                 /anomalies route kept for any old bookmark; not in the menu. */}
             <Route path="/attendance/validation" element={<ProtectedRoute anyOf={['attendance.read', ...MANAGER_PERMS]}><PunchReview /></ProtectedRoute>} />
+            <Route path="/leave" element={<ProtectedRoute anyOf={['leave.request', 'leave.manage', 'roles.manage']}><Leave /></ProtectedRoute>} />
             <Route path="/anomalies" element={<ProtectedRoute anyOf={MANAGER_PERMS}><AnomalyInbox /></ProtectedRoute>} />
             <Route path="/payroll-export" element={<ProtectedRoute anyOf={MANAGER_PERMS}><PayrollExport /></ProtectedRoute>} />
           </Routes>
