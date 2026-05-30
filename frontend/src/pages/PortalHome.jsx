@@ -11,6 +11,7 @@ const fmtMin = (m) => {
 };
 
 const fmtDate = (d) => d.toISOString().slice(0, 10);
+const fmtDays = (n) => (Number(n) % 1 === 0 ? String(Number(n)) : Number(n).toFixed(1));
 
 /**
  * Pair punches in/out and return total worked minutes + a flag for "still in".
@@ -57,6 +58,11 @@ export default function PortalHome() {
   const [monthly, setMonthly] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Congés
+  const [leaveBalance, setLeaveBalance] = useState(null);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [signingId, setSigningId] = useState(null);
 
   // Ticker for the "worked so far" live counter
   const [now, setNow] = useState(new Date());
@@ -110,8 +116,26 @@ export default function PortalHome() {
     }
   }, [tab, pickedDay, year, month, todayISO, navigate]);
 
+  const loadLeave = useCallback(async () => {
+    try {
+      const [bal, reqs] = await Promise.all([Portal.leaveBalance(year), Portal.leaveRequests()]);
+      setLeaveBalance(bal || null);
+      setLeaveRequests((reqs && reqs.requests) || []);
+    } catch (e) {
+      if (e.status === 401) { navigate('/portal-login'); return; }
+    }
+  }, [year, navigate]);
+
+  const signLeave = async (id) => {
+    setSigningId(id);
+    try { await Portal.leaveSign(id); await loadLeave(); }
+    catch (e) { setError(e.message); }
+    finally { setSigningId(null); }
+  };
+
   useEffect(() => { loadMe(); }, [loadMe]);
   useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { if (tab === 'leave') loadLeave(); }, [tab, loadLeave]);
 
   // Realtime: poll punches every 30s when on Today tab
   useEffect(() => {
@@ -174,6 +198,7 @@ export default function PortalHome() {
             { id: 'today', label: t('todayTab') || "Aujourd'hui" },
             { id: 'month', label: t('monthTab') || 'Ce mois' },
             { id: 'day',   label: t('dayTab')   || 'Un jour précis' },
+            { id: 'leave', label: t('leaveTitle') || 'Congés' },
           ].map(item => (
             <button key={item.id} onClick={() => setTab(item.id)}
                     className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 ${tab === item.id ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
@@ -295,6 +320,66 @@ export default function PortalHome() {
                      className="px-3 py-2 border rounded text-sm" />
             </div>
             <DayList punchesByDay={punchesByDay} t={t} singleDay={pickedDay} />
+          </>
+        )}
+
+        {/* LEAVE / CONGÉS */}
+        {tab === 'leave' && (
+          <>
+            {/* Balance cards */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { k: 'entitled', label: t('leaveEntitled') || 'Droit', val: leaveBalance ? (leaveBalance.entitled_days + leaveBalance.carried_over) : '—', cls: 'text-gray-900' },
+                { k: 'used',     label: t('leaveUsed') || 'Pris',     val: leaveBalance ? leaveBalance.used_days : '—', cls: 'text-amber-700' },
+                { k: 'remaining',label: t('leaveRemaining') || 'Restant', val: leaveBalance ? leaveBalance.remaining_days : '—', cls: 'text-emerald-700' },
+              ].map(c => (
+                <div key={c.k} className="bg-white rounded-lg border p-4 text-center">
+                  <div className="text-xs text-gray-500">{c.label}</div>
+                  <div className={`text-2xl font-bold mt-1 ${c.cls}`}>{c.val}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* History + signing */}
+            <div className="bg-white rounded-lg border overflow-hidden">
+              <div className="px-4 py-3 border-b text-sm font-semibold text-gray-700">
+                {t('leaveHistory') || 'Mes congés'}
+              </div>
+              {leaveRequests.length === 0 ? (
+                <div className="px-4 py-8 text-center text-gray-400 text-sm">{t('leaveNoRequests') || 'Aucune demande.'}</div>
+              ) : (
+                <ul className="divide-y">
+                  {leaveRequests.map(r => (
+                    <li key={r.id} className="px-4 py-3 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900">
+                          {r.start_date}{r.end_date !== r.start_date ? ` → ${r.end_date}` : ''}
+                          <span className="ml-2 text-xs text-gray-500">{fmtDays(r.working_days)} {t('days') || 'j'}</span>
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {t({ annual: 'leaveAnnual', sick: 'leaveSick', other: 'leaveOther' }[r.type]) || r.type}
+                          {r.reason ? ` · ${r.reason}` : ''}
+                        </div>
+                      </div>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                        r.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                        r.status === 'pending'  ? 'bg-amber-100 text-amber-800' :
+                        r.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {t('leaveSt' + r.status.charAt(0).toUpperCase() + r.status.slice(1)) || r.status}
+                      </span>
+                      {r.needs_signature ? (
+                        <button disabled={signingId === r.id} onClick={() => signLeave(r.id)}
+                                className="px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 rounded disabled:opacity-50">
+                          {signingId === r.id ? '…' : (t('leaveSign') || 'Signer')}
+                        </button>
+                      ) : r.employee_signed_at ? (
+                        <span className="text-xs text-emerald-600">{t('leaveSigned') || 'Signé'}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </>
         )}
 

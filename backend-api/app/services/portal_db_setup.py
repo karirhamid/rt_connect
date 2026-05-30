@@ -66,8 +66,18 @@ def ensure_portal_role() -> None:
 
             # 4) Grant the minimum
             for tbl in ("employees", "attendance", "departments",
-                        "app_settings", "daily_shift_records", "devices"):
+                        "app_settings", "daily_shift_records", "devices",
+                        # Congés: portal shows the employee's own balance +
+                        # history and lets them e-sign a pending request.
+                        "leave_balances", "leave_requests"):
                 conn.execute(sa_text(f'GRANT SELECT ON {tbl} TO "{PORTAL_USER}"'))
+
+            # Employee e-signature: portal may set only employee_signed_at on
+            # a congé request (the endpoint enforces it's their OWN pending
+            # request). Every other leave_requests column stays read-only.
+            conn.execute(sa_text(
+                f'GRANT UPDATE (employee_signed_at) ON leave_requests TO "{PORTAL_USER}"'
+            ))
 
             # Column-level UPDATE: just the four columns the portal needs to
             # write. portal_pin_hash + portal_must_change_password for the

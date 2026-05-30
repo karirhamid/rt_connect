@@ -351,3 +351,67 @@ def portal_month(year: int, month: int, me=Depends(_require_portal)):
                 "total_minutes", "overtime_minutes", "late_minutes", "early_departure_minutes")}})
 
         return {"year": year, "month": month, "totals": totals, "per_day": per_day}
+
+
+# ─── Portal: Congés (balance, history, e-sign) ─────────────────────────────
+@router.get("/portal/leave/balance")
+def portal_leave_balance(year: Optional[int] = None, me=Depends(_require_portal)):
+    """The logged-in employee's own annual leave balance."""
+    _require_portal_enabled()
+    from app.database.schema import LeaveBalance, AppSettings
+    from app.api.leave import _balance_dict
+    from datetime import date as _date
+    yr = year or _date.today().year
+    with get_portal_db_session() as db:
+        settings = db.query(AppSettings).first()
+        default_annual = float(getattr(settings, "leave_default_annual_days", 18) or 18)
+        bal = (db.query(LeaveBalance)
+               .filter(LeaveBalance.employee_user_id == me["matricule"],
+                       LeaveBalance.year == yr).first())
+        return _balance_dict(db, bal, me["matricule"], yr, default_annual)
+
+
+@router.get("/portal/leave/requests")
+def portal_leave_requests(me=Depends(_require_portal)):
+    """The logged-in employee's own congé history (all statuses)."""
+    _require_portal_enabled()
+    from app.database.schema import LeaveRequest
+    with get_portal_db_session() as db:
+        rows = (db.query(LeaveRequest)
+                .filter(LeaveRequest.employee_user_id == me["matricule"])
+                .order_by(LeaveRequest.start_date.desc()).limit(500).all())
+        out = []
+        for r in rows:
+            out.append({
+                "id": r.id, "type": r.type, "status": r.status,
+                "start_date": r.start_date.date().isoformat(),
+                "end_date": r.end_date.date().isoformat(),
+                "start_fraction": r.start_fraction, "end_fraction": r.end_fraction,
+                "working_days": float(r.working_days or 0),
+                "reason": r.reason,
+                "employee_signed_at": r.employee_signed_at.isoformat() if r.employee_signed_at else None,
+                "approved_at": r.approved_at.isoformat() if r.approved_at else None,
+                "needs_signature": (r.status == "pending" and r.employee_signed_at is None),
+            })
+        return {"count": len(out), "requests": out}
+
+
+@router.post("/portal/leave/requests/{req_id}/sign")
+def portal_leave_sign(req_id: int, me=Depends(_require_portal)):
+    """Employee e-signs a pending congé created for them. Sets
+    employee_signed_at; HR then approves. Can only sign one's OWN pending,
+    not-yet-signed request."""
+    _require_portal_enabled()
+    from app.database.schema import LeaveRequest
+    from datetime import datetime as _dt, timezone as _tz
+    with get_portal_db_session() as db:
+        r = db.query(LeaveRequest).filter(LeaveRequest.id == req_id).first()
+        if not r or r.employee_user_id != me["matricule"]:
+            raise HTTPException(404, "Request not found")
+        if r.status != "pending":
+            raise HTTPException(400, "Only a pending request can be signed")
+        if r.employee_signed_at is not None:
+            return {"ok": True, "already_signed": True}
+        r.employee_signed_at = _dt.now(_tz.utc)
+        db.commit()
+        return {"ok": True}

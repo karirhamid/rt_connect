@@ -59,4 +59,8 @@ export const Portal = {
     portalFetch(`/api/portal/punches?start_date=${encodeURIComponent(start_date)}&end_date=${encodeURIComponent(end_date)}`),
   monthSummary: (year, month) =>
     portalFetch(`/api/portal/month-summary?year=${year}&month=${month}`),
+  leaveBalance: (year) =>
+    portalFetch(`/api/portal/leave/balance${year ? `?year=${year}` : ''}`),
+  leaveRequests: () => portalFetch('/api/portal/leave/requests'),
+  leaveSign: (id) => portalFetch(`/api/portal/leave/requests/${id}/sign`, { method: 'POST' }),
 };
