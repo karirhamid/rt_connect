@@ -415,3 +415,152 @@ def portal_leave_sign(req_id: int, me=Depends(_require_portal)):
         r.employee_signed_at = _dt.now(_tz.utc)
         db.commit()
         return {"ok": True}
+
+
+# ─── Portal: employee self-service request creation ────────────────────────
+@router.post("/portal/leave/requests")
+def portal_leave_create(body: dict, me=Depends(_require_portal)):
+    """An employee creates their OWN congé request from the portal. It enters
+    the configured approval chain (supervisor → HR → top). employee_signed_at
+    is set immediately since creating it is the employee's own act."""
+    _require_portal_enabled()
+    from app.database.schema import LeaveRequest, AppSettings
+    from app.api.leave import (compute_working_days, _initial_stage,
+                               _FRACTIONS, _TYPES)
+    from datetime import datetime as _dt, timezone as _tz
+
+    ltype = (body.get("type") or "annual")
+    sfrac = (body.get("start_fraction") or "full")
+    efrac = (body.get("end_fraction") or "full")
+    if ltype not in _TYPES or sfrac not in _FRACTIONS or efrac not in _FRACTIONS:
+        raise HTTPException(400, "Invalid type/fraction")
+    try:
+        sd = _dt.strptime(body.get("start_date", ""), "%Y-%m-%d").date()
+        ed = _dt.strptime(body.get("end_date", ""), "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
+    if ed < sd:
+        raise HTTPException(400, "end_date is before start_date")
+
+    with get_portal_db_session() as db:
+        settings = db.query(AppSettings).first()
+        from app.database.shift_schema import Holiday as _HOL
+        hol = {h.date for h in db.query(_HOL).filter(_HOL.date >= sd, _HOL.date <= ed).all()}
+        wd = compute_working_days(sd, ed, sfrac, efrac,
+                                  bool(getattr(settings, "leave_count_saturday", True)),
+                                  bool(getattr(settings, "leave_count_sunday", False)), hol)
+        if wd <= 0:
+            raise HTTPException(400, "0 chargeable days (weekend / holidays only?)")
+        req = LeaveRequest(
+            employee_user_id=me["matricule"], type=ltype,
+            start_date=_dt.combine(sd, _dt.min.time()),
+            end_date=_dt.combine(ed, _dt.min.time()),
+            start_fraction=sfrac, end_fraction=efrac, working_days=wd,
+            reason=(body.get("reason") or None), status="pending",
+            stage=_initial_stage(settings),
+            employee_signed_at=_dt.now(_tz.utc),
+        )
+        db.add(req); db.commit(); db.refresh(req)
+        return {"ok": True, "id": req.id, "working_days": wd, "stage": req.stage}
+
+
+# ─── Portal: supervisor view (validate department requests) ────────────────
+def _is_supervisor(db, matricule: str) -> bool:
+    from app.database.schema import DepartmentSupervisor
+    return db.query(DepartmentSupervisor).filter(
+        DepartmentSupervisor.supervisor_user_id == matricule).first() is not None
+
+
+@router.get("/portal/leave/is-supervisor")
+def portal_is_supervisor(me=Depends(_require_portal)):
+    """Tells the portal UI whether to show the supervisor validation section."""
+    _require_portal_enabled()
+    with get_portal_db_session() as db:
+        return {"is_supervisor": _is_supervisor(db, me["matricule"])}
+
+
+@router.get("/portal/leave/to-validate")
+def portal_leave_to_validate(me=Depends(_require_portal)):
+    """Congé requests awaiting THIS supervisor — i.e. at the 'supervisor'
+    stage, for employees in a department this person supervises."""
+    _require_portal_enabled()
+    from app.database.schema import LeaveRequest, DepartmentSupervisor, Employee
+    with get_portal_db_session() as db:
+        dept_ids = {row.department_id for row in
+                    db.query(DepartmentSupervisor.department_id)
+                      .filter(DepartmentSupervisor.supervisor_user_id == me["matricule"]).all()}
+        if not dept_ids:
+            return {"count": 0, "requests": []}
+        # matricules of employees in those departments
+        emp = db.query(Employee).filter(Employee.department_id.in_(dept_ids)).all()
+        mats = {e.user_id for e in emp}
+        names = {e.user_id: e.name for e in emp}
+        if not mats:
+            return {"count": 0, "requests": []}
+        rows = (db.query(LeaveRequest)
+                .filter(LeaveRequest.status == "pending",
+                        LeaveRequest.stage == "supervisor",
+                        LeaveRequest.employee_user_id.in_(mats))
+                .order_by(LeaveRequest.start_date.asc()).all())
+        out = [{
+            "id": r.id, "employee_user_id": r.employee_user_id,
+            "employee_name": names.get(r.employee_user_id, r.employee_user_id),
+            "type": r.type, "start_date": r.start_date.date().isoformat(),
+            "end_date": r.end_date.date().isoformat(),
+            "working_days": float(r.working_days or 0), "reason": r.reason,
+        } for r in rows]
+        return {"count": len(out), "requests": out}
+
+
+def _supervisor_act(db, req_id: int, matricule: str):
+    """Validate that the request is at the supervisor stage AND belongs to a
+    department this person supervises. Returns the LeaveRequest or raises."""
+    from app.database.schema import LeaveRequest, DepartmentSupervisor, Employee
+    r = db.query(LeaveRequest).filter(LeaveRequest.id == req_id).first()
+    if not r or r.status != "pending" or r.stage != "supervisor":
+        raise HTTPException(404, "Request not found at supervisor stage")
+    dept_ids = {row.department_id for row in
+                db.query(DepartmentSupervisor.department_id)
+                  .filter(DepartmentSupervisor.supervisor_user_id == matricule).all()}
+    emp_depts = {e.department_id for e in
+                 db.query(Employee.department_id).filter(Employee.user_id == r.employee_user_id).all()}
+    if not (dept_ids & emp_depts):
+        raise HTTPException(403, "Not your department")
+    return r
+
+
+@router.post("/portal/leave/requests/{req_id}/supervisor-approve")
+def portal_supervisor_approve(req_id: int, me=Depends(_require_portal)):
+    """Supervisor approves a department request → advances to HR."""
+    _require_portal_enabled()
+    from app.database.schema import AppSettings
+    from app.api.leave import _next_stage
+    from datetime import datetime as _dt, timezone as _tz
+    with get_portal_db_session() as db:
+        r = _supervisor_act(db, req_id, me["matricule"])
+        settings = db.query(AppSettings).first()
+        r.supervisor_approved_by = me["matricule"]
+        r.supervisor_approved_at = _dt.now(_tz.utc)
+        nxt = _next_stage("supervisor", settings)   # → 'hr'
+        r.stage = nxt
+        if nxt is None:
+            r.status = "approved"
+        db.commit()
+        return {"ok": True, "status": r.status, "stage": r.stage}
+
+
+@router.post("/portal/leave/requests/{req_id}/supervisor-reject")
+def portal_supervisor_reject(req_id: int, body: Optional[dict] = None, me=Depends(_require_portal)):
+    """Supervisor rejects a department request."""
+    _require_portal_enabled()
+    from datetime import datetime as _dt, timezone as _tz
+    with get_portal_db_session() as db:
+        r = _supervisor_act(db, req_id, me["matricule"])
+        r.status = "rejected"
+        r.rejected_at_stage = "supervisor"
+        r.stage = None
+        r.reject_reason = (body or {}).get("reason")
+        r.supervisor_approved_by = me["matricule"]
+        r.supervisor_approved_at = _dt.now(_tz.utc)
+        db.commit()
+        return {"ok": True, "status": "rejected"}

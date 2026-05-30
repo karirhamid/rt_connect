@@ -68,16 +68,30 @@ def ensure_portal_role() -> None:
             for tbl in ("employees", "attendance", "departments",
                         "app_settings", "daily_shift_records", "devices",
                         # Congés: portal shows the employee's own balance +
-                        # history and lets them e-sign a pending request.
-                        "leave_balances", "leave_requests"):
+                        # history, lets them create/sign requests, and lets a
+                        # supervisor validate their department's requests.
+                        "leave_balances", "leave_requests", "department_supervisors",
+                        "holidays"):
                 conn.execute(sa_text(f'GRANT SELECT ON {tbl} TO "{PORTAL_USER}"'))
 
-            # Employee e-signature: portal may set only employee_signed_at on
-            # a congé request (the endpoint enforces it's their OWN pending
-            # request). Every other leave_requests column stays read-only.
+            # Portal writes on leave_requests:
+            #  • INSERT — employee self-creates a request (endpoint forces it's
+            #    their own matricule + sets the initial stage).
+            #  • UPDATE on the columns the portal touches: employee_signed_at
+            #    (sign) and the supervisor-validation columns (supervisor
+            #    approve/reject advances stage/status). Endpoints enforce that
+            #    the actor owns the request or supervises its department.
+            conn.execute(sa_text(f'GRANT INSERT ON leave_requests TO "{PORTAL_USER}"'))
             conn.execute(sa_text(
-                f'GRANT UPDATE (employee_signed_at) ON leave_requests TO "{PORTAL_USER}"'
+                f'GRANT UPDATE (employee_signed_at, status, stage, '
+                f'supervisor_approved_by, supervisor_approved_at, '
+                f'rejected_at_stage, reject_reason) ON leave_requests TO "{PORTAL_USER}"'
             ))
+            # Self-created requests need the sequence for the id.
+            try:
+                conn.execute(sa_text(f'GRANT USAGE, SELECT ON SEQUENCE leave_requests_id_seq TO "{PORTAL_USER}"'))
+            except Exception:
+                pass
 
             # Column-level UPDATE: just the four columns the portal needs to
             # write. portal_pin_hash + portal_must_change_password for the
