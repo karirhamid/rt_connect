@@ -97,6 +97,8 @@ function GeneralSettings() {
   const [leaveCountSat, setLeaveCountSat] = useState(true);
   const [leaveCountSun, setLeaveCountSun] = useState(false);
   const [leaveDefaultDays, setLeaveDefaultDays] = useState(18);
+  const [leaveReqSupervisor, setLeaveReqSupervisor] = useState(false);
+  const [leaveReqTop, setLeaveReqTop] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [savingPdf, setSavingPdf] = useState(false);
 
@@ -392,6 +394,8 @@ function GeneralSettings() {
       setLeaveCountSat(settings.leave_count_saturday !== undefined ? !!settings.leave_count_saturday : true);
       setLeaveCountSun(!!settings.leave_count_sunday);
       setLeaveDefaultDays(settings.leave_default_annual_days ?? 18);
+      setLeaveReqSupervisor(!!settings.leave_require_supervisor);
+      setLeaveReqTop(!!settings.leave_require_top);
     } catch (err) {
       console.error('Failed to load PDF settings:', err);
       showNotification('error', t('failedToLoadData'));
@@ -404,7 +408,7 @@ function GeneralSettings() {
     setSavingPdf(true);
     try {
       const settings = await api.getGeneralSettings();
-      await api.updateGeneralSettings({ ...settings, pdf_style: pdfStyle, pdf_show_overtime: pdfShowOvertime, pdf_show_total_worked: pdfShowTotalWorked, pdf_show_holidays: pdfShowHolidays, lateness_module_enabled: latenessModuleEnabled, leave_count_saturday: leaveCountSat, leave_count_sunday: leaveCountSun, leave_default_annual_days: Number(leaveDefaultDays) });
+      await api.updateGeneralSettings({ ...settings, pdf_style: pdfStyle, pdf_show_overtime: pdfShowOvertime, pdf_show_total_worked: pdfShowTotalWorked, pdf_show_holidays: pdfShowHolidays, lateness_module_enabled: latenessModuleEnabled, leave_count_saturday: leaveCountSat, leave_count_sunday: leaveCountSun, leave_default_annual_days: Number(leaveDefaultDays), leave_require_supervisor: leaveReqSupervisor, leave_require_top: leaveReqTop });
       showNotification('success', t('settingsSaved'));
     } catch (err) {
       console.error('Failed to save PDF settings:', err);
@@ -1039,6 +1043,19 @@ function GeneralSettings() {
                       <span className="text-sm text-gray-800">{t('leaveDefaultDays') || 'Droit annuel par défaut'}</span>
                       <input type="number" step="0.5" min="0" className="w-20 border rounded-lg px-2 py-1 text-sm" value={leaveDefaultDays} onChange={e => setLeaveDefaultDays(e.target.value)} />
                       <span className="text-sm text-gray-500">{t('days') || 'jours'}</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-indigo-100">
+                    <p className="text-xs text-gray-600 mb-2">{t('leaveWorkflowDesc') || "Circuit de validation : Employé → [Superviseur] → RH → [Direction]. La validation RH est toujours requise."}</p>
+                    <div className="flex flex-wrap items-center gap-6">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" className="w-4 h-4 rounded text-primary-600" checked={leaveReqSupervisor} onChange={e => setLeaveReqSupervisor(e.target.checked)} />
+                        <span className="text-sm text-gray-800">{t('leaveReqSupervisor') || 'Validation superviseur (avant RH)'}</span>
+                      </label>
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" className="w-4 h-4 rounded text-primary-600" checked={leaveReqTop} onChange={e => setLeaveReqTop(e.target.checked)} />
+                        <span className="text-sm text-gray-800">{t('leaveReqTop') || 'Validation direction (après RH)'}</span>
+                      </label>
                     </div>
                   </div>
                 </div>

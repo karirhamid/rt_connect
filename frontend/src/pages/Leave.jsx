@@ -21,13 +21,16 @@ export default function Leave() {
   const perms = (() => { try { return JSON.parse(localStorage.getItem('_userPerms') || '[]'); } catch { return []; } })();
   const canManage = perms.includes('leave.manage') || perms.includes('roles.manage');
   const canRequest = canManage || perms.includes('leave.request');
+  const canApproveTop = perms.includes('leave.approve_top') || perms.includes('roles.manage');
 
-  const [tab, setTab] = useState('requests');      // requests | balances
+  const [tab, setTab] = useState('requests');      // requests | balances | supervisors
   const [year, setYear] = useState(thisYear);
   const [status, setStatus] = useState('');
   const [employees, setEmployees] = useState([]);
   const [requests, setRequests] = useState([]);
   const [balances, setBalances] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [supervisors, setSupervisors] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [toast, setToast] = useState(null);
@@ -68,7 +71,36 @@ export default function Leave() {
     } catch { setBalances([]); } finally { setLoading(false); }
   }, [year]);
 
-  useEffect(() => { if (tab === 'requests') loadRequests(); else loadBalances(); }, [tab, loadRequests, loadBalances]);
+  const loadSupervisors = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [supResp, depResp] = await Promise.all([
+        api.authFetch('/api/leave/supervisors', { method: 'GET' }),
+        api.authFetch('/api/departments', { method: 'GET' }),
+      ]);
+      if (supResp.ok) { const d = await supResp.json(); setSupervisors(d.supervisors || []); }
+      if (depResp.ok) { const d = await depResp.json(); setDepartments(Array.isArray(d) ? d : (d?.departments || [])); }
+    } catch { /* ignore */ } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'requests') loadRequests();
+    else if (tab === 'balances') loadBalances();
+    else loadSupervisors();
+  }, [tab, loadRequests, loadBalances, loadSupervisors]);
+
+  const addSupervisor = async (department_id, supervisor_user_id) => {
+    const resp = await api.authFetch('/api/leave/supervisors', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ department_id: Number(department_id), supervisor_user_id }),
+    });
+    if (resp.ok) { flash('ok', t('leaveActionDone') || 'Fait'); loadSupervisors(); }
+    else { const e = await resp.json().catch(() => ({})); flash('err', e.detail || 'Erreur'); }
+  };
+  const removeSupervisor = async (id) => {
+    const resp = await api.authFetch(`/api/leave/supervisors/${id}`, { method: 'DELETE' });
+    if (resp.ok) loadSupervisors();
+  };
 
   const act = async (id, action, body) => {
     setBusyId(id);
@@ -117,11 +149,11 @@ export default function Leave() {
 
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
         <div className="flex border-b">
-          {['requests', 'balances'].map(tb => (
+          {(canManage ? ['requests', 'balances', 'supervisors'] : ['requests', 'balances']).map(tb => (
             <button key={tb} onClick={() => setTab(tb)}
                     className={`px-5 py-3 text-sm font-medium inline-flex items-center gap-2 ${tab === tb ? 'border-b-2 border-primary-600 text-primary-600' : 'text-gray-500 hover:text-gray-700'}`}>
-              {tb === 'requests' ? <CalendarDays className="w-4 h-4" /> : <Wallet className="w-4 h-4" />}
-              {tb === 'requests' ? (t('leaveRequests') || 'Demandes') : (t('leaveBalances') || 'Soldes')}
+              {tb === 'requests' ? <CalendarDays className="w-4 h-4" /> : tb === 'balances' ? <Wallet className="w-4 h-4" /> : <Users className="w-4 h-4" />}
+              {tb === 'requests' ? (t('leaveRequests') || 'Demandes') : tb === 'balances' ? (t('leaveBalances') || 'Soldes') : (t('leaveSupervisors') || 'Superviseurs')}
             </button>
           ))}
           {tab === 'requests' && (
@@ -142,10 +174,13 @@ export default function Leave() {
             <Loader className="w-5 h-5 animate-spin" /><span className="text-sm">{t('loading')}...</span>
           </div>
         ) : tab === 'requests' ? (
-          <RequestsTable requests={requests} canManage={canManage} canRequest={canRequest} busyId={busyId}
+          <RequestsTable requests={requests} canManage={canManage} canRequest={canRequest} canApproveTop={canApproveTop} busyId={busyId}
                          t={t} act={act} downloadPdf={downloadPdf} fmtDays={fmtDays} />
-        ) : (
+        ) : tab === 'balances' ? (
           <BalancesTable balances={balances} canManage={canManage} t={t} fmtDays={fmtDays} onEdit={setEditBal} />
+        ) : (
+          <SupervisorsTab supervisors={supervisors} departments={departments} employees={employees}
+                          t={t} onAdd={addSupervisor} onRemove={removeSupervisor} />
         )}
       </div>
 
@@ -169,7 +204,8 @@ export default function Leave() {
   );
 }
 
-function RequestsTable({ requests, canManage, canRequest, busyId, t, act, downloadPdf, fmtDays }) {
+function RequestsTable({ requests, canManage, canRequest, canApproveTop, busyId, t, act, downloadPdf, fmtDays }) {
+  const canActOnStage = (r) => (r.stage === 'top' ? canApproveTop : canManage);
   if (requests.length === 0)
     return <div className="px-4 py-12 text-center text-gray-400 text-sm">{t('leaveNoRequests') || 'Aucune demande.'}</div>;
   return (
@@ -204,9 +240,15 @@ function RequestsTable({ requests, canManage, canRequest, busyId, t, act, downlo
                 <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[r.status] || 'bg-gray-100'}`}>
                   {t('leaveSt' + r.status.charAt(0).toUpperCase() + r.status.slice(1)) || r.status}
                 </span>
+                {r.status === 'pending' && r.stage && (
+                  <div className="text-[10px] text-gray-400 mt-0.5">
+                    {t('leaveStage' + r.stage.charAt(0).toUpperCase() + r.stage.slice(1)) ||
+                     ({ supervisor: 'superviseur', hr: 'RH', top: 'direction' }[r.stage])}
+                  </div>
+                )}
               </td>
               <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                {r.status === 'pending' && canManage && (
+                {r.status === 'pending' && canActOnStage(r) && (
                   <>
                     <button disabled={busyId === r.id} onClick={() => act(r.id, 'approve')}
                             className="inline-flex items-center gap-1 px-2 py-1 text-xs text-white bg-emerald-600 hover:bg-emerald-700 rounded disabled:opacity-50">
@@ -218,7 +260,7 @@ function RequestsTable({ requests, canManage, canRequest, busyId, t, act, downlo
                     </button>
                   </>
                 )}
-                {r.status === 'pending' && canRequest && !canManage && (
+                {r.status === 'pending' && canRequest && !canManage && !canActOnStage(r) && (
                   <button disabled={busyId === r.id} onClick={() => act(r.id, 'cancel')}
                           className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 border rounded hover:bg-gray-50 disabled:opacity-50">
                     <RotateCcw className="w-3.5 h-3.5" /> {t('cancel') || 'Annuler'}
@@ -407,6 +449,60 @@ function EditBalanceModal({ row, year, t, onClose, onSaved, onError }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SupervisorsTab({ supervisors, departments, employees, t, onAdd, onRemove }) {
+  const [dept, setDept] = useState('');
+  const [emp, setEmp] = useState('');
+  // group assignments by department
+  const byDept = {};
+  supervisors.forEach(s => { (byDept[s.department_name] = byDept[s.department_name] || []).push(s); });
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Add form */}
+      <div className="flex flex-wrap items-end gap-2 bg-gray-50 rounded-lg p-3 border">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('department') || 'Département'}</label>
+          <select className="border rounded-lg px-3 py-2 text-sm bg-white min-w-[10rem]" value={dept} onChange={e => setDept(e.target.value)}>
+            <option value="">—</option>
+            {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('leaveSupervisor') || 'Superviseur'}</label>
+          <select className="border rounded-lg px-3 py-2 text-sm bg-white min-w-[12rem]" value={emp} onChange={e => setEmp(e.target.value)}>
+            <option value="">—</option>
+            {employees.map(e => <option key={e.user_id || e.id} value={e.user_id || e.id}>{e.name} ({e.user_id || e.id})</option>)}
+          </select>
+        </div>
+        <button disabled={!dept || !emp} onClick={() => { onAdd(dept, emp); setEmp(''); }}
+                className="inline-flex items-center gap-1 px-3 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50">
+          + {t('add') || 'Ajouter'}
+        </button>
+      </div>
+
+      {supervisors.length === 0 ? (
+        <div className="px-4 py-8 text-center text-gray-400 text-sm">{t('leaveNoSupervisors') || 'Aucun superviseur défini.'}</div>
+      ) : (
+        <div className="space-y-3">
+          {Object.entries(byDept).map(([dname, list]) => (
+            <div key={dname} className="border rounded-lg overflow-hidden">
+              <div className="px-4 py-2 bg-gray-50 border-b text-sm font-semibold text-gray-700">{dname}</div>
+              <ul className="divide-y">
+                {list.map(s => (
+                  <li key={s.id} className="px-4 py-2 flex items-center justify-between text-sm">
+                    <span className="text-gray-800">{s.supervisor_name} <span className="text-xs text-gray-400">({s.supervisor_user_id})</span></span>
+                    <button onClick={() => onRemove(s.id)} className="text-xs text-red-600 hover:underline">{t('remove') || 'Retirer'}</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
