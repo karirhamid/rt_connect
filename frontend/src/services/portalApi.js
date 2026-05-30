@@ -63,4 +63,9 @@ export const Portal = {
     portalFetch(`/api/portal/leave/balance${year ? `?year=${year}` : ''}`),
   leaveRequests: () => portalFetch('/api/portal/leave/requests'),
   leaveSign: (id) => portalFetch(`/api/portal/leave/requests/${id}/sign`, { method: 'POST' }),
+  leaveCreate: (body) => portalFetch('/api/portal/leave/requests', { method: 'POST', body }),
+  isSupervisor: () => portalFetch('/api/portal/leave/is-supervisor'),
+  toValidate: () => portalFetch('/api/portal/leave/to-validate'),
+  supervisorApprove: (id) => portalFetch(`/api/portal/leave/requests/${id}/supervisor-approve`, { method: 'POST' }),
+  supervisorReject: (id, reason) => portalFetch(`/api/portal/leave/requests/${id}/supervisor-reject`, { method: 'POST', body: { reason } }),
 };

@@ -63,6 +63,12 @@ export default function PortalHome() {
   const [leaveBalance, setLeaveBalance] = useState(null);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [signingId, setSigningId] = useState(null);
+  const [isSupervisor, setIsSupervisor] = useState(false);
+  const [toValidate, setToValidate] = useState([]);
+  const [validatingId, setValidatingId] = useState(null);
+  const [showLeaveForm, setShowLeaveForm] = useState(false);
+  const [leaveForm, setLeaveForm] = useState({ type: 'annual', start_date: todayISO, end_date: todayISO, start_fraction: 'full', end_fraction: 'full', reason: '' });
+  const [submitting, setSubmitting] = useState(false);
 
   // Ticker for the "worked so far" live counter
   const [now, setNow] = useState(new Date());
@@ -118,9 +124,17 @@ export default function PortalHome() {
 
   const loadLeave = useCallback(async () => {
     try {
-      const [bal, reqs] = await Promise.all([Portal.leaveBalance(year), Portal.leaveRequests()]);
+      const [bal, reqs, sup] = await Promise.all([
+        Portal.leaveBalance(year), Portal.leaveRequests(), Portal.isSupervisor(),
+      ]);
       setLeaveBalance(bal || null);
       setLeaveRequests((reqs && reqs.requests) || []);
+      const isSup = !!(sup && sup.is_supervisor);
+      setIsSupervisor(isSup);
+      if (isSup) {
+        const tv = await Portal.toValidate();
+        setToValidate((tv && tv.requests) || []);
+      } else setToValidate([]);
     } catch (e) {
       if (e.status === 401) { navigate('/portal-login'); return; }
     }
@@ -131,6 +145,27 @@ export default function PortalHome() {
     try { await Portal.leaveSign(id); await loadLeave(); }
     catch (e) { setError(e.message); }
     finally { setSigningId(null); }
+  };
+
+  const submitLeave = async () => {
+    setSubmitting(true);
+    try {
+      await Portal.leaveCreate(leaveForm);
+      setShowLeaveForm(false);
+      setLeaveForm({ type: 'annual', start_date: todayISO, end_date: todayISO, start_fraction: 'full', end_fraction: 'full', reason: '' });
+      await loadLeave();
+    } catch (e) { setError(e.message || 'Erreur'); }
+    finally { setSubmitting(false); }
+  };
+
+  const validateLeave = async (id, approve) => {
+    setValidatingId(id);
+    try {
+      if (approve) await Portal.supervisorApprove(id);
+      else await Portal.supervisorReject(id, '');
+      await loadLeave();
+    } catch (e) { setError(e.message); }
+    finally { setValidatingId(null); }
   };
 
   useEffect(() => { loadMe(); }, [loadMe]);
@@ -340,11 +375,85 @@ export default function PortalHome() {
               ))}
             </div>
 
-            {/* History + signing */}
-            <div className="bg-white rounded-lg border overflow-hidden">
-              <div className="px-4 py-3 border-b text-sm font-semibold text-gray-700">
-                {t('leaveHistory') || 'Mes congés'}
+            {/* Supervisor: requests to validate */}
+            {isSupervisor && toValidate.length > 0 && (
+              <div className="bg-white rounded-lg border border-amber-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-amber-100 bg-amber-50 text-sm font-semibold text-amber-800">
+                  {t('leaveToValidate') || 'À valider (mon équipe)'} · {toValidate.length}
+                </div>
+                <ul className="divide-y">
+                  {toValidate.map(r => (
+                    <li key={r.id} className="px-4 py-3 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-900">{r.employee_name}
+                          <span className="ml-2 text-xs text-gray-500">{r.start_date}{r.end_date !== r.start_date ? ` → ${r.end_date}` : ''} · {fmtDays(r.working_days)} {t('days') || 'j'}</span>
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {t({ annual: 'leaveAnnual', sick: 'leaveSick', other: 'leaveOther' }[r.type]) || r.type}{r.reason ? ` · ${r.reason}` : ''}
+                        </div>
+                      </div>
+                      <button disabled={validatingId === r.id} onClick={() => validateLeave(r.id, true)}
+                              className="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded disabled:opacity-50">
+                        {t('approve') || 'Approuver'}
+                      </button>
+                      <button disabled={validatingId === r.id} onClick={() => validateLeave(r.id, false)}
+                              className="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 rounded disabled:opacity-50">
+                        {t('reject') || 'Refuser'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
+            )}
+
+            {/* History + new request */}
+            <div className="bg-white rounded-lg border overflow-hidden">
+              <div className="px-4 py-3 border-b flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">{t('leaveHistory') || 'Mes congés'}</span>
+                <button onClick={() => setShowLeaveForm(v => !v)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 hover:bg-primary-700 rounded">
+                  + {t('leaveNew') || 'Nouvelle demande'}
+                </button>
+              </div>
+
+              {showLeaveForm && (
+                <div className="p-4 border-b bg-gray-50 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">{t('leaveType') || 'Type'}</label>
+                      <select className="w-full border rounded px-2 py-1.5 text-sm" value={leaveForm.type} onChange={e => setLeaveForm(f => ({ ...f, type: e.target.value }))}>
+                        <option value="annual">{t('leaveAnnual') || 'Congé annuel'}</option>
+                        <option value="sick">{t('leaveSick') || 'Congé maladie'}</option>
+                        <option value="other">{t('leaveOther') || 'Autre'}</option>
+                      </select>
+                    </div>
+                    <div />
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">{t('from') || 'Du'}</label>
+                      <input type="date" className="w-full border rounded px-2 py-1.5 text-sm" value={leaveForm.start_date} onChange={e => setLeaveForm(f => ({ ...f, start_date: e.target.value }))} />
+                      <select className="w-full border rounded px-2 py-1 text-xs mt-1" value={leaveForm.start_fraction} onChange={e => setLeaveForm(f => ({ ...f, start_fraction: e.target.value }))}>
+                        <option value="full">{t('leaveFull') || 'Journée'}</option><option value="am">{t('leaveAm') || 'Matin'}</option><option value="pm">{t('leavePm') || 'Après-midi'}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">{t('to') || 'Au'}</label>
+                      <input type="date" className="w-full border rounded px-2 py-1.5 text-sm" min={leaveForm.start_date} value={leaveForm.end_date} onChange={e => setLeaveForm(f => ({ ...f, end_date: e.target.value }))} />
+                      {leaveForm.start_date !== leaveForm.end_date && (
+                        <select className="w-full border rounded px-2 py-1 text-xs mt-1" value={leaveForm.end_fraction} onChange={e => setLeaveForm(f => ({ ...f, end_fraction: e.target.value }))}>
+                          <option value="full">{t('leaveFull') || 'Journée'}</option><option value="am">{t('leaveAm') || 'Matin'}</option><option value="pm">{t('leavePm') || 'Après-midi'}</option>
+                        </select>
+                      )}
+                    </div>
+                  </div>
+                  <textarea className="w-full border rounded px-2 py-1.5 text-sm" rows={2} placeholder={t('leaveReason') || 'Motif'} value={leaveForm.reason} onChange={e => setLeaveForm(f => ({ ...f, reason: e.target.value }))} />
+                  <div className="flex justify-end">
+                    <button disabled={submitting} onClick={submitLeave} className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50">
+                      {submitting ? '…' : (t('leaveCreate') || 'Créer')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {leaveRequests.length === 0 ? (
                 <div className="px-4 py-8 text-center text-gray-400 text-sm">{t('leaveNoRequests') || 'Aucune demande.'}</div>
               ) : (
