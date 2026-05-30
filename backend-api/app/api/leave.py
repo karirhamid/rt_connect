@@ -25,6 +25,7 @@ import io
 from app.database.connection import get_db_session
 from app.database.schema import (
     LeaveBalance, LeaveRequest, Employee, AppSettings, User,
+    DepartmentSupervisor, Department,
 )
 from app.core.security import get_current_user, user_has_permission
 
@@ -57,6 +58,46 @@ def _uid(user) -> Optional[int]:
         return getattr(user, "id", None)
     except Exception:
         return None
+
+
+def _can_approve_top(user) -> bool:
+    return (user_has_permission(user, "leave.approve_top")
+            or user_has_permission(user, "roles.manage"))
+
+
+# ── Multi-level approval workflow ──────────────────────────────────────────
+# Chain (levels off in settings are skipped; HR is always present):
+#   created → [supervisor] → hr → [top] → approved
+def _initial_stage(settings) -> str:
+    return "supervisor" if getattr(settings, "leave_require_supervisor", False) else "hr"
+
+
+def _next_stage(current: str, settings) -> Optional[str]:
+    """Next pending stage after `current`, or None meaning fully approved."""
+    if current == "supervisor":
+        return "hr"
+    if current == "hr":
+        return "top" if getattr(settings, "leave_require_top", False) else None
+    if current == "top":
+        return None
+    return None
+
+
+def _supervised_departments(db, supervisor_matricule: str) -> set:
+    return {row.department_id for row in
+            db.query(DepartmentSupervisor.department_id)
+              .filter(DepartmentSupervisor.supervisor_user_id == supervisor_matricule).all()}
+
+
+def is_supervisor_of(db, supervisor_matricule: str, employee_matricule: str) -> bool:
+    """True if `supervisor_matricule` supervises the department of
+    `employee_matricule` (any of their device rows)."""
+    depts = _supervised_departments(db, supervisor_matricule)
+    if not depts:
+        return False
+    emp_depts = {e.department_id for e in
+                 db.query(Employee.department_id).filter(Employee.user_id == employee_matricule).all()}
+    return bool(depts & emp_depts)
 
 
 # ── Working-days computation (honours weekend setting + half-days) ─────────
@@ -251,10 +292,14 @@ def _request_dict(r: LeaveRequest, emp_name: str = None) -> dict:
         "working_days": float(r.working_days or 0),
         "reason": r.reason,
         "status": r.status,
+        "stage": r.stage,
         "certificate_path": r.certificate_path,
         "employee_signed_at": r.employee_signed_at.isoformat() if r.employee_signed_at else None,
+        "supervisor_approved_at": r.supervisor_approved_at.isoformat() if r.supervisor_approved_at else None,
         "approved_at": r.approved_at.isoformat() if r.approved_at else None,
+        "top_approved_at": r.top_approved_at.isoformat() if r.top_approved_at else None,
         "reject_reason": r.reject_reason,
+        "rejected_at_stage": r.rejected_at_stage,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
@@ -333,30 +378,60 @@ def create_request(payload: RequestIn, current=Depends(get_current_user)):
             working_days=wd,
             reason=payload.reason,
             status="pending",
+            stage=_initial_stage(settings),
             created_by=_uid(current),
         )
         db.add(req)
         db.commit()
         db.refresh(req)
-        return {"ok": True, "id": req.id, "working_days": wd}
+        return {"ok": True, "id": req.id, "working_days": wd, "stage": req.stage}
 
 
 @router.post("/leave/requests/{req_id}/approve")
 def approve_request(req_id: int, current=Depends(get_current_user)):
-    if not _can_manage(current):
-        raise HTTPException(403, "Only HR-congé can approve")
+    """Approve the CURRENT stage of a request from the admin app.
+
+    leave.manage may approve the supervisor + hr stages (HR can act/override);
+    leave.approve_top (or roles.manage) approves the top stage. Approving the
+    last active stage flips the request to 'approved'.
+    """
     with get_db_session() as db:
         r = db.query(LeaveRequest).filter(LeaveRequest.id == req_id).first()
         if not r:
             raise HTTPException(404, "Request not found")
-        if r.status not in ("pending",):
+        if r.status != "pending":
             raise HTTPException(400, f"Cannot approve a '{r.status}' request")
-        r.status = "approved"
-        r.approved_by = _uid(current)
-        r.approved_at = datetime.now(timezone.utc)
-        r.reject_reason = None
+        settings = db.query(AppSettings).first()
+        stage = r.stage or "hr"
+        now = datetime.now(timezone.utc)
+        uid = _uid(current)
+
+        if stage == "supervisor":
+            if not _can_manage(current):   # HR override of the supervisor step
+                raise HTTPException(403, "Not authorized for the supervisor step")
+            r.supervisor_approved_by = f"user:{uid}"
+            r.supervisor_approved_at = now
+        elif stage == "hr":
+            if not _can_manage(current):
+                raise HTTPException(403, "Only HR-congé can approve the HR step")
+            r.approved_by = uid
+            r.approved_at = now
+        elif stage == "top":
+            if not _can_approve_top(current):
+                raise HTTPException(403, "Only a top-level approver can approve this step")
+            r.top_approved_by = uid
+            r.top_approved_at = now
+        else:
+            raise HTTPException(400, "Unknown stage")
+
+        nxt = _next_stage(stage, settings)
+        if nxt is None:
+            r.status = "approved"
+            r.stage = None
+        else:
+            r.stage = nxt
         db.commit()
-        return {"ok": True, "status": "approved"}
+        return {"ok": True, "status": r.status, "stage": r.stage}
 
 
 class RejectIn(BaseModel):
@@ -366,15 +441,23 @@ class RejectIn(BaseModel):
 @router.post("/leave/requests/{req_id}/reject")
 def reject_request(req_id: int, payload: Optional[RejectIn] = None,
                    current=Depends(get_current_user)):
-    if not _can_manage(current):
-        raise HTTPException(403, "Only HR-congé can reject")
+    """Reject the request at its current stage (admin app)."""
     with get_db_session() as db:
         r = db.query(LeaveRequest).filter(LeaveRequest.id == req_id).first()
         if not r:
             raise HTTPException(404, "Request not found")
-        if r.status not in ("pending",):
+        if r.status != "pending":
             raise HTTPException(400, f"Cannot reject a '{r.status}' request")
+        stage = r.stage or "hr"
+        if stage == "top":
+            if not _can_approve_top(current):
+                raise HTTPException(403, "Not authorized")
+        else:
+            if not _can_manage(current):
+                raise HTTPException(403, "Not authorized")
         r.status = "rejected"
+        r.rejected_at_stage = stage
+        r.stage = None
         r.approved_by = _uid(current)
         r.approved_at = datetime.now(timezone.utc)
         r.reject_reason = (payload.reason if payload else None)
@@ -396,6 +479,62 @@ def cancel_request(req_id: int, current=Depends(get_current_user)):
         r.status = "cancelled"
         db.commit()
         return {"ok": True, "status": "cancelled"}
+
+
+# ── Supervisor assignment (HR manages who supervises which department) ─────
+@router.get("/leave/supervisors")
+def list_supervisors(current=Depends(get_current_user)):
+    if not _can_view(current):
+        raise HTTPException(403, "Not authorized")
+    with get_db_session() as db:
+        rows = db.query(DepartmentSupervisor).all()
+        depts = {d.id: d.name for d in db.query(Department).all()}
+        names = {e.user_id: e.name for e in db.query(Employee).all()}
+        out = [{
+            "id": r.id,
+            "department_id": r.department_id,
+            "department_name": depts.get(r.department_id, "—"),
+            "supervisor_user_id": r.supervisor_user_id,
+            "supervisor_name": names.get(r.supervisor_user_id, r.supervisor_user_id),
+        } for r in rows]
+        out.sort(key=lambda x: (x["department_name"], x["supervisor_name"]))
+        return {"count": len(out), "supervisors": out}
+
+
+class SupervisorIn(BaseModel):
+    department_id: int
+    supervisor_user_id: str
+
+
+@router.post("/leave/supervisors")
+def add_supervisor(payload: SupervisorIn, current=Depends(get_current_user)):
+    if not _can_manage(current):
+        raise HTTPException(403, "Only HR-congé can manage supervisors")
+    with get_db_session() as db:
+        if not db.query(Department).filter(Department.id == payload.department_id).first():
+            raise HTTPException(404, "Department not found")
+        if not db.query(Employee).filter(Employee.user_id == payload.supervisor_user_id).first():
+            raise HTTPException(404, "Supervisor employee not found")
+        exists = (db.query(DepartmentSupervisor)
+                  .filter(DepartmentSupervisor.department_id == payload.department_id,
+                          DepartmentSupervisor.supervisor_user_id == payload.supervisor_user_id).first())
+        if exists:
+            return {"ok": True, "id": exists.id, "already": True}
+        row = DepartmentSupervisor(department_id=payload.department_id,
+                                   supervisor_user_id=payload.supervisor_user_id)
+        db.add(row); db.commit(); db.refresh(row)
+        return {"ok": True, "id": row.id}
+
+
+@router.delete("/leave/supervisors/{sup_id}")
+def remove_supervisor(sup_id: int, current=Depends(get_current_user)):
+    if not _can_manage(current):
+        raise HTTPException(403, "Only HR-congé can manage supervisors")
+    with get_db_session() as db:
+        row = db.query(DepartmentSupervisor).filter(DepartmentSupervisor.id == sup_id).first()
+        if row:
+            db.delete(row); db.commit()
+        return {"ok": True}
 
 
 # ── Demande de congé PDF (A4, printable + signable) ────────────────────────

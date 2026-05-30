@@ -26,6 +26,8 @@ class GeneralSettings(BaseModel):
     leave_count_saturday: bool = Field(default=True, description="Saturday counts as a congé working day")
     leave_count_sunday: bool = Field(default=False, description="Sunday counts as a congé working day")
     leave_default_annual_days: float = Field(default=18, ge=0, le=365, description="Default annual leave entitlement (days)")
+    leave_require_supervisor: bool = Field(default=False, description="Require supervisor validation before HR")
+    leave_require_top: bool = Field(default=False, description="Require top/direction validation after HR")
     app_name: Optional[str] = Field(default="RTPointage", description="System name shown on login + sidebar")
     client_name: Optional[str] = Field(default=None, description="Client / customer organization name shown on login")
     device_heartbeat_enabled: bool = Field(default=True, description="Periodically ping devices to track online status")
@@ -82,6 +84,8 @@ async def get_general_settings():
             leave_count_saturday=bool(getattr(row, 'leave_count_saturday', True)),
             leave_count_sunday=bool(getattr(row, 'leave_count_sunday', False)),
             leave_default_annual_days=float(getattr(row, 'leave_default_annual_days', 18) or 18),
+            leave_require_supervisor=bool(getattr(row, 'leave_require_supervisor', False)),
+            leave_require_top=bool(getattr(row, 'leave_require_top', False)),
             app_name=getattr(row, 'app_name', None) or 'RTPointage',
             client_name=getattr(row, 'client_name', None),
             device_heartbeat_enabled=bool(getattr(row, 'device_heartbeat_enabled', True)),
@@ -119,6 +123,8 @@ async def update_general_settings(payload: GeneralSettings, current=Depends(get_
         row.leave_count_saturday = bool(payload.leave_count_saturday)
         row.leave_count_sunday = bool(payload.leave_count_sunday)
         row.leave_default_annual_days = max(0.0, min(365.0, float(payload.leave_default_annual_days or 18)))
+        row.leave_require_supervisor = bool(payload.leave_require_supervisor)
+        row.leave_require_top = bool(payload.leave_require_top)
         # Gate (super admin only): the lateness module is a feature flag,
         # not a display preference — same rule as portal_enabled above.
         prev_lateness = bool(getattr(row, 'lateness_module_enabled', False))

@@ -213,6 +213,32 @@ async def lifespan(app: FastAPI):
             conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_count_saturday BOOLEAN NOT NULL DEFAULT TRUE"))
             conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_count_sunday BOOLEAN NOT NULL DEFAULT FALSE"))
             conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_default_annual_days DOUBLE PRECISION NOT NULL DEFAULT 18"))
+            # Congé approval workflow (multi-level)
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_require_supervisor BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(sa_text("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS leave_require_top BOOLEAN NOT NULL DEFAULT FALSE"))
+            conn.execute(sa_text("ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS stage VARCHAR(12) DEFAULT 'hr'"))
+            conn.execute(sa_text("ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS supervisor_approved_by VARCHAR"))
+            conn.execute(sa_text("ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS supervisor_approved_at TIMESTAMP"))
+            conn.execute(sa_text("ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS top_approved_by INTEGER REFERENCES users(id)"))
+            conn.execute(sa_text("ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS top_approved_at TIMESTAMP"))
+            conn.execute(sa_text("ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS rejected_at_stage VARCHAR(12)"))
+            conn.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS department_supervisors (
+                    id BIGSERIAL PRIMARY KEY,
+                    department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+                    supervisor_user_id VARCHAR NOT NULL,
+                    created_at TIMESTAMP DEFAULT now(),
+                    CONSTRAINT uq_dept_supervisor UNIQUE (department_id, supervisor_user_id)
+                )
+            """))
+            conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_dept_sup_dept ON department_supervisors(department_id)"))
+            conn.execute(sa_text("CREATE INDEX IF NOT EXISTS ix_dept_sup_user ON department_supervisors(supervisor_user_id)"))
+            # Top-level approver permission (assignable to a role by super admin)
+            conn.execute(sa_text("""
+                INSERT INTO permissions (code, description)
+                VALUES ('leave.approve_top', 'Approve congés at the top/direction level')
+                ON CONFLICT (code) DO NOTHING
+            """))
             # Ensure the 'reports.hours' permission exists so admins can assign it
             # to a role (e.g. "RH Reporting logs") that may view computed-hours
             # columns (Total worked / Overtime / Late / Early). Plain reporting
@@ -405,6 +431,20 @@ async def lifespan(app: FastAPI):
                 db.refresh(conge_role)
             conge_role.permissions = _get_perms(['leave.request', 'leave.manage'])
             db.add(conge_role)
+            db.commit()
+
+            # ── Validation Congés (Direction) — top-level approver ─────────
+            # Optional final approval step. Super admin grants it to whoever
+            # is the top/direction validator. Only carries leave.approve_top.
+            top_role = db.query(Role).filter(Role.name == 'Validation Congés (Direction)').first()
+            if not top_role:
+                top_role = Role(name='Validation Congés (Direction)',
+                                description='Validation finale des congés (niveau direction)')
+                db.add(top_role)
+                db.commit()
+                db.refresh(top_role)
+            top_role.permissions = _get_perms(['leave.approve_top'])
+            db.add(top_role)
             db.commit()
 
             # ── admin user (Super Admin) ───────────────────────────────────

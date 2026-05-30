@@ -262,6 +262,10 @@ class AppSettings(Base):
     leave_count_saturday      = Column(Boolean, default=True,  nullable=False, server_default='true')
     leave_count_sunday        = Column(Boolean, default=False, nullable=False, server_default='false')
     leave_default_annual_days = Column(Float, default=18.0, nullable=False, server_default='18')
+    # Congé approval workflow — HR is always required; these two add the
+    # optional supervisor (before HR) and top/direction (after HR) levels.
+    leave_require_supervisor  = Column(Boolean, default=False, nullable=False, server_default='false')
+    leave_require_top         = Column(Boolean, default=False, nullable=False, server_default='false')
 
     # Branding (shown on login + sidebar)
     app_name    = Column(String(100), nullable=True, default='RTPointage')
@@ -533,13 +537,45 @@ class LeaveRequest(Base):
     reason = Column(Text, nullable=True)
     # pending → approved | rejected | cancelled
     status = Column(String(12), nullable=False, default='pending', index=True)
+    # Multi-level approval workflow (configurable). While status='pending',
+    # `stage` says which level the request is waiting on:
+    #   'supervisor' → 'hr' → 'top' → (done = status 'approved')
+    # Levels are skipped when disabled in settings (HR is always required).
+    stage = Column(String(12), nullable=True, default='hr', index=True)
     certificate_path = Column(String(500), nullable=True)   # optional sick-leave doc
     created_by  = Column(Integer, ForeignKey('users.id'), nullable=True)
     created_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    employee_signed_at = Column(DateTime, nullable=True)    # set when employee signs via portal
+    employee_signed_at = Column(DateTime, nullable=True)    # set when employee signs / self-creates
+    # Supervisor approval (the supervisor is an employee — store matricule).
+    supervisor_approved_by = Column(String, nullable=True)
+    supervisor_approved_at = Column(DateTime, nullable=True)
+    # HR approval (a back-office user).
     approved_by = Column(Integer, ForeignKey('users.id'), nullable=True)
     approved_at = Column(DateTime, nullable=True)
+    # Top-level / direction approval (a back-office user).
+    top_approved_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    top_approved_at = Column(DateTime, nullable=True)
     reject_reason = Column(Text, nullable=True)
+    rejected_at_stage = Column(String(12), nullable=True)   # which level rejected it
+
+
+class DepartmentSupervisor(Base):
+    """Designates an employee (matricule) as a supervisor of a department.
+
+    A supervisor validates the FIRST approval level of congé requests from
+    employees in their department(s), from their own portal. One employee can
+    supervise several departments; a department can have several supervisors
+    (any one of whom may approve).
+    """
+    __tablename__ = 'department_supervisors'
+    __table_args__ = (
+        UniqueConstraint('department_id', 'supervisor_user_id', name='uq_dept_supervisor'),
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    department_id = Column(Integer, ForeignKey('departments.id', ondelete='CASCADE'), nullable=False, index=True)
+    supervisor_user_id = Column(String, nullable=False, index=True)   # employee matricule
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Anomaly(Base):
