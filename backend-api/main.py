@@ -390,6 +390,23 @@ async def lifespan(app: FastAPI):
             db.add(report_role)
             db.commit()
 
+            # ── RH Congés — dedicated leave-workflow role ──────────────────
+            # A standalone role the super admin can grant to ANY user ON TOP
+            # of their existing role(s). It only carries the congé
+            # permissions (create + approve demandes, manage balances); it
+            # grants no other access. Permissions are re-synced on every boot
+            # so the role stays correct even if codes change.
+            conge_role = db.query(Role).filter(Role.name == 'RH Congés').first()
+            if not conge_role:
+                conge_role = Role(name='RH Congés',
+                                  description='Gestion des congés — création, validation et soldes')
+                db.add(conge_role)
+                db.commit()
+                db.refresh(conge_role)
+            conge_role.permissions = _get_perms(['leave.request', 'leave.manage'])
+            db.add(conge_role)
+            db.commit()
+
             # ── admin user (Super Admin) ───────────────────────────────────
             admin_user = db.query(User).filter(User.username == 'admin').first()
             if not admin_user:
